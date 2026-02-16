@@ -22,6 +22,7 @@ type LlamaModel struct {
 	Config  LlamaConfig
 	Weights LlamaWeights
 	State   LlamaState
+	Gamma   *GammaEssence // personality essence (nil = no gamma)
 }
 
 // LlamaConfig holds model dimensions
@@ -282,8 +283,14 @@ func getF32Tensor(gguf *GGUFFile, name string, expectedSize int) ([]float32, err
 		return out, nil
 	case ggmlTypeQ4_0:
 		return DequantQ4_0(data, expectedSize), nil
+	case ggmlTypeQ5_0:
+		return DequantQ5_0(data, expectedSize), nil
 	case ggmlTypeQ8_0:
 		return DequantQ8_0(data, expectedSize), nil
+	case ggmlTypeQ4_K:
+		return DequantQ4_K(data, expectedSize), nil
+	case ggmlTypeQ6_K:
+		return DequantQ6_K(data, expectedSize), nil
 	default:
 		return nil, fmt.Errorf("unsupported tensor type %d for %s", info.Type, name)
 	}
@@ -347,7 +354,7 @@ func precomputeRoPE(s *LlamaState, cfg *LlamaConfig) {
 // isSupportedType checks if a GGML tensor type is supported for matmul
 func isSupportedType(t uint32) bool {
 	switch t {
-	case ggmlTypeQ4_0, ggmlTypeQ8_0, ggmlTypeF16, ggmlTypeF32, ggmlTypeQ6_K:
+	case ggmlTypeQ4_0, ggmlTypeQ5_0, ggmlTypeQ8_0, ggmlTypeF16, ggmlTypeF32, ggmlTypeQ4_K, ggmlTypeQ6_K:
 		return true
 	default:
 		return false
@@ -359,6 +366,8 @@ func matmulDispatch(out []float32, w []byte, wtype uint32, x []float32, rows, co
 	switch wtype {
 	case ggmlTypeQ4_0:
 		MatMulQ4_0(out, w, x, rows, cols)
+	case ggmlTypeQ5_0:
+		MatMulQ5_0(out, w, x, rows, cols)
 	case ggmlTypeQ8_0:
 		MatMulQ8_0(out, w, x, rows, cols)
 	case ggmlTypeF16:
@@ -372,6 +381,8 @@ func matmulDispatch(out []float32, w []byte, wtype uint32, x []float32, rows, co
 					uint32(w[i*4+2])<<16 | uint32(w[i*4+3])<<24)
 		}
 		MatMulF32(out, f32, x, rows, cols)
+	case ggmlTypeQ4_K:
+		MatMulQ4_K(out, w, x, rows, cols)
 	case ggmlTypeQ6_K:
 		MatMulQ6_K(out, w, x, rows, cols)
 	default:
@@ -390,6 +401,14 @@ func embedLookupInto(out []float32, data []byte, dtype uint32, token, dim int) {
 			blockOff := rowOff + b*q4BytesPerBlock
 			DequantQ4_0Block(data[blockOff:blockOff+q4BytesPerBlock], out[b*q4BlockSize:])
 		}
+	case ggmlTypeQ5_0:
+		blocksPerRow := dim / q50BlockSize
+		bytesPerRow := blocksPerRow * q50BytesPerBlock
+		rowOff := token * bytesPerRow
+		for b := 0; b < blocksPerRow; b++ {
+			blockOff := rowOff + b*q50BytesPerBlock
+			DequantQ5_0Block(data[blockOff:blockOff+q50BytesPerBlock], out[b*q50BlockSize:])
+		}
 	case ggmlTypeQ8_0:
 		blocksPerRow := dim / q8BlockSize
 		bytesPerRow := blocksPerRow * q8BytesPerBlock
@@ -398,6 +417,19 @@ func embedLookupInto(out []float32, data []byte, dtype uint32, token, dim int) {
 			blockOff := rowOff + b*q8BytesPerBlock
 			DequantQ8_0Block(data[blockOff:blockOff+q8BytesPerBlock], out[b*q8BlockSize:])
 		}
+	case ggmlTypeQ4_K:
+		blocksPerRow := dim / q4kBlockSize
+		bytesPerRow := blocksPerRow * q4kBytesPerBlock
+		rowOff := token * bytesPerRow
+		for b := 0; b < blocksPerRow; b++ {
+			blockOff := rowOff + b*q4kBytesPerBlock
+			DequantQ4_KBlock(data[blockOff:blockOff+q4kBytesPerBlock], out[b*q4kBlockSize:])
+		}
+	case ggmlTypeQ6_K:
+		blocksPerRow := dim / q6kBlockSize
+		bytesPerRow := blocksPerRow * q6kBytesPerBlock
+		rowOff := token * bytesPerRow
+		copy(out, DequantQ6_K(data[rowOff:rowOff+bytesPerRow], dim))
 	case ggmlTypeF16:
 		off := token * dim * 2
 		for i := 0; i < dim; i++ {
@@ -464,6 +496,12 @@ func (m *LlamaModel) Forward(token int, pos int) {
 
 	// 1. Token embedding lookup (zero-alloc: reuses s.EmbBuf)
 	embedLookupInto(s.EmbBuf, w.TokenEmbed, w.TokenEmbType, token, dim)
+
+	// 1.5. Gamma injection: embed[token] += γ[token]
+	if m.Gamma != nil {
+		m.Gamma.ApplyToEmbedding(s.EmbBuf, token)
+	}
+
 	copy(s.X, s.EmbBuf)
 
 	// Pre-compute attention scale (constant across all heads and layers)

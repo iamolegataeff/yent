@@ -28,23 +28,39 @@ import (
 	"strings"
 )
 
-// DeltaVoice holds the low-rank delta for multilingual recovery
+// DeltaVoice holds the delta for multilingual recovery
+// Supports two formats:
+//   SVD (low-rank):    logits += alpha * A @ (B @ x)     — compact, ~10M FMA
+//   Sparse (full diff): logits[idx] += alpha * values[i] · x — accurate, ~136M FMA
 type DeltaVoice struct {
 	VocabSize int
 	HiddenDim int
-	Rank      int
 
-	// A: [VocabSize × Rank] stored as float32 (converted from float16 on load)
-	A []float32
-	// B: [Rank × HiddenDim] stored as float32
-	B []float32
+	// Format flag
+	IsSparse bool
 
-	// Scratch buffer for B @ x computation
-	Bx []float32 // [Rank]
+	// SVD format (low-rank)
+	Rank int
+	A    []float32 // [VocabSize × Rank]
+	B    []float32 // [Rank × HiddenDim]
+	Bx   []float32 // scratch [Rank]
+
+	// Sparse format (indexed full diff)
+	Indices   []int32   // token indices with nonzero delta
+	Values    []float32 // [len(Indices) × HiddenDim] — f32 (only if loaded as f32)
+	ValuesF16 []uint16  // [len(Indices) × HiddenDim] — raw f16 (half the RAM)
+	IsF16     bool      // true = values stored as f16 in RAM
+
+	// i8 quantized sparse format (half the RAM of f16)
+	ValuesI8 []int8    // [len(Indices) × HiddenDim] — int8 quantized
+	ScalesI8 []float32 // [len(Indices)] — per-row scale (f16→f32 on load)
+	IsI8     bool
 }
 
 // LoadDelta loads a delta voice file from NPZ format
-// Expected entries: A.npy, B.npy (float16, C-order)
+// Auto-detects format:
+//   SVD:    contains A.npy + B.npy (float16, low-rank)
+//   Sparse: contains indices.npy + values.npy (full diff)
 func LoadDelta(path string) (*DeltaVoice, error) {
 	r, err := zip.OpenReader(path)
 	if err != nil {
@@ -52,16 +68,37 @@ func LoadDelta(path string) (*DeltaVoice, error) {
 	}
 	defer r.Close()
 
+	// Detect format by checking which files exist
+	hasA, hasB, hasIndices, hasValues := false, false, false, false
+	for _, f := range r.File {
+		switch f.Name {
+		case "A.npy":
+			hasA = true
+		case "B.npy":
+			hasB = true
+		case "indices.npy":
+			hasIndices = true
+		case "values.npy":
+			hasValues = true
+		}
+	}
+
+	if hasIndices && hasValues {
+		return loadSparseDelta(r)
+	}
+	if hasA && hasB {
+		return loadSVDDelta(r)
+	}
+	return nil, fmt.Errorf("delta npz: unrecognized format (need A+B or indices+values)")
+}
+
+// loadSVDDelta loads the low-rank SVD format (A.npy + B.npy)
+func loadSVDDelta(r *zip.ReadCloser) (*DeltaVoice, error) {
 	var aData, bData []float32
 	var aShape, bShape [2]int
 
 	for _, f := range r.File {
 		name := f.Name
-		if !strings.HasSuffix(name, ".npy") {
-			continue
-		}
-
-		// Only load A.npy and B.npy — skip scalar metadata (rank, vocab_size, etc.)
 		isA := name == "A.npy"
 		isB := name == "B.npy"
 		if !isA && !isB {
@@ -73,7 +110,7 @@ func LoadDelta(path string) (*DeltaVoice, error) {
 			return nil, fmt.Errorf("open %s: %w", name, err)
 		}
 
-		data, shape, err := readNpy(rc)
+		data, shape, err := readNpyFloat(rc)
 		rc.Close()
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", name, err)
@@ -92,7 +129,6 @@ func LoadDelta(path string) (*DeltaVoice, error) {
 		return nil, fmt.Errorf("delta npz missing A.npy or B.npy")
 	}
 
-	// Validate shapes
 	vocabSize := aShape[0]
 	rank := aShape[1]
 	if bShape[0] != rank {
@@ -100,7 +136,7 @@ func LoadDelta(path string) (*DeltaVoice, error) {
 	}
 	hiddenDim := bShape[1]
 
-	fmt.Printf("[delta-voice] loaded: vocab=%d, hidden=%d, rank=%d\n", vocabSize, hiddenDim, rank)
+	fmt.Printf("[delta-voice] SVD format: vocab=%d, hidden=%d, rank=%d\n", vocabSize, hiddenDim, rank)
 	fmt.Printf("[delta-voice] A: %d×%d (%.1f MB), B: %d×%d (%.1f MB)\n",
 		vocabSize, rank, float64(len(aData)*4)/1024/1024,
 		rank, hiddenDim, float64(len(bData)*4)/1024/1024)
@@ -108,6 +144,7 @@ func LoadDelta(path string) (*DeltaVoice, error) {
 	return &DeltaVoice{
 		VocabSize: vocabSize,
 		HiddenDim: hiddenDim,
+		IsSparse:  false,
 		Rank:      rank,
 		A:         aData,
 		B:         bData,
@@ -115,19 +152,162 @@ func LoadDelta(path string) (*DeltaVoice, error) {
 	}, nil
 }
 
-// ApplyToLogits adds alpha * A @ (B @ x) to logits
-// logits: [VocabSize], x: [HiddenDim], alpha: blend factor
+// loadSparseDelta loads the sparse full-diff format (indices.npy + values.npy)
+// Supports f16, f32, and i8 (int8 + per-row f16 scales) formats.
+// Keeps f16 data in RAM as raw uint16 — half the memory vs f32 conversion
+func loadSparseDelta(r *zip.ReadCloser) (*DeltaVoice, error) {
+	var indices []int32
+	var valuesF16 []uint16
+	var valuesF32 []float32
+	var valuesI8 []int8
+	var scalesI8 []float32
+	var valShape [2]int
+	var isF16, isI8 bool
+
+	// First pass: detect values.npy dtype
+	for _, f := range r.File {
+		if f.Name == "values.npy" {
+			rc, err := f.Open()
+			if err != nil {
+				return nil, fmt.Errorf("open values.npy: %w", err)
+			}
+			hdr, err := readNpyHeader(rc)
+			rc.Close()
+			if err != nil {
+				return nil, fmt.Errorf("peek values.npy: %w", err)
+			}
+			isF16 = strings.Contains(hdr, "'<f2'") || strings.Contains(hdr, "float16")
+			isI8 = strings.Contains(hdr, "'<i1'") || strings.Contains(hdr, "int8") || strings.Contains(hdr, "'|i1'")
+			break
+		}
+	}
+
+	// Second pass: load data
+	for _, f := range r.File {
+		switch f.Name {
+		case "indices.npy":
+			rc, err := f.Open()
+			if err != nil {
+				return nil, fmt.Errorf("open indices.npy: %w", err)
+			}
+			indices, err = readNpyInt32(rc)
+			rc.Close()
+			if err != nil {
+				return nil, fmt.Errorf("read indices.npy: %w", err)
+			}
+
+		case "values.npy":
+			rc, err := f.Open()
+			if err != nil {
+				return nil, fmt.Errorf("open values.npy: %w", err)
+			}
+			if isI8 {
+				var err2 error
+				valuesI8, valShape, err2 = readNpyInt8Raw(rc)
+				rc.Close()
+				if err2 != nil {
+					return nil, fmt.Errorf("read values.npy i8: %w", err2)
+				}
+			} else if isF16 {
+				var err2 error
+				valuesF16, valShape, err2 = readNpyF16Raw(rc)
+				rc.Close()
+				if err2 != nil {
+					return nil, fmt.Errorf("read values.npy f16: %w", err2)
+				}
+			} else {
+				var err2 error
+				valuesF32, valShape, err2 = readNpyFloat(rc)
+				rc.Close()
+				if err2 != nil {
+					return nil, fmt.Errorf("read values.npy f32: %w", err2)
+				}
+			}
+
+		case "scales.npy":
+			rc, err := f.Open()
+			if err != nil {
+				return nil, fmt.Errorf("open scales.npy: %w", err)
+			}
+			var err2 error
+			scalesI8, err2 = readNpyF16_1D(rc)
+			rc.Close()
+			if err2 != nil {
+				return nil, fmt.Errorf("read scales.npy: %w", err2)
+			}
+		}
+	}
+
+	if indices == nil || (valuesF16 == nil && valuesF32 == nil && valuesI8 == nil) {
+		return nil, fmt.Errorf("sparse delta npz missing indices.npy or values.npy")
+	}
+	if isI8 && scalesI8 == nil {
+		return nil, fmt.Errorf("i8 delta npz missing scales.npy")
+	}
+
+	numRows := valShape[0]
+	hiddenDim := valShape[1]
+
+	if len(indices) != numRows {
+		return nil, fmt.Errorf("indices len %d != values rows %d", len(indices), numRows)
+	}
+
+	var vocabSize int
+	for _, idx := range indices {
+		if int(idx)+1 > vocabSize {
+			vocabSize = int(idx) + 1
+		}
+	}
+
+	var ramMB float64
+	dtype := "f32"
+	if isI8 {
+		dtype = "i8"
+		ramMB = float64(len(valuesI8)+len(scalesI8)*4) / 1024 / 1024
+	} else if isF16 {
+		dtype = "f16"
+		ramMB = float64(len(valuesF16)*2) / 1024 / 1024
+	} else {
+		ramMB = float64(len(valuesF32)*4) / 1024 / 1024
+	}
+	fmt.Printf("[delta-voice] sparse %s: %d/%d tokens, hidden=%d (%.1f MB RAM)\n",
+		dtype, numRows, vocabSize, hiddenDim, ramMB)
+
+	return &DeltaVoice{
+		VocabSize: vocabSize,
+		HiddenDim: hiddenDim,
+		IsSparse:  true,
+		Indices:   indices,
+		Values:    valuesF32,
+		ValuesF16: valuesF16,
+		IsF16:     isF16,
+		ValuesI8:  valuesI8,
+		ScalesI8:  scalesI8,
+		IsI8:      isI8,
+	}, nil
+}
+
+// ApplyToLogits adds delta to logits: logits += alpha * delta(x)
+// Dispatches to SVD or sparse implementation based on format
 func (d *DeltaVoice) ApplyToLogits(logits []float32, x []float32, alpha float32) {
 	if alpha == 0 || d == nil {
 		return
 	}
 
+	if d.IsSparse {
+		d.applySparse(logits, x, alpha)
+	} else {
+		d.applySVD(logits, x, alpha)
+	}
+}
+
+// applySVD: logits += alpha * A @ (B @ x)
+func (d *DeltaVoice) applySVD(logits []float32, x []float32, alpha float32) {
 	rank := d.Rank
 	hiddenDim := d.HiddenDim
 	vocabSize := d.VocabSize
 
 	// Step 1: Bx = B @ x → [rank]
-	// B is [rank, hiddenDim], x is [hiddenDim]
 	for r := 0; r < rank; r++ {
 		var sum float32
 		off := r * hiddenDim
@@ -138,7 +318,6 @@ func (d *DeltaVoice) ApplyToLogits(logits []float32, x []float32, alpha float32)
 	}
 
 	// Step 2: logits += alpha * A @ Bx
-	// A is [vocabSize, rank], Bx is [rank]
 	for i := 0; i < vocabSize; i++ {
 		var sum float32
 		off := i * rank
@@ -149,46 +328,64 @@ func (d *DeltaVoice) ApplyToLogits(logits []float32, x []float32, alpha float32)
 	}
 }
 
-// readNpy reads a numpy .npy file and returns float32 data + 2D shape
-// Supports float16 and float32 dtypes
-func readNpy(r io.Reader) ([]float32, [2]int, error) {
-	// Magic: \x93NUMPY
-	magic := make([]byte, 6)
-	if _, err := io.ReadFull(r, magic); err != nil {
-		return nil, [2]int{}, fmt.Errorf("read magic: %w", err)
-	}
-	if magic[0] != 0x93 || string(magic[1:6]) != "NUMPY" {
-		return nil, [2]int{}, fmt.Errorf("not a npy file")
-	}
+// applySparse: logits[idx] += alpha * values[i] · x
+func (d *DeltaVoice) applySparse(logits []float32, x []float32, alpha float32) {
+	hiddenDim := d.HiddenDim
+	numRows := len(d.Indices)
 
-	// Version
-	ver := make([]byte, 2)
-	if _, err := io.ReadFull(r, ver); err != nil {
-		return nil, [2]int{}, fmt.Errorf("read version: %w", err)
-	}
-
-	// Header length
-	var headerLen int
-	if ver[0] == 1 {
-		hl := make([]byte, 2)
-		if _, err := io.ReadFull(r, hl); err != nil {
-			return nil, [2]int{}, fmt.Errorf("read header len: %w", err)
+	if d.IsI8 {
+		// i8 path: dequant as int8_val / 127.0 * scale[row]
+		for i := 0; i < numRows; i++ {
+			idx := int(d.Indices[i])
+			if idx >= len(logits) {
+				continue
+			}
+			scale := d.ScalesI8[i] / 127.0
+			off := i * hiddenDim
+			var dot float32
+			for j := 0; j < hiddenDim; j++ {
+				dot += float32(d.ValuesI8[off+j]) * x[j]
+			}
+			logits[idx] += alpha * scale * dot
 		}
-		headerLen = int(binary.LittleEndian.Uint16(hl))
+	} else if d.IsF16 {
+		// f16 path: convert on the fly during dot product
+		for i := 0; i < numRows; i++ {
+			idx := int(d.Indices[i])
+			if idx >= len(logits) {
+				continue
+			}
+			var dot float32
+			off := i * hiddenDim
+			for j := 0; j < hiddenDim; j++ {
+				dot += half2float(d.ValuesF16[off+j]) * x[j]
+			}
+			logits[idx] += alpha * dot
+		}
 	} else {
-		hl := make([]byte, 4)
-		if _, err := io.ReadFull(r, hl); err != nil {
-			return nil, [2]int{}, fmt.Errorf("read header len v2: %w", err)
+		// f32 path
+		for i := 0; i < numRows; i++ {
+			idx := int(d.Indices[i])
+			if idx >= len(logits) {
+				continue
+			}
+			var dot float32
+			off := i * hiddenDim
+			for j := 0; j < hiddenDim; j++ {
+				dot += d.Values[off+j] * x[j]
+			}
+			logits[idx] += alpha * dot
 		}
-		headerLen = int(binary.LittleEndian.Uint32(hl))
 	}
+}
 
-	// Header string (Python dict)
-	header := make([]byte, headerLen)
-	if _, err := io.ReadFull(r, header); err != nil {
-		return nil, [2]int{}, fmt.Errorf("read header: %w", err)
+// readNpyFloat reads a numpy .npy file and returns float32 data + 2D shape
+// Supports float16 and float32 dtypes
+func readNpyFloat(r io.Reader) ([]float32, [2]int, error) {
+	hstr, err := readNpyHeader(r)
+	if err != nil {
+		return nil, [2]int{}, err
 	}
-	hstr := string(header)
 
 	// Parse dtype
 	isFloat16 := strings.Contains(hstr, "'<f2'") || strings.Contains(hstr, "float16")
@@ -231,38 +428,214 @@ func readNpy(r io.Reader) ([]float32, [2]int, error) {
 	return data, shape, nil
 }
 
-// parseShape extracts (rows, cols) from npy header string
-// Header looks like: {'descr': '<f2', 'fortran_order': False, 'shape': (151936, 64), }
-func parseShape(header string) [2]int {
-	idx := strings.Index(header, "shape")
-	if idx < 0 {
-		return [2]int{}
+// readNpyF16Raw reads a 2D float16 npy file and returns raw uint16 data (NO conversion to f32)
+// Saves 50% RAM vs readNpyFloat for f16 files
+func readNpyF16Raw(r io.Reader) ([]uint16, [2]int, error) {
+	hstr, err := readNpyHeader(r)
+	if err != nil {
+		return nil, [2]int{}, err
 	}
 
-	// Find opening paren
+	if !strings.Contains(hstr, "'<f2'") && !strings.Contains(hstr, "float16") {
+		return nil, [2]int{}, fmt.Errorf("expected float16, got header: %s", hstr)
+	}
+
+	shape := parseShape(hstr)
+	if shape[0] == 0 || shape[1] == 0 {
+		return nil, [2]int{}, fmt.Errorf("could not parse shape from header: %s", hstr)
+	}
+
+	total := shape[0] * shape[1]
+	raw := make([]byte, total*2)
+	if _, err := io.ReadFull(r, raw); err != nil {
+		return nil, [2]int{}, fmt.Errorf("read f16 data: %w", err)
+	}
+
+	data := make([]uint16, total)
+	for i := 0; i < total; i++ {
+		data[i] = uint16(raw[i*2]) | uint16(raw[i*2+1])<<8
+	}
+	return data, shape, nil
+}
+
+// readNpyInt8Raw reads a 2D int8 npy file and returns raw int8 data + shape
+func readNpyInt8Raw(r io.Reader) ([]int8, [2]int, error) {
+	hstr, err := readNpyHeader(r)
+	if err != nil {
+		return nil, [2]int{}, err
+	}
+
+	if !strings.Contains(hstr, "'<i1'") && !strings.Contains(hstr, "int8") && !strings.Contains(hstr, "'|i1'") {
+		return nil, [2]int{}, fmt.Errorf("expected int8, got header: %s", hstr)
+	}
+
+	shape := parseShape(hstr)
+	if shape[0] == 0 || shape[1] == 0 {
+		return nil, [2]int{}, fmt.Errorf("could not parse 2D shape from header: %s", hstr)
+	}
+
+	total := shape[0] * shape[1]
+	raw := make([]byte, total)
+	if _, err := io.ReadFull(r, raw); err != nil {
+		return nil, [2]int{}, fmt.Errorf("read int8 data: %w", err)
+	}
+
+	// Reinterpret []byte as []int8 (same memory layout)
+	data := make([]int8, total)
+	for i := 0; i < total; i++ {
+		data[i] = int8(raw[i])
+	}
+	return data, shape, nil
+}
+
+// readNpyF16_1D reads a 1D float16 npy file and converts to float32
+func readNpyF16_1D(r io.Reader) ([]float32, error) {
+	hstr, err := readNpyHeader(r)
+	if err != nil {
+		return nil, err
+	}
+
+	if !strings.Contains(hstr, "'<f2'") && !strings.Contains(hstr, "float16") {
+		return nil, fmt.Errorf("expected float16, got header: %s", hstr)
+	}
+
+	shape := parseShapeAny(hstr)
+	if len(shape) == 0 {
+		return nil, fmt.Errorf("could not parse shape from header: %s", hstr)
+	}
+
+	total := 1
+	for _, s := range shape {
+		total *= s
+	}
+
+	raw := make([]byte, total*2)
+	if _, err := io.ReadFull(r, raw); err != nil {
+		return nil, fmt.Errorf("read f16 data: %w", err)
+	}
+
+	data := make([]float32, total)
+	for i := 0; i < total; i++ {
+		h := uint16(raw[i*2]) | uint16(raw[i*2+1])<<8
+		data[i] = half2float(h)
+	}
+	return data, nil
+}
+
+// readNpyInt32 reads a 1D int32 numpy array
+func readNpyInt32(r io.Reader) ([]int32, error) {
+	header, err := readNpyHeader(r)
+	if err != nil {
+		return nil, err
+	}
+
+	if !strings.Contains(header, "'<i4'") && !strings.Contains(header, "int32") {
+		return nil, fmt.Errorf("expected int32 dtype, got header: %s", header)
+	}
+
+	shape := parseShapeAny(header)
+	if len(shape) == 0 {
+		return nil, fmt.Errorf("could not parse shape from header: %s", header)
+	}
+
+	total := 1
+	for _, s := range shape {
+		total *= s
+	}
+
+	raw := make([]byte, total*4)
+	if _, err := io.ReadFull(r, raw); err != nil {
+		return nil, fmt.Errorf("read int32 data: %w", err)
+	}
+
+	data := make([]int32, total)
+	for i := 0; i < total; i++ {
+		data[i] = int32(binary.LittleEndian.Uint32(raw[i*4:]))
+	}
+	return data, nil
+}
+
+// readNpyHeader reads and returns the npy header string
+func readNpyHeader(r io.Reader) (string, error) {
+	magic := make([]byte, 6)
+	if _, err := io.ReadFull(r, magic); err != nil {
+		return "", fmt.Errorf("read magic: %w", err)
+	}
+	if magic[0] != 0x93 || string(magic[1:6]) != "NUMPY" {
+		return "", fmt.Errorf("not a npy file")
+	}
+
+	ver := make([]byte, 2)
+	if _, err := io.ReadFull(r, ver); err != nil {
+		return "", fmt.Errorf("read version: %w", err)
+	}
+
+	var headerLen int
+	if ver[0] == 1 {
+		hl := make([]byte, 2)
+		if _, err := io.ReadFull(r, hl); err != nil {
+			return "", fmt.Errorf("read header len: %w", err)
+		}
+		headerLen = int(binary.LittleEndian.Uint16(hl))
+	} else {
+		hl := make([]byte, 4)
+		if _, err := io.ReadFull(r, hl); err != nil {
+			return "", fmt.Errorf("read header len v2: %w", err)
+		}
+		headerLen = int(binary.LittleEndian.Uint32(hl))
+	}
+
+	header := make([]byte, headerLen)
+	if _, err := io.ReadFull(r, header); err != nil {
+		return "", fmt.Errorf("read header: %w", err)
+	}
+	return string(header), nil
+}
+
+// parseShapeAny extracts shape tuple from npy header, supports 1D and 2D
+func parseShapeAny(header string) []int {
+	idx := strings.Index(header, "shape")
+	if idx < 0 {
+		return nil
+	}
+
 	start := strings.Index(header[idx:], "(")
 	if start < 0 {
-		return [2]int{}
+		return nil
 	}
 	start += idx + 1
 
-	// Find closing paren
 	end := strings.Index(header[start:], ")")
 	if end < 0 {
-		return [2]int{}
+		return nil
 	}
 
-	shapeStr := header[start : start+end]
-	shapeStr = strings.TrimSpace(shapeStr)
+	shapeStr := strings.TrimSpace(header[start : start+end])
+	if shapeStr == "" {
+		return []int{1} // scalar
+	}
 
-	// Parse "N, M"
 	parts := strings.Split(shapeStr, ",")
-	if len(parts) < 2 {
-		return [2]int{}
+	var shape []int
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		var v int
+		fmt.Sscanf(p, "%d", &v)
+		if v > 0 {
+			shape = append(shape, v)
+		}
 	}
-
-	var shape [2]int
-	fmt.Sscanf(strings.TrimSpace(parts[0]), "%d", &shape[0])
-	fmt.Sscanf(strings.TrimSpace(parts[1]), "%d", &shape[1])
 	return shape
+}
+
+// parseShape extracts (rows, cols) from npy header string (legacy, 2D only)
+func parseShape(header string) [2]int {
+	s := parseShapeAny(header)
+	if len(s) >= 2 {
+		return [2]int{s[0], s[1]}
+	}
+	return [2]int{}
 }

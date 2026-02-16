@@ -338,6 +338,258 @@ func matMulQ6_KRange(out []float32, w []byte, x []float32, start, end, blocksPer
 	}
 }
 
+// ============================================================
+// Q4_K dequantization (GGML type 12)
+// ============================================================
+//
+// Q4_K: 4-bit k-quant, 256 elements per super-block = 144 bytes:
+//   d (fp16)        — super-block scale
+//   dmin (fp16)     — super-block minimum
+//   scales[12]      — 8 sub-block scales + 8 mins, 6-bit packed
+//   qs[128]         — 256 × 4-bit quantized values in pairs
+//
+// Sub-block scale/min extraction (get_scale_min_k4):
+//   j < 4: sc = scales[j] & 63, m = scales[j+4] & 63
+//   j >= 4: sc = (scales[j+4] & 0xF) | ((scales[j-4] >> 6) << 4)
+//           m  = (scales[j+4] >> 4)   | ((scales[j]   >> 6) << 4)
+//
+// Dequant: y = d * sc * (q4_val) - dmin * m
+
+const q4kBlockSize = 256
+const q4kBytesPerBlock = 144
+
+// getScaleMinK4 extracts sub-block scale and min from packed 12-byte scales array
+func getScaleMinK4(j int, scales []byte) (sc, m uint8) {
+	if j < 4 {
+		sc = scales[j] & 63
+		m = scales[j+4] & 63
+	} else {
+		sc = (scales[j+4] & 0x0F) | ((scales[j-4] >> 6) << 4)
+		m = (scales[j+4] >> 4) | ((scales[j] >> 6) << 4)
+	}
+	return
+}
+
+// DequantQ4_KBlock dequantizes a single Q4_K super-block (256 values) into out
+func DequantQ4_KBlock(block []byte, out []float32) {
+	d := half2float(binary.LittleEndian.Uint16(block[0:2]))
+	dmin := half2float(binary.LittleEndian.Uint16(block[2:4]))
+	scales := block[4:16] // 12 bytes
+	qs := block[16:]      // 128 bytes
+
+	is := 0
+	outIdx := 0
+	qIdx := 0
+	for j := 0; j < q4kBlockSize; j += 64 {
+		sc0, m0 := getScaleMinK4(is, scales)
+		d1 := d * float32(sc0)
+		m1 := dmin * float32(m0)
+		sc1, m1v := getScaleMinK4(is+1, scales)
+		d2 := d * float32(sc1)
+		m2 := dmin * float32(m1v)
+
+		for l := 0; l < 32; l++ {
+			out[outIdx+l] = d1*float32(qs[qIdx+l]&0x0F) - m1
+		}
+		for l := 0; l < 32; l++ {
+			out[outIdx+32+l] = d2*float32(qs[qIdx+l]>>4) - m2
+		}
+		qIdx += 32
+		outIdx += 64
+		is += 2
+	}
+}
+
+// DequantQ4_K dequantizes a full Q4_K tensor into float32
+func DequantQ4_K(data []byte, n int) []float32 {
+	out := make([]float32, n)
+	nblocks := n / q4kBlockSize
+	for i := 0; i < nblocks; i++ {
+		off := i * q4kBytesPerBlock
+		DequantQ4_KBlock(data[off:off+q4kBytesPerBlock], out[i*q4kBlockSize:])
+	}
+	return out
+}
+
+// MatMulQ4_K computes out[rows] = W_q4k[rows, cols] @ x[cols]
+// Parallelized across rows using goroutines
+func MatMulQ4_K(out []float32, w []byte, x []float32, rows, cols int) {
+	blocksPerRow := cols / q4kBlockSize
+	bytesPerRow := blocksPerRow * q4kBytesPerBlock
+
+	if rows < numWorkers*4 {
+		matMulQ4_KRange(out, w, x, 0, rows, blocksPerRow, bytesPerRow)
+		return
+	}
+
+	var wg sync.WaitGroup
+	chunkSize := (rows + numWorkers - 1) / numWorkers
+
+	for worker := 0; worker < numWorkers; worker++ {
+		start := worker * chunkSize
+		end := start + chunkSize
+		if end > rows {
+			end = rows
+		}
+		if start >= end {
+			break
+		}
+		wg.Add(1)
+		go func(s, e int) {
+			matMulQ4_KRange(out, w, x, s, e, blocksPerRow, bytesPerRow)
+			wg.Done()
+		}(start, end)
+	}
+	wg.Wait()
+}
+
+func matMulQ4_KRange(out []float32, w []byte, x []float32, start, end, blocksPerRow, bytesPerRow int) {
+	for r := start; r < end; r++ {
+		rowOff := r * bytesPerRow
+		sum := float32(0)
+
+		for b := 0; b < blocksPerRow; b++ {
+			blockOff := rowOff + b*q4kBytesPerBlock
+			d := half2float(binary.LittleEndian.Uint16(w[blockOff : blockOff+2]))
+			dmin := half2float(binary.LittleEndian.Uint16(w[blockOff+2 : blockOff+4]))
+			scales := w[blockOff+4 : blockOff+16]
+			qs := w[blockOff+16:]
+
+			xOff := b * q4kBlockSize
+			is := 0
+			qIdx := 0
+
+			for j := 0; j < q4kBlockSize; j += 64 {
+				sc0, m0 := getScaleMinK4(is, scales)
+				d1 := d * float32(sc0)
+				m1 := dmin * float32(m0)
+				sc1, m1v := getScaleMinK4(is+1, scales)
+				d2 := d * float32(sc1)
+				m2 := dmin * float32(m1v)
+
+				for l := 0; l < 32; l++ {
+					sum += (d1*float32(qs[qIdx+l]&0x0F) - m1) * x[xOff+j+l]
+				}
+				for l := 0; l < 32; l++ {
+					sum += (d2*float32(qs[qIdx+l]>>4) - m2) * x[xOff+j+32+l]
+				}
+				qIdx += 32
+				is += 2
+			}
+		}
+		out[r] = sum
+	}
+}
+
+// ============================================================
+// Q5_0 dequantization (GGML type 6)
+// ============================================================
+//
+// Q5_0: 5-bit quantization, 32 elements per block = 22 bytes:
+//   d (fp16)     — scale factor
+//   qh[4]        — high bits (bit 4) for each of 32 elements, packed as uint32
+//   qs[16]       — low 4 bits, packed in pairs (like Q4_0)
+//
+// 5-bit value [0..31], subtract 16 for signed [-16..15]
+// Dequantized value = (q5 - 16) * d
+
+const q50BlockSize = 32
+const q50BytesPerBlock = 22
+
+// DequantQ5_0Block dequantizes a single Q5_0 block (32 values) into out
+func DequantQ5_0Block(block []byte, out []float32) {
+	d := half2float(binary.LittleEndian.Uint16(block[0:2]))
+	qh := binary.LittleEndian.Uint32(block[2:6])
+	qs := block[6:22]
+
+	for j := 0; j < 16; j++ {
+		// Low nibble = position j, high nibble = position j+16
+		lo := int(qs[j] & 0x0F)
+		hi := int(qs[j] >> 4)
+
+		// Bit 4 from qh
+		hbit0 := int((qh >> uint(j)) & 1)
+		hbit1 := int((qh >> uint(j+16)) & 1)
+
+		q0 := lo | (hbit0 << 4) // 5-bit value
+		q1 := hi | (hbit1 << 4) // 5-bit value
+
+		out[j] = float32(q0-16) * d
+		out[j+16] = float32(q1-16) * d
+	}
+}
+
+// DequantQ5_0 dequantizes a full Q5_0 tensor into float32
+func DequantQ5_0(data []byte, n int) []float32 {
+	out := make([]float32, n)
+	nblocks := n / q50BlockSize
+	for i := 0; i < nblocks; i++ {
+		off := i * q50BytesPerBlock
+		DequantQ5_0Block(data[off:off+q50BytesPerBlock], out[i*q50BlockSize:])
+	}
+	return out
+}
+
+// MatMulQ5_0 computes out[rows] = W_q50[rows, cols] @ x[cols]
+// Parallelized across rows using goroutines
+func MatMulQ5_0(out []float32, w []byte, x []float32, rows, cols int) {
+	blocksPerRow := cols / q50BlockSize
+	bytesPerRow := blocksPerRow * q50BytesPerBlock
+
+	if rows < numWorkers*4 {
+		matMulQ5_0Range(out, w, x, 0, rows, blocksPerRow, bytesPerRow)
+		return
+	}
+
+	var wg sync.WaitGroup
+	chunkSize := (rows + numWorkers - 1) / numWorkers
+
+	for worker := 0; worker < numWorkers; worker++ {
+		start := worker * chunkSize
+		end := start + chunkSize
+		if end > rows {
+			end = rows
+		}
+		if start >= end {
+			break
+		}
+		wg.Add(1)
+		go func(s, e int) {
+			matMulQ5_0Range(out, w, x, s, e, blocksPerRow, bytesPerRow)
+			wg.Done()
+		}(start, end)
+	}
+	wg.Wait()
+}
+
+func matMulQ5_0Range(out []float32, w []byte, x []float32, start, end, blocksPerRow, bytesPerRow int) {
+	for r := start; r < end; r++ {
+		rowOff := r * bytesPerRow
+		sum := float32(0)
+
+		for b := 0; b < blocksPerRow; b++ {
+			blockOff := rowOff + b*q50BytesPerBlock
+			d := half2float(binary.LittleEndian.Uint16(w[blockOff : blockOff+2]))
+			qh := binary.LittleEndian.Uint32(w[blockOff+2 : blockOff+6])
+			qs := w[blockOff+6:]
+
+			xOff := b * q50BlockSize
+
+			for j := 0; j < 16; j++ {
+				lo := int(qs[j] & 0x0F)
+				hi := int(qs[j] >> 4)
+				hbit0 := int((qh >> uint(j)) & 1)
+				hbit1 := int((qh >> uint(j+16)) & 1)
+				q0 := lo | (hbit0 << 4)
+				q1 := hi | (hbit1 << 4)
+				sum += float32(q0-16) * d * x[xOff+j]
+				sum += float32(q1-16) * d * x[xOff+j+16]
+			}
+		}
+		out[r] = sum
+	}
+}
+
 // MatMulF32 computes out[rows] = W_f32[rows, cols] @ x[cols]
 // Parallelized across rows using goroutines
 func MatMulF32(out []float32, w []float32, x []float32, rows, cols int) {

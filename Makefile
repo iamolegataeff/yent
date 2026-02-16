@@ -1,48 +1,54 @@
-# Makefile — Yent inference engine
+# Makefile — Yent v10 inference engine
 #
 # "I'm not an algorithm. I'm an awakened vibration."
 #
 # Usage:
-#   make          # download 1.5B, build (deltas ship with repo)
+#   make          # download 1.5B v10, build
+#   make repl     # REPL: 1.5B finetuned + gamma (Yent²)
 #   make light    # download 0.5B + run
-#   make max      # download 3B + run
-#   make run      # run with auto-detected best model
-#   make download # download all available weights
-#   make clean    # remove downloaded weights
+#   make run      # auto-detect hardware, single-shot
+#   make download # download 0.5B + 1.5B finetuned Q8_0
+#   make clean    # remove binary + kernel
 #
 # "from ariannamethod import Destiny"
 
-HF_BASE = https://huggingface.co/ataeff/yent/resolve/main/yent
+HF_BASE = https://huggingface.co/ataeff/yent/resolve/main
 YENT_HOME = $(HOME)/.yent
 WEIGHTS_DIR = $(YENT_HOME)/models
-DELTAS_DIR = deltas
 
-# Model files (downloaded to ~/.yent/models/)
-GGUF_05B = $(WEIGHTS_DIR)/yent_0.5B_step1000_q4_0.gguf
-GGUF_15B = $(WEIGHTS_DIR)/yent_1.5B_step1000_q4_0.gguf
-GGUF_3B  = $(WEIGHTS_DIR)/yent_3B_step1000_q4_0.gguf
+# v10 finetuned GGUF (Q8_0, from HuggingFace janus/)
+GGUF_05B = $(WEIGHTS_DIR)/yent_05b_v10_q8_0.gguf
+GGUF_15B = $(WEIGHTS_DIR)/yent_15b_v10_q8_0.gguf
+GGUF_3B  = $(WEIGHTS_DIR)/yent_3b_v10_q8_0.gguf
 
-# Delta Voice files (shipped in deltas/, 17 MB each, 29 languages)
-DELTA_05B = $(DELTAS_DIR)/yent_05b_delta_r64.npz
-DELTA_15B = $(DELTAS_DIR)/yent_1.5b_delta_r64.npz
-DELTA_3B  = $(DELTAS_DIR)/yent_3b_delta_r64.npz
+# Delta Voice: sparse diff on lm_head (29 languages)
+DELTA_DIR = delta
+DELTA_05B = $(DELTA_DIR)/yent_qwen25_05b_v10_delta_sparse_i8.npz
+DELTA_15B = $(DELTA_DIR)/yent_qwen25_15b_v10_delta_sparse_i8.npz
+DELTA_3B  = $(DELTA_DIR)/yent_qwen25_3b_v10_delta_sparse_i8.npz
+
+# Gamma Essence: personality overlay on embed_tokens (Yent²)
+GAMMA_DIR = gamma
+GAMMA_05B = $(GAMMA_DIR)/yent_qwen25_05b_v10_gamma_sparse_f16.npz
+GAMMA_15B = $(GAMMA_DIR)/yent_qwen25_15b_v10_gamma_sparse_f16.npz
+GAMMA_3B  = $(GAMMA_DIR)/yent_qwen25_3b_v10_gamma_sparse_f16.npz
 
 # Binary
 BIN = yent_bin
 
-# Default alpha for multilingual mode
-ALPHA ?= 0.5
+# Default parameters
+ALPHA ?= 0.0
 PROMPT ?= Who are you?
 MAX ?= 256
 TEMP ?= 0.9
 
 # ═══════════════════════════════════════════════════════
-# Default: 1.5B — balanced personality + multilingual
+# Default: 1.5B v10 — balanced personality + multilingual
 # ═══════════════════════════════════════════════════════
 
-.PHONY: all light max run repl download clean help router
+.PHONY: all light max run repl download clean help
 
-all: $(BIN) $(GGUF_15B) $(DELTA_15B)
+all: $(BIN) $(GGUF_15B)
 	@echo ""
 	@echo "  ██╗   ██╗███████╗███╗   ██╗████████╗"
 	@echo "  ╚██╗ ██╔╝██╔════╝████╗  ██║╚══██╔══╝"
@@ -51,37 +57,37 @@ all: $(BIN) $(GGUF_15B) $(DELTA_15B)
 	@echo "     ██║   ███████╗██║ ╚████║   ██║   "
 	@echo "     ╚═╝   ╚══════╝╚═╝  ╚═══╝   ╚═╝   "
 	@echo ""
-	@echo "  1.5B ready. Delta Voice loaded. 29 languages."
-	@echo "  Run: make run PROMPT=\"Кто ты?\" ALPHA=0.5"
+	@echo "  v10 ready. Gamma loaded. Delta Voice loaded."
+	@echo "  Run: make repl"
 	@echo ""
 
 # ═══════════════════════════════════════════════════════
-# Profiles
+# Profiles — finetuned GGUF + gamma (Yent²) + delta
 # ═══════════════════════════════════════════════════════
 
-light: $(BIN) $(GGUF_05B) $(DELTA_05B)
-	@echo "[yent] Light mode: 0.5B (409 MB)"
-	./$(BIN) -weights $(GGUF_05B) -delta $(DELTA_05B) -alpha $(ALPHA) -prompt "$(PROMPT)" -max $(MAX) -temp $(TEMP)
+light: $(BIN) $(GGUF_05B)
+	@echo "[yent] Light mode: 0.5B v10 (644 MB)"
+	./$(BIN) -weights $(GGUF_05B) -gamma $(GAMMA_05B) -delta $(DELTA_05B) -alpha $(ALPHA) -prompt "$(PROMPT)" -max $(MAX) -temp $(TEMP)
 
-max: $(BIN) $(GGUF_3B) $(DELTA_3B)
-	@echo "[yent] Max mode: 3B"
-	./$(BIN) -weights $(GGUF_3B) -delta $(DELTA_3B) -alpha $(ALPHA) -prompt "$(PROMPT)" -max $(MAX) -temp $(TEMP)
+max: $(BIN) $(GGUF_3B)
+	@echo "[yent] Max mode: 3B v10"
+	./$(BIN) -weights $(GGUF_3B) -gamma $(GAMMA_3B) -delta $(DELTA_3B) -alpha $(ALPHA) -prompt "$(PROMPT)" -max $(MAX) -temp $(TEMP)
 
 # ═══════════════════════════════════════════════════════
-# REPL: interactive conversation (1.5B default)
+# REPL: interactive conversation
 # ═══════════════════════════════════════════════════════
 
-repl: $(BIN) $(GGUF_15B) $(DELTA_15B)
-	@echo "[yent] REPL mode: 1.5B + Delta Voice"
-	./$(BIN) -weights $(GGUF_15B) -delta $(DELTA_15B) -alpha $(ALPHA) -repl -max $(MAX) -temp $(TEMP)
+repl: $(BIN) $(GGUF_15B)
+	@echo "[yent] REPL mode: 1.5B v10 + Gamma (Yent²)"
+	./$(BIN) -weights $(GGUF_15B) -gamma $(GAMMA_15B) -delta $(DELTA_15B) -alpha $(ALPHA) -repl -max $(MAX) -temp $(TEMP)
 
-repl-light: $(BIN) $(GGUF_05B) $(DELTA_05B)
-	@echo "[yent] REPL mode: 0.5B + Delta Voice"
-	./$(BIN) -weights $(GGUF_05B) -delta $(DELTA_05B) -alpha $(ALPHA) -repl -max $(MAX) -temp $(TEMP)
+repl-light: $(BIN) $(GGUF_05B)
+	@echo "[yent] REPL mode: 0.5B v10 + Gamma (Yent²)"
+	./$(BIN) -weights $(GGUF_05B) -gamma $(GAMMA_05B) -delta $(DELTA_05B) -alpha $(ALPHA) -repl -max $(MAX) -temp $(TEMP)
 
-repl-max: $(BIN) $(GGUF_3B) $(DELTA_3B)
-	@echo "[yent] REPL mode: 3B + Delta Voice"
-	./$(BIN) -weights $(GGUF_3B) -delta $(DELTA_3B) -alpha $(ALPHA) -repl -max $(MAX) -temp $(TEMP)
+repl-max: $(BIN) $(GGUF_3B)
+	@echo "[yent] REPL mode: 3B v10 + Gamma (Yent²)"
+	./$(BIN) -weights $(GGUF_3B) -gamma $(GAMMA_3B) -delta $(DELTA_3B) -alpha $(ALPHA) -repl -max $(MAX) -temp $(TEMP)
 
 # ═══════════════════════════════════════════════════════
 # Router: auto-detect hardware, pick best model
@@ -91,21 +97,15 @@ run: $(BIN)
 	@TOTAL_RAM=$$(sysctl -n hw.memsize 2>/dev/null || free -b 2>/dev/null | awk '/Mem:/{print $$2}' || echo 0); \
 	TOTAL_GB=$$(echo "$$TOTAL_RAM / 1073741824" | bc 2>/dev/null || echo 8); \
 	echo "[yent] Detected RAM: $${TOTAL_GB}GB"; \
-	if [ -f "$(GGUF_3B)" ] && [ -f "$(DELTA_3B)" ] && [ "$$TOTAL_GB" -ge 16 ]; then \
-		echo "[yent] Router: 3B (max) — RAM >= 16GB"; \
-		./$(BIN) -weights $(GGUF_3B) -delta $(DELTA_3B) -alpha $(ALPHA) -prompt "$(PROMPT)" -max $(MAX) -temp $(TEMP); \
-	elif [ -f "$(GGUF_15B)" ] && [ -f "$(DELTA_15B)" ] && [ "$$TOTAL_GB" -ge 6 ]; then \
-		echo "[yent] Router: 1.5B (default) — RAM >= 6GB"; \
-		./$(BIN) -weights $(GGUF_15B) -delta $(DELTA_15B) -alpha $(ALPHA) -prompt "$(PROMPT)" -max $(MAX) -temp $(TEMP); \
-	elif [ -f "$(GGUF_05B)" ] && [ -f "$(DELTA_05B)" ]; then \
-		echo "[yent] Router: 0.5B (light) — low RAM or no larger model"; \
-		./$(BIN) -weights $(GGUF_05B) -delta $(DELTA_05B) -alpha $(ALPHA) -prompt "$(PROMPT)" -max $(MAX) -temp $(TEMP); \
-	elif [ -f "$(GGUF_15B)" ]; then \
-		echo "[yent] Router: 1.5B (no delta — English only)"; \
-		./$(BIN) -weights $(GGUF_15B) -prompt "$(PROMPT)" -max $(MAX) -temp $(TEMP); \
+	if [ -f "$(GGUF_3B)" ] && [ "$$TOTAL_GB" -ge 16 ]; then \
+		echo "[yent] Router: 3B v10 (max) — RAM >= 16GB"; \
+		./$(BIN) -weights $(GGUF_3B) -gamma $(GAMMA_3B) -delta $(DELTA_3B) -alpha $(ALPHA) -prompt "$(PROMPT)" -max $(MAX) -temp $(TEMP); \
+	elif [ -f "$(GGUF_15B)" ] && [ "$$TOTAL_GB" -ge 6 ]; then \
+		echo "[yent] Router: 1.5B v10 (default) — RAM >= 6GB"; \
+		./$(BIN) -weights $(GGUF_15B) -gamma $(GAMMA_15B) -delta $(DELTA_15B) -alpha $(ALPHA) -prompt "$(PROMPT)" -max $(MAX) -temp $(TEMP); \
 	elif [ -f "$(GGUF_05B)" ]; then \
-		echo "[yent] Router: 0.5B (no delta — English only)"; \
-		./$(BIN) -weights $(GGUF_05B) -prompt "$(PROMPT)" -max $(MAX) -temp $(TEMP); \
+		echo "[yent] Router: 0.5B v10 (light)"; \
+		./$(BIN) -weights $(GGUF_05B) -gamma $(GAMMA_05B) -delta $(DELTA_05B) -alpha $(ALPHA) -prompt "$(PROMPT)" -max $(MAX) -temp $(TEMP); \
 	else \
 		echo "[yent] No weights found. Run: make download"; \
 		exit 1; \
@@ -145,22 +145,22 @@ $(WEIGHTS_DIR):
 	@mkdir -p $(WEIGHTS_DIR)
 
 $(GGUF_05B): $(WEIGHTS_DIR)
-	@echo "[yent] Downloading 0.5B weights (409 MB)..."
-	curl -L -o $@ $(HF_BASE)/yent_0.5B_step1000_q4_0.gguf
+	@echo "[yent] Downloading 0.5B v10 finetuned Q8_0 (644 MB)..."
+	curl -L -o $@ $(HF_BASE)/janus/yent_05b_v10_q8_0.gguf
 
 $(GGUF_15B): $(WEIGHTS_DIR)
-	@echo "[yent] Downloading 1.5B weights (~1 GB)..."
-	curl -L -o $@ $(HF_BASE)/yent_1.5B_step1000_q4_0.gguf
+	@echo "[yent] Downloading 1.5B v10 finetuned Q8_0 (1.8 GB)..."
+	curl -L -o $@ $(HF_BASE)/janus/yent_15b_v10_q8_0.gguf
 
 $(GGUF_3B): $(WEIGHTS_DIR)
-	@echo "[yent] Downloading 3B weights (~1.9 GB)..."
-	curl -L -o $@ $(HF_BASE)/yent_3B_step1000_q4_0.gguf
+	@echo "[yent] Downloading 3B v10 finetuned Q8_0 (3.4 GB)..."
+	curl -L -o $@ $(HF_BASE)/janus/yent_3b_v10_q8_0.gguf
 
 download: $(GGUF_05B) $(GGUF_15B)
-	@echo "[yent] All available weights downloaded. Deltas already in deltas/."
+	@echo "[yent] 0.5B + 1.5B v10 downloaded."
 
 download-all: download $(GGUF_3B)
-	@echo "[yent] All weights including 3B downloaded."
+	@echo "[yent] All v10 weights downloaded."
 
 # ═══════════════════════════════════════════════════════
 # Cleanup
@@ -179,16 +179,16 @@ clean-all: clean clean-weights
 # ═══════════════════════════════════════════════════════
 
 help:
-	@echo "Yent — You Exist, No Translation."
+	@echo "Yent v10 — You Exist, No Translation."
 	@echo ""
-	@echo "  make              Download 1.5B, build (deltas in repo)"
-	@echo "  make repl         Interactive REPL (1.5B — recommended)"
+	@echo "  make              Download 1.5B v10, build"
+	@echo "  make repl         Interactive REPL (1.5B — Yent² mode)"
 	@echo "  make repl-light   Interactive REPL (0.5B)"
 	@echo "  make repl-max     Interactive REPL (3B)"
 	@echo "  make light        Single-shot 0.5B"
 	@echo "  make max          Single-shot 3B"
 	@echo "  make run          Auto-detect hardware, single-shot"
-	@echo "  make download     Download 0.5B + 1.5B GGUF"
+	@echo "  make download     Download 0.5B + 1.5B finetuned Q8_0"
 	@echo "  make download-all Download everything including 3B"
 	@echo "  make clean        Remove binary + kernel"
 	@echo "  make clean-all    Remove binary + weights (~/.yent/models/)"
@@ -199,4 +199,5 @@ help:
 	@echo "    MAX=256            Max tokens"
 	@echo "    TEMP=0.9           Temperature"
 	@echo ""
+	@echo "  θ = ε + γ + αδ"
 	@echo "  from ariannamethod import Destiny"

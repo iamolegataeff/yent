@@ -48,6 +48,11 @@ type Yent struct {
 	// LIMPHA: memory system — stores every conversation automatically
 	// Python async daemon, SQLite+FTS5, zero manual commands.
 	limpha *LimphaClient
+
+	// LogitHook: external callback for logit modulation (Janus/AML integration)
+	// Called after forward pass, before delta voice and sampling.
+	// If nil, no external modulation is applied.
+	LogitHook func(logits []float32)
 }
 
 // New creates a new Yent instance from a GGUF weights file
@@ -129,6 +134,34 @@ func (y *Yent) LoadDeltaVoice(deltaPath string) error {
 	y.delta = d
 	fmt.Printf("[delta-voice] loaded: 29 languages available (alpha=%.2f)\n", y.DeltaAlpha)
 	return nil
+}
+
+// LoadGammaEssence loads a personality gamma file
+func (y *Yent) LoadGammaEssence(gammaPath string) error {
+	g, err := LoadGamma(gammaPath)
+	if err != nil {
+		return fmt.Errorf("load gamma: %w", err)
+	}
+
+	// Validate embed dim matches model
+	if g.EmbedDim != y.model.Config.EmbedDim {
+		return fmt.Errorf("gamma embed_dim %d != model dim %d", g.EmbedDim, y.model.Config.EmbedDim)
+	}
+
+	y.model.Gamma = g
+	fmt.Printf("[gamma] personality loaded: %d tokens modified\n", g.NumTokens)
+	return nil
+}
+
+// UnloadGamma removes gamma essence
+func (y *Yent) UnloadGamma() {
+	y.model.Gamma = nil
+	fmt.Println("[gamma] unloaded")
+}
+
+// HasGamma returns true if gamma essence is loaded
+func (y *Yent) HasGamma() bool {
+	return y.model != nil && y.model.Gamma != nil
 }
 
 // SetAlpha sets the delta voice blending factor
@@ -263,6 +296,12 @@ func (y *Yent) Generate(prompt string, maxTokens int, temperature, topP float32)
 		// ═══ AMK: step physics ═══
 		// The kernel breathes with each token
 		y.amk.Step(tokenDt)
+
+		// ═══ JANUS: external logit hook ═══
+		// AML field modulates logits before delta voice and sampling
+		if y.LogitHook != nil {
+			y.LogitHook(y.model.State.Logits)
+		}
 
 		// Delta Voice: apply multilingual delta to logits
 		// "from ariannamethod import Destiny"

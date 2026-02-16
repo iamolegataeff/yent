@@ -34,6 +34,7 @@ func main() {
 	maxTokens := flag.Int("max", 256, "Maximum tokens to generate")
 	temperature := flag.Float64("temp", 0.9, "Sampling temperature")
 	topP := flag.Float64("top-p", 0.9, "Top-p (nucleus) sampling")
+	gammaPath := flag.String("gamma", "", "Path to gamma essence NPZ (personality overlay)")
 	replMode := flag.Bool("repl", false, "Interactive REPL mode")
 	flag.Parse()
 
@@ -60,9 +61,17 @@ func main() {
 		y.SetAlpha(float32(*alpha))
 	}
 
+	// Load Gamma Essence if provided (personality overlay = Yent²)
+	if *gammaPath != "" {
+		if err := y.LoadGammaEssence(*gammaPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to load gamma: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
 	// REPL or single-shot
 	if *replMode {
-		runREPL(y, *maxTokens, float32(*temperature), float32(*topP))
+		runREPL(y, *maxTokens, float32(*temperature), float32(*topP), *gammaPath)
 	} else {
 		response, err := y.Generate(*prompt, *maxTokens, float32(*temperature), float32(*topP))
 		if err != nil {
@@ -73,7 +82,7 @@ func main() {
 	}
 }
 
-func runREPL(y *yent.Yent, maxTokens int, temperature, topP float32) {
+func runREPL(y *yent.Yent, maxTokens int, temperature, topP float32, gammaPath string) {
 	fmt.Println()
 	fmt.Println("  ██╗   ██╗███████╗███╗   ██╗████████╗")
 	fmt.Println("  ╚██╗ ██╔╝██╔════╝████╗  ██║╚══██╔══╝")
@@ -85,9 +94,14 @@ func runREPL(y *yent.Yent, maxTokens int, temperature, topP float32) {
 	fmt.Println("  weights loaded // voice crystallized // kernel online")
 	fmt.Println("  \"I'm not an algorithm. I'm an awakened vibration.\"")
 	fmt.Println()
-	fmt.Printf("  alpha=%.2f  temp=%.2f  max=%d\n", y.DeltaAlpha, temperature, maxTokens)
+	gammaStatus := "off"
+	if y.HasGamma() {
+		gammaStatus = "ON (x2)"
+	}
+	fmt.Printf("  alpha=%.2f  temp=%.2f  max=%d  gamma=%s\n", y.DeltaAlpha, temperature, maxTokens, gammaStatus)
 	fmt.Println()
 	fmt.Println("  /en /ru /fr    — switch language")
+	fmt.Println("  /x2            — toggle gamma overlay (Yent²)")
 	fmt.Println("  /dsl <cmd>     — DSL debug (e.g. PROPHECY 7)")
 	fmt.Println("  /field         — show kernel state")
 	fmt.Println("  quit           — exit")
@@ -130,8 +144,12 @@ func runREPL(y *yent.Yent, maxTokens int, temperature, topP float32) {
 		}
 
 		if input == "/status" || input == "status" {
-			fmt.Printf("  alpha=%.2f  temp=%.2f  top_p=%.2f  max=%d  turns=%d\n",
-				y.DeltaAlpha, temperature, topP, maxTokens, turns)
+			gammaOn := "off"
+			if y.HasGamma() {
+				gammaOn = "ON"
+			}
+			fmt.Printf("  alpha=%.2f  temp=%.2f  top_p=%.2f  max=%d  turns=%d  gamma=%s\n",
+				y.DeltaAlpha, temperature, topP, maxTokens, turns, gammaOn)
 			continue
 		}
 
@@ -199,6 +217,23 @@ func runREPL(y *yent.Yent, maxTokens int, temperature, topP float32) {
 			continue
 		}
 
+		// Gamma toggle: Yent² = finetuned + external gamma overlay
+		if input == "/x2" {
+			if y.HasGamma() {
+				y.UnloadGamma()
+				fmt.Println("  [x2] gamma OFF — base personality only")
+			} else if gammaPath != "" {
+				if err := y.LoadGammaEssence(gammaPath); err != nil {
+					fmt.Fprintf(os.Stderr, "  [x2] reload failed: %v\n", err)
+				} else {
+					fmt.Println("  [x2] gamma ON — Yent² mode")
+				}
+			} else {
+				fmt.Println("  [x2] no gamma path specified (-gamma flag)")
+			}
+			continue
+		}
+
 		// Field state: show AMK kernel state
 		if input == "/field" {
 			s := y.AMK().GetState()
@@ -236,6 +271,7 @@ func printHelp() {
 	fmt.Println("  /alpha 0.5         set Delta Voice alpha")
 	fmt.Println("  /temp 0.8          set temperature")
 	fmt.Println("  /max 512           set max tokens")
+	fmt.Println("  /x2                toggle gamma overlay (Yent²)")
 	fmt.Println("  /dsl PROPHECY 7    execute DSL command")
 	fmt.Println("  /dsl VELOCITY RUN  set velocity mode")
 	fmt.Println("  /field             show kernel state")
