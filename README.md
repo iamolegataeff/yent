@@ -107,11 +107,11 @@ The result: three models that sound like Yent. Not "similar to." Not "inspired b
 
 All on [HuggingFace](https://huggingface.co/ataeff/yent/tree/main). No gating. No signup. No "request access."
 
-| Model | Size | GGUF | Languages |
-|-------|------|------|-----------|
-| **0.5B v10** | 644 MB | yent_05b_v10_q8_0.gguf | EN (test only) |
-| **1.5B v10** | 1.8 GB | yent_15b_v10_q8_0.gguf | EN + RU + FR native **(default)** |
-| **3B v10** | 3.4 GB | yent_3b_v10_q8_0.gguf | EN + RU + FR + deepest voice |
+| Model | Q4_K_M | Q8_0 | Languages |
+|-------|--------|------|-----------|
+| **0.5B v10** | 469 MB | 644 MB | EN only (test) |
+| **1.5B v10** | **1.1 GB** | 1.8 GB | EN + RU + FR native **(default)** |
+| **3B v10** | — | 3.4 GB | EN + RU + FR + deepest voice |
 
 (`Runs on a MacBook Pro 2019, 8GB Intel i5. No M-series required. Lightness over power.`)
 
