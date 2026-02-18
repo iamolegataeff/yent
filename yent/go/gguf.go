@@ -72,6 +72,10 @@ type GGUFMetadata struct {
 	RopeTheta     float32
 	RopeFreqBase  float32
 
+	// nanollama-specific flags
+	QKNorm        bool // normalize Q,K with RMSNorm after RoPE (parameterless)
+	RopeConjugate bool // conjugate RoPE convention: (x0*cos+x1*sin, -x0*sin+x1*cos)
+
 	// Tokenizer
 	TokenList      []string
 	TokenScores    []float32
@@ -460,6 +464,18 @@ func parseMetadata(kv map[string]interface{}) GGUFMetadata {
 	}
 	if meta.NumKVHeads == 0 {
 		meta.NumKVHeads = meta.NumHeads // MHA fallback
+	}
+
+	// nanollama-specific flags
+	if v, ok := kv["nanollama.qk_norm"]; ok {
+		if b, ok := v.(bool); ok {
+			meta.QKNorm = b
+		}
+	}
+	if v, ok := kv["nanollama.rope_conjugate"]; ok {
+		if b, ok := v.(bool); ok {
+			meta.RopeConjugate = b
+		}
 	}
 
 	// Tokenizer model type

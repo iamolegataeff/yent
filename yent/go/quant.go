@@ -706,6 +706,20 @@ func RMSNorm(x []float32, w []float32, eps float32) {
 	}
 }
 
+// RMSNormBare applies RMS normalization in-place WITHOUT learnable weights.
+// Used for QK-norm in nanollama (parameterless RMSNorm).
+func RMSNormBare(x []float32, eps float32) {
+	n := len(x)
+	var ss float64
+	for i := 0; i < n; i++ {
+		ss += float64(x[i]) * float64(x[i])
+	}
+	inv := float32(1.0 / math.Sqrt(ss/float64(n)+float64(eps)))
+	for i := 0; i < n; i++ {
+		x[i] *= inv
+	}
+}
+
 // RMSNormInto applies RMS normalization: out = norm(x) * w
 func RMSNormInto(out, x, w []float32, eps float32) {
 	n := len(x)

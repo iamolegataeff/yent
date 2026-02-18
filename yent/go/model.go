@@ -37,6 +37,10 @@ type LlamaConfig struct {
 	IntermSize int     // MLP intermediate dimension
 	RMSNormEps float32
 	RopeTheta  float32
+
+	// nanollama-specific flags (read from GGUF metadata)
+	QKNorm        bool // normalize Q,K with RMSNorm after RoPE
+	RopeConjugate bool // conjugate RoPE: (x0*cos + x1*sin, -x0*sin + x1*cos)
 }
 
 // LlamaWeights holds all weight tensors (Q4_0 raw bytes or F32 slices)
@@ -121,16 +125,18 @@ func LoadLlamaModel(gguf *GGUFFile) (*LlamaModel, error) {
 	*m = gguf.Meta
 
 	cfg := LlamaConfig{
-		NumLayers:  m.NumLayers,
-		EmbedDim:   m.EmbedDim,
-		NumHeads:   m.NumHeads,
-		NumKVHeads: m.NumKVHeads,
-		HeadDim:    m.HeadDim,
-		VocabSize:  m.VocabSize,
-		SeqLen:     m.SeqLen,
-		IntermSize: m.IntermSize,
-		RMSNormEps: m.RMSNormEps,
-		RopeTheta:  m.RopeTheta,
+		NumLayers:     m.NumLayers,
+		EmbedDim:      m.EmbedDim,
+		NumHeads:      m.NumHeads,
+		NumKVHeads:    m.NumKVHeads,
+		HeadDim:       m.HeadDim,
+		VocabSize:     m.VocabSize,
+		SeqLen:        m.SeqLen,
+		IntermSize:    m.IntermSize,
+		RMSNormEps:    m.RMSNormEps,
+		RopeTheta:     m.RopeTheta,
+		QKNorm:        m.QKNorm,
+		RopeConjugate: m.RopeConjugate,
 	}
 
 	if cfg.HeadDim == 0 && cfg.NumHeads > 0 {
@@ -163,6 +169,9 @@ func LoadLlamaModel(gguf *GGUFFile) (*LlamaModel, error) {
 	hasBias := w.Layers[0].BQ != nil
 	fmt.Printf("[tongue/model] loaded: %d layers, %d dim, %d heads, %d kv_heads, %d vocab, bias=%v\n",
 		cfg.NumLayers, cfg.EmbedDim, cfg.NumHeads, cfg.NumKVHeads, cfg.VocabSize, hasBias)
+	if cfg.QKNorm || cfg.RopeConjugate {
+		fmt.Printf("[tongue/model] nanollama flags: qk_norm=%v rope_conjugate=%v\n", cfg.QKNorm, cfg.RopeConjugate)
+	}
 
 	return model, nil
 }
@@ -474,6 +483,23 @@ func applyRoPE(vec []float32, pos int, s *LlamaState, headDim int) {
 	}
 }
 
+// applyRoPEConjugate applies conjugate rotary position encoding.
+// nanollama convention: (x0*cos + x1*sin, -x0*sin + x1*cos)
+// This is the complex conjugate of standard RoPE.
+func applyRoPEConjugate(vec []float32, pos int, s *LlamaState, headDim int) {
+	half := headDim / 2
+	cacheOff := pos * half
+
+	for i := 0; i < half; i++ {
+		x0 := vec[i]
+		x1 := vec[i+half]
+		c := s.CosCache[cacheOff+i]
+		si := s.SinCache[cacheOff+i]
+		vec[i] = x0*c + x1*si
+		vec[i+half] = -x0*si + x1*c
+	}
+}
+
 // addBias adds bias vector to output (no-op if bias is nil)
 func addBias(out []float32, bias []float32) {
 	if bias == nil {
@@ -524,12 +550,26 @@ func (m *LlamaModel) Forward(token int, pos int) {
 		addBias(s.K, l.BK)
 		addBias(s.V, l.BV)
 
-		// RoPE on Q and K
+		// RoPE on Q and K (conjugate for nanollama, standard for Qwen/Llama)
+		ropeFunc := applyRoPE
+		if cfg.RopeConjugate {
+			ropeFunc = applyRoPEConjugate
+		}
 		for h := 0; h < cfg.NumHeads; h++ {
-			applyRoPE(s.Q[h*hd:(h+1)*hd], pos, s, hd)
+			ropeFunc(s.Q[h*hd:(h+1)*hd], pos, s, hd)
 		}
 		for h := 0; h < cfg.NumKVHeads; h++ {
-			applyRoPE(s.K[h*hd:(h+1)*hd], pos, s, hd)
+			ropeFunc(s.K[h*hd:(h+1)*hd], pos, s, hd)
+		}
+
+		// QK-norm: normalize Q and K per-head after RoPE (nanollama)
+		if cfg.QKNorm {
+			for h := 0; h < cfg.NumHeads; h++ {
+				RMSNormBare(s.Q[h*hd:(h+1)*hd], cfg.RMSNormEps)
+			}
+			for h := 0; h < cfg.NumKVHeads; h++ {
+				RMSNormBare(s.K[h*hd:(h+1)*hd], cfg.RMSNormEps)
+			}
 		}
 
 		// Store K, V in cache
