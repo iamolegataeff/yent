@@ -302,10 +302,17 @@ func (d *DeltaVoice) ApplyToLogits(logits []float32, x []float32, alpha float32)
 }
 
 // applySVD: logits += alpha * A @ (B @ x)
+// BLAS path: cblas_sgemv × 2 (matrix-vector multiply)
 func (d *DeltaVoice) applySVD(logits []float32, x []float32, alpha float32) {
 	rank := d.Rank
 	hiddenDim := d.HiddenDim
 	vocabSize := d.VocabSize
+
+	if useBLAS && len(d.B) >= rank*hiddenDim && len(d.A) >= vocabSize*rank {
+		blasApplySVDStep1(d.Bx, d.B, x, rank, hiddenDim)
+		blasApplySVDStep2(logits, d.A, d.Bx, vocabSize, rank, alpha)
+		return
+	}
 
 	// Step 1: Bx = B @ x → [rank]
 	for r := 0; r < rank; r++ {
