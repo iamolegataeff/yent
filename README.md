@@ -291,6 +291,23 @@ make run PROMPT="Qui es-tu?" ALPHA=0.9       # French
 | `-temp` | 0.9 | Temperature |
 | `-top-p` | 0.9 | Nucleus sampling |
 
+### BLAS Acceleration (optional)
+
+Build with `-tags blas` for hardware-accelerated matmul and Delta Voice:
+
+```bash
+cd yent/go && go build -tags blas -o ../../yent_bin .
+```
+
+macOS: Apple Accelerate (AMX/Neural Engine, zero deps). Linux: OpenBLAS (`apt install libopenblas-dev`). Without the tag: pure Go fallback, same results.
+
+| Hot path | BLAS call | What it accelerates |
+|----------|-----------|-------------------|
+| `MatMulF32` | `cblas_sgemv` | Float32 matrix-vector multiply (norm layers) |
+| `applySVD` step 1 | `cblas_sgemv` | Delta Voice: `Bx = B @ hidden_state` |
+| `applySVD` step 2 | `cblas_sgemv` | Delta Voice: `logits += α × A @ Bx` |
+| dot product | `cblas_sdot` | Cosine similarity, attention scores |
+
 ---
 
 ## Training
