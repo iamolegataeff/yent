@@ -32,6 +32,7 @@
 // See amk_kernel.h for struct definitions and pack flags
 
 static AM_State G;
+static int g_am_initialized = 0;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // HELPERS — the small bones
@@ -122,6 +123,7 @@ static void update_effective_temp(void) {
 
 void am_init(void) {
   memset(&G, 0, sizeof(G));
+  g_am_initialized = 1;
 
   // prophecy physics defaults
   G.prophecy = 7;
@@ -238,6 +240,12 @@ void am_reset_debt(void) {
 
 int am_exec(const char* script) {
   if (!script) return 0;  // empty script is OK
+
+  // A-4 (Mythos audit sync): reaching am_exec before am_init runs on a zeroed
+  // field (base_temperature 0, etc.). The Go wrapper calls am_init first, so
+  // this hardens the kernel itself — any entry point (WASM export, future
+  // caller) is safe.
+  if (!g_am_initialized) am_init();
 
   size_t n = strlen(script);
   if (n == 0) return 0;   // empty string is OK
