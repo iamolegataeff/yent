@@ -458,8 +458,10 @@ func parseMetadata(kv map[string]interface{}) GGUFMetadata {
 		meta.RopeTheta = toFloat32(v)
 	}
 
-	// Derived
-	if meta.NumHeads > 0 && meta.EmbedDim > 0 {
+	// Derived (Y-B1: prefer attention.key_length from header — Mistral hd=128 != 5120/32=160; Qwen-neutral)
+	if v, ok := kv[arch+".attention.key_length"]; ok {
+		meta.HeadDim = toInt(v)
+	} else if meta.NumHeads > 0 && meta.EmbedDim > 0 {
 		meta.HeadDim = meta.EmbedDim / meta.NumHeads
 	}
 	if meta.NumKVHeads == 0 {

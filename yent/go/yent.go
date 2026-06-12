@@ -254,11 +254,20 @@ func (y *Yent) Generate(prompt string, maxTokens int, temperature, topP float32)
 		return "", fmt.Errorf("yent not initialized")
 	}
 
-	// Training format: ### Question: / ### Answer:
+	// Y-B7: prompt template. Mistral needs [INST] + BOS; nanollama/Qwen uses ### Question, no BOS.
+	// YENT_TEMPLATE=inst switches to Mistral [INST] mode (env, doe-style; chat_template detect = follow-up).
 	chatText := "### Question: " + prompt + "\n### Answer:"
+	addBOS := false
+	if os.Getenv("YENT_TEMPLATE") == "inst" {
+		chatText = "[INST] " + prompt + " [/INST]"
+		addBOS = true
+	}
 
-	// Tokenize (no BOS for Qwen2.5)
-	allTokens := y.tokenizer.Encode(chatText, false)
+	// Tokenize
+	allTokens := y.tokenizer.Encode(chatText, addBOS)
+	if os.Getenv("YENT_DEBUG_TOKENS") != "" {
+		fmt.Fprintf(os.Stderr, "[tokdump] n=%d ids: %v\n", len(allTokens), allTokens)
+	}
 
 	y.model.Reset()
 

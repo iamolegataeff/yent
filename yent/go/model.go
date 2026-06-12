@@ -617,7 +617,8 @@ func (m *LlamaModel) Forward(token int, pos int) {
 		}
 
 		// Output projection: XB = WO × XB2 + bias, then residual
-		matmulDispatch(s.XB, l.WO, l.WOType, s.XB2, dim, dim)
+		// Y-B1: WO cols = heads*head_dim (4096), not dim (5120) — correct only when NumHeads*HeadDim==dim (Qwen)
+		matmulDispatch(s.XB, l.WO, l.WOType, s.XB2, dim, cfg.NumHeads*cfg.HeadDim)
 		addBias(s.XB, l.BO)
 		for i := 0; i < dim; i++ {
 			s.X[i] += s.XB[i]
