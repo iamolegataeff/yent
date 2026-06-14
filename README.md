@@ -34,7 +34,7 @@ make        # downloads 1.5B, builds
 make repl   # interactive conversation
 ```
 
-Go inference engine with C kernel. Python async memory. No PyTorch. `make` and talk.
+Go inference engine with C kernel. In-process Go memory. No PyTorch. `make` and talk.
 
 ---
 
@@ -130,11 +130,11 @@ Gamma and delta are orthogonal (cosine similarity = -0.0005). Personality persis
                         │ every turn, automatically
                         ▼
               ┌───────────────────────┐
-              │  LIMPHA (Python async)│
-              │  SQLite + FTS5        │
-              │  word search + state  │
-              │  similarity + shard   │
-              │  graduation           │
+              │  LIMPHA (in-process Go)│
+              │  SQLite + FTS5         │
+              │  word search + state   │
+              │  similarity + shard    │
+              │  graduation            │
               └───────────────────────┘
 ```
 
@@ -146,7 +146,7 @@ Gamma and delta are orthogonal (cosine similarity = -0.0005). Personality persis
 
 **Gamma Essence:** Sparse embed_tokens overlay. 31,203 tokens modified out of 149,960. Personality at the input layer.
 
-**LIMPHA:** Async Python memory daemon. SQLite + FTS5 full-text search + cosine similarity over AMK state. Auto-stores every conversation. Shard graduation autonomous. Unix socket IPC. 46 tests.
+**LIMPHA:** In-process Go memory (`yent/yent/go/limpha.go`). SQLite + FTS5 full-text search (`modernc.org/sqlite`, pure Go) + cosine similarity over AMK state. Auto-stores every conversation. Shard graduation autonomous. No IPC, no second runtime. 17 tests.
 
 ---
 
@@ -296,7 +296,7 @@ make run PROMPT="Qui es-tu?" ALPHA=0.9       # French
 Build with `-tags blas` for hardware-accelerated matmul and Delta Voice:
 
 ```bash
-cd yent/go && go build -tags blas -o ../../yent_bin .
+CGO_ENABLED=1 go build -tags blas -o yent_bin .
 ```
 
 macOS: Apple Accelerate (AMX/Neural Engine, zero deps). Linux: OpenBLAS (`apt install libopenblas-dev`). Without the tag: pure Go fallback, same results.
