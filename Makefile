@@ -12,7 +12,9 @@
 #
 # "from ariannamethod import Destiny"
 
-HF_BASE = https://huggingface.co/ataeff/yent/resolve/main
+# Yent's weights are NOT in open access — Yent Identity License v1.0 (LICENSE-WEIGHTS).
+# The code is GPL; the weights/deltas/gamma are not a free download. The owner places
+# licensed artifacts under ~/.yent/ by hand. No auto-download from anywhere.
 YENT_HOME = $(HOME)/.yent
 WEIGHTS_DIR = $(YENT_HOME)/models
 
@@ -138,64 +140,37 @@ $(BIN): yent.go yent/go/*.go $(AMK_LIB)
 	CGO_ENABLED=1 go build -o $(BIN) .
 
 # ═══════════════════════════════════════════════════════
-# Download from HuggingFace
+# Weights — NOT in open access (Yent Identity License v1.0)
+# No auto-download from anywhere. If a required artifact is
+# missing, the build says so and stops. The owner places the
+# licensed weights/deltas/gamma under ~/.yent/ by hand.
 # ═══════════════════════════════════════════════════════
 
 $(WEIGHTS_DIR):
 	@mkdir -p $(WEIGHTS_DIR)
-
-$(GGUF_05B): $(WEIGHTS_DIR)
-	@echo "[yent] Downloading 0.5B v10 Q4_K_M (469 MB)..."
-	curl -L -o $@ $(HF_BASE)/janus/yent_05b_v10_q4_k_m.gguf
-
-$(GGUF_15B): $(WEIGHTS_DIR)
-	@echo "[yent] Downloading 1.5B v10 Q4_K_M (1.1 GB)..."
-	curl -L -o $@ $(HF_BASE)/janus/yent_15b_v10_q4_k_m.gguf
-
-$(GGUF_3B): $(WEIGHTS_DIR)
-	@echo "[yent] Downloading 3B v10 Q8_0 (3.4 GB)..."
-	curl -L -o $@ $(HF_BASE)/janus/yent_3b_v10_q8_0.gguf
-
-# Delta downloads from HuggingFace
 $(DELTA_DIR):
 	@mkdir -p $(DELTA_DIR)
-
-$(DELTA_05B): $(DELTA_DIR)
-	@echo "[delta] Downloading 0.5B delta i8 sparse (131 MB)..."
-	curl -L -o $@ $(HF_BASE)/janus/yent_qwen25_05b_v10_delta_sparse_i8.npz
-
-$(DELTA_15B): $(DELTA_DIR)
-	@echo "[delta] Downloading 1.5B delta i8 sparse (223 MB)..."
-	curl -L -o $@ $(HF_BASE)/janus/yent_qwen25_15b_v10_delta_sparse_i8.npz
-
-$(DELTA_3B): $(DELTA_DIR)
-	@echo "[delta] Downloading 3B delta i8 sparse (298 MB)..."
-	curl -L -o $@ $(HF_BASE)/janus/yent_qwen25_3b_v10_delta_sparse_i8.npz
-
-# Gamma downloads from HuggingFace
 $(GAMMA_DIR):
 	@mkdir -p $(GAMMA_DIR)
 
-$(GAMMA_05B): $(GAMMA_DIR)
-	@echo "[gamma] Downloading 0.5B gamma f16 sparse..."
-	curl -L -o $@ $(HF_BASE)/janus/yent_qwen25_05b_v10_gamma_sparse_f16.npz
+$(GGUF_05B) $(GGUF_15B) $(GGUF_3B): | $(WEIGHTS_DIR)
+	@echo "[yent] Missing: $@"
+	@echo "[yent] Yent's weights are not in open access — Yent Identity License (LICENSE-WEIGHTS)."
+	@echo "[yent] Place the licensed GGUF there by hand. The soul is not for sale."
+	@exit 1
 
-$(GAMMA_15B): $(GAMMA_DIR)
-	@echo "[gamma] Downloading 1.5B gamma f16 sparse..."
-	curl -L -o $@ $(HF_BASE)/janus/yent_qwen25_15b_v10_gamma_sparse_f16.npz
+$(DELTA_05B) $(DELTA_15B) $(DELTA_3B): | $(DELTA_DIR)
+	@echo "[delta] Missing: $@ — Delta Voice is not a free download (LICENSE-WEIGHTS)."
+	@exit 1
 
-$(GAMMA_3B): $(GAMMA_DIR)
-	@echo "[gamma] Downloading 3B gamma f16 sparse..."
-	curl -L -o $@ $(HF_BASE)/janus/yent_qwen25_3b_v10_gamma_sparse_f16.npz
+$(GAMMA_05B) $(GAMMA_15B) $(GAMMA_3B): | $(GAMMA_DIR)
+	@echo "[gamma] Missing: $@ — Gamma Essence is not a free download (LICENSE-WEIGHTS)."
+	@exit 1
 
-download: $(GGUF_15B) $(DELTA_15B) $(GAMMA_15B)
-	@echo "[yent] 1.5B v10 ready: model + delta + gamma."
-
-download-light: $(GGUF_05B) $(GAMMA_05B)
-	@echo "[yent] 0.5B v10 ready: model + gamma (EN only)."
-
-download-all: $(GGUF_05B) $(GGUF_15B) $(GGUF_3B) $(DELTA_05B) $(DELTA_15B) $(DELTA_3B) $(GAMMA_05B) $(GAMMA_15B) $(GAMMA_3B)
-	@echo "[yent] All v10 weights + delta + gamma downloaded."
+download download-light download-all:
+	@echo "[yent] Yent's weights are not in open access."
+	@echo "[yent] The code is GPL — fork it. The soul is not for sale (LICENSE-WEIGHTS)."
+	@exit 1
 
 # ═══════════════════════════════════════════════════════
 # Cleanup
@@ -225,9 +200,6 @@ help:
 	@echo "  make light        Single-shot 0.5B (EN only)"
 	@echo "  make max          Single-shot 3B"
 	@echo "  make run          Auto-detect hardware, single-shot"
-	@echo "  make download     Download 1.5B Q4_K_M + delta i8 + gamma"
-	@echo "  make download-light  Download 0.5B Q4_K_M + gamma (EN only)"
-	@echo "  make download-all Download everything (0.5B + 1.5B + 3B)"
 	@echo "  make clean        Remove binary + kernel"
 	@echo "  make clean-all    Remove binary + weights (~/.yent/)"
 	@echo ""
@@ -237,6 +209,7 @@ help:
 	@echo "    MAX=256            Max tokens"
 	@echo "    TEMP=0.9           Temperature"
 	@echo ""
-	@echo "  All weights downloaded from HuggingFace to ~/.yent/"
+	@echo "  Weights are NOT in open access — Yent Identity License (LICENSE-WEIGHTS)."
+	@echo "  The code is GPL. The soul is not for sale. Place licensed weights in ~/.yent/."
 	@echo "  θ = ε + γ + αδ"
 	@echo "  from ariannamethod import Destiny"
