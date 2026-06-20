@@ -9,4 +9,5 @@ __pycache__/
 *.pyc
 DoE/doe_field
 DoE/*.o
+DoE/Makefile
 /Makefile

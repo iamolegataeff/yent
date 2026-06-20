@@ -135,6 +135,10 @@ static float g_gen_temp_override = -1.0f; /* <0 uses field effective temperature
 static int g_once = 0; /* exit after one generated answer; useful for artifact isolation */
 static int g_load_spore = 1;
 static int g_save_spore = 1;
+static char g_image_path[512]  = {0}; /* --image: native pixtral vision (doe sees images, no llama.cpp) */
+static char g_mmproj_path[512] = {0}; /* --mmproj: pixtral vision-tower gguf */
+static char g_img_embeds_bin[512] = {0}; /* --img-embeds-bin: load image embeds [n_tok*host_dim] f32 from file (diagnostic: clip ground-truth vs native encoder) */
+extern float *pv_encode_image(const char *img_path, const char *mmproj_path, int *o_ntok, int *o_dim);
 static int g_rope_norm = 0; /* probe: llama.cpp NORM RoPE pairs consecutive head values */
 /* M4 slot ids for the FFN/attention half-layer chains on GPU (NT_SLOT_MAX=64). */
 enum { SLOT_X = 0, SLOT_FN, SLOT_G, SLOT_U, SLOT_HB, SLOT_DN, SLOT_Q, SLOT_K, SLOT_V, SLOT_O, SLOT_XB, SLOT_LOGITS,
@@ -1347,6 +1351,16 @@ static void apply_rope_mode(float *v, int pos, float *cc, float *sc, int hd, int
             v[i+h] = x0*sc[off+i] + x1*cc[off+i];
         }
     }
+}
+
+/* RoPE pairing per architecture, mirroring llama.cpp llama_model_rope_type()
+ * (src/llama-model.cpp): llama-family + Mistral use NORM (adjacent pairs 2i,2i+1);
+ * the qwen/falcon/gemma/phi/... family uses NEOX (offset-half pairs i,i+hd/2).
+ * GGUF permutes Q/K for whichever the arch expects, so the wrong mode is identity
+ * at pos 0 but corrupts rope progressively at pos>0 (coherent short, broken long). */
+static int arch_rope_norm(const char *arch) {
+    return strcmp(arch, "llama") == 0 || strcmp(arch, "mistral") == 0 ||
+           strcmp(arch, "mistral3") == 0 || strcmp(arch, "mistral4") == 0;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
@@ -2641,6 +2655,8 @@ typedef struct {
     float *cos_cache, *sin_cache;
     HarmonicState hs;
     int max_seq;
+    float *img_embeds;            /* native pixtral image embeds [host_dim * img_count], or NULL */
+    int    img_start, img_count;  /* positions [img_start, img_start+img_count) splice img_embeds */
 } InferState;
 
 static InferState alloc_infer(GGUFIndex *ps, int max_seq) {
@@ -2708,8 +2724,10 @@ static float *doe_forward(GGUFIndex *ps, InferState *s, int token, int pos) {
     /* per-shape dims for DOE_PERSHAPE matvec grouping (keys pershape_group). */
     g_ps_D = D; g_ps_qn = ps->host_heads*hd; g_ps_kd = kd; g_ps_H = H; g_ps_H2 = H*2; g_ps_vocab = ps->host_vocab;
 
-    /* Embedding */
-    if (token >= 0 && token < ps->host_vocab)
+    /* Embedding (image-aware: splice native pixtral embeds at image positions) */
+    if (s->img_embeds && pos >= s->img_start && pos < s->img_start + s->img_count)
+        memcpy(s->x, s->img_embeds + (size_t)(pos - s->img_start) * D, D * sizeof(float));
+    else if (token >= 0 && token < ps->host_vocab)
         memcpy(s->x, ps->host_tok_emb + token * D, D * sizeof(float));
     else
         memset(s->x, 0, D * sizeof(float));
@@ -2801,7 +2819,7 @@ static float *doe_forward(GGUFIndex *ps, InferState *s, int token, int pos) {
                 else         nt_metal_q4k_matvec_slot(SLOT_K,(const uint8_t*)ps->host_layers[l].wk,SLOT_FN,kd,D);
                 if (vd==14)  nt_metal_q6k_matvec_slot(SLOT_V,(const uint8_t*)ps->host_layers[l].wv,SLOT_FN,kd,D);
                 else         nt_metal_q4k_matvec_slot(SLOT_V,(const uint8_t*)ps->host_layers[l].wv,SLOT_FN,kd,D);
-                int rope_norm = g_rope_norm || strcmp(ps->host_arch, "llama") == 0;
+                int rope_norm = g_rope_norm || arch_rope_norm(ps->host_arch);
                 nt_metal_rope(SLOT_Q, ps->host_heads,    hd, pos, ps->rope_theta, rope_norm);
                 nt_metal_rope(SLOT_K, ps->host_kv_heads, hd, pos, ps->rope_theta, rope_norm);
                 nt_metal_copy_to_region(s->key_cache   + co2, SLOT_K, kd*4);
@@ -2906,7 +2924,7 @@ static float *doe_forward(GGUFIndex *ps, InferState *s, int token, int pos) {
                 else         nt_metal_q4k_matvec_slot(SLOT_K,(const uint8_t*)ps->host_layers[l].wk,SLOT_FN,kd,D);
                 if (vd==14)  nt_metal_q6k_matvec_slot(SLOT_V,(const uint8_t*)ps->host_layers[l].wv,SLOT_FN,kd,D);
                 else         nt_metal_q4k_matvec_slot(SLOT_V,(const uint8_t*)ps->host_layers[l].wv,SLOT_FN,kd,D);
-                int rope_norm = g_rope_norm || strcmp(ps->host_arch, "llama") == 0;
+                int rope_norm = g_rope_norm || arch_rope_norm(ps->host_arch);
                 nt_metal_rope(SLOT_Q, ps->host_heads,    hd, pos, ps->rope_theta, rope_norm);
                 nt_metal_rope(SLOT_K, ps->host_kv_heads, hd, pos, ps->rope_theta, rope_norm);
                 nt_metal_copy_to_region(s->key_cache   + co2, SLOT_K, kd*4);
@@ -2946,7 +2964,7 @@ static float *doe_forward(GGUFIndex *ps, InferState *s, int token, int pos) {
         if (ps->host_layers[l].bk) for (int i = 0; i < kd; i++) s->k[i] += ps->host_layers[l].bk[i];
         if (ps->host_layers[l].bv) for (int i = 0; i < kd; i++) s->v[i] += ps->host_layers[l].bv[i];
 
-        int rope_norm = g_rope_norm || strcmp(ps->host_arch, "llama") == 0;
+        int rope_norm = g_rope_norm || arch_rope_norm(ps->host_arch);
         for (int h = 0; h < ps->host_heads; h++) apply_rope_mode(s->q+h*hd, pos, s->cos_cache, s->sin_cache, hd, rope_norm);
         for (int h = 0; h < ps->host_kv_heads; h++) apply_rope_mode(s->k+h*hd, pos, s->cos_cache, s->sin_cache, hd, rope_norm);
 
@@ -3465,13 +3483,13 @@ static int tokenize_input(GGUFIndex *ps, const char *text, int *tokens, int max_
 }
 
 static void chat(GGUFIndex *ps) {
-    int max_seq = 512;
+    int max_seq = 1536;  /* room for ~1022 image tokens / long contexts */
     InferState is = alloc_infer(ps, max_seq);
     CalendarDrift cd; drift_init(&cd);
     MetaTrack meta; meta_init(&meta);
     HarmonicState hs = {0};
 
-    char input[1024];
+    char input[8192];  /* enlarged for long prompts / long-context probes */
     printf("\n[doe] the parliament is in session. type your message (Ctrl+C to dissipate):\n");
     printf("[doe] host: %s (%s, %dM params)\n\n",
            ps->host_path, ps->host_arch,
@@ -3557,11 +3575,44 @@ static void chat(GGUFIndex *ps) {
         }
         if (!use_template) snprintf(wrapped, sizeof(wrapped), "%s", input);
 
-        /* Tokenize wrapped input */
-        int input_tokens[512];
+        /* Tokenize wrapped input (buffer enlarged for vision: ~1022 image tokens) */
+        int input_tokens[2048];
         int n_input = 0;
-        if (ps->bos_id >= 0) input_tokens[n_input++] = ps->bos_id;
-        n_input += tokenize_input(ps, wrapped, input_tokens + n_input, 512 - n_input);
+        is.img_embeds = NULL; is.img_start = 0; is.img_count = 0;
+        if (g_image_path[0] || g_img_embeds_bin[0]) {
+            /* native pixtral vision — replicate mtmd layout:
+             * <s> [INST] ▁ <img_count image embeds> [IMG_END] {prompt} ▁ [/INST] */
+            int n_img = 0, vdim = ps->host_dim;
+            float *emb = NULL;
+            if (g_img_embeds_bin[0]) {
+                /* diagnostic: load image embeds [n_tok * host_dim] f32 from file (clip ground-truth) */
+                FILE *ef = fopen(g_img_embeds_bin, "rb");
+                if (!ef) { printf("[doe] cannot open img-embeds-bin: %s\n", g_img_embeds_bin); continue; }
+                fseek(ef, 0, SEEK_END); long ne = ftell(ef) / 4; fseek(ef, 0, SEEK_SET);
+                n_img = (int)(ne / ps->host_dim);
+                emb = malloc((size_t)ne * 4);
+                if (fread(emb, 4, ne, ef) != (size_t)ne) { fclose(ef); free(emb); continue; }
+                fclose(ef);
+                printf("[doe] vision: %d image tokens from BIN %s\n", n_img, g_img_embeds_bin);
+            } else {
+                emb = pv_encode_image(g_image_path, g_mmproj_path, &n_img, &vdim);
+                if (!emb) { printf("[doe] image encode failed: %s\n", g_image_path); continue; }
+                printf("[doe] vision: %d image tokens (dim %d) from %s\n", n_img, vdim, g_image_path);
+            }
+            int t;
+            if (ps->bos_id >= 0) input_tokens[n_input++] = ps->bos_id;
+            if ((t = tok_lookup(ps, "[INST]", 6)) >= 0) input_tokens[n_input++] = t;
+            n_input += tokenize_input(ps, " ", input_tokens + n_input, 2048 - n_input);
+            is.img_embeds = emb; is.img_start = n_input; is.img_count = n_img;
+            for (int k = 0; k < n_img && n_input < 2000; k++) input_tokens[n_input++] = (ps->bos_id >= 0 ? ps->bos_id : 0); /* placeholder, spliced by pos */
+            if ((t = tok_lookup(ps, "[IMG_END]", 9)) >= 0) input_tokens[n_input++] = t;
+            char vbuf[1200]; snprintf(vbuf, sizeof vbuf, "%s ", input);
+            n_input += tokenize_input(ps, vbuf, input_tokens + n_input, 2048 - n_input);
+            if ((t = tok_lookup(ps, "[/INST]", 7)) >= 0) input_tokens[n_input++] = t;
+        } else {
+            if (ps->bos_id >= 0) input_tokens[n_input++] = ps->bos_id;
+            n_input += tokenize_input(ps, wrapped, input_tokens + n_input, 2048 - n_input);
+        }
 
         /* A12a: input-id dump WITH bos for parity vs llama (env-guarded, diagnostic only) */
         if (getenv("DOE_DEBUG_INPUT")) {
@@ -3578,7 +3629,8 @@ static void chat(GGUFIndex *ps) {
         int pos = 0;
         for (int i = 0; i < n_input - 1 && pos < max_seq - 1; i++, pos++) {
             doe_forward(ps, &is, input_tokens[i], pos);
-            dario_ingest(input_tokens[i]); /* feed user tokens into Dario field */
+            if (!(is.img_embeds && pos >= is.img_start && pos < is.img_start + is.img_count))
+                dario_ingest(input_tokens[i]); /* feed user tokens into Dario field (skip image placeholders) */
         }
 
         int prev = input_tokens[n_input - 1];
@@ -4123,6 +4175,9 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--destiny") == 0 && i+1 < argc) { /* will be set after field_init */ }
         else if (strcmp(argv[i], "--serve") == 0 && i+1 < argc) { g_serve_port = atoi(argv[++i]); }
         else if (strcmp(argv[i], "--serve-public") == 0) { g_serve_public = 1; }
+        else if (strcmp(argv[i], "--image") == 0 && i+1 < argc) snprintf(g_image_path, sizeof g_image_path, "%s", argv[++i]);
+        else if (strcmp(argv[i], "--mmproj") == 0 && i+1 < argc) snprintf(g_mmproj_path, sizeof g_mmproj_path, "%s", argv[++i]);
+        else if (strcmp(argv[i], "--img-embeds-bin") == 0 && i+1 < argc) snprintf(g_img_embeds_bin, sizeof g_img_embeds_bin, "%s", argv[++i]);
         else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printf("doe.c — DOE: inference architecture over any GGUF\n\n");
             printf("  --model PATH    GGUF to index (or auto-detect)\n");

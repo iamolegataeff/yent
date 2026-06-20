@@ -324,6 +324,32 @@ float *pv_img_break(const float *proj, int D, int OWm, int OHm, gguf_file *gf, i
     return out;
 }
 
+// ── Public entry: full pipeline image path -> image embeddings [n_embd_text, n_tok] ──
+// Returns malloc'd [dim * ntok] f32 (token-major: out[e + dim*k] = token k, embd e).
+// Caller frees. *o_ntok = number of image tokens (incl IMG_BREAK rows), *o_dim = 5120.
+float *pv_encode_image(const char *img_path, const char *mmproj_path, int *o_ntok, int *o_dim) {
+    int nx, ny;
+    float *inp = pv_preprocess(img_path, &nx, &ny);
+    if (!inp) return NULL;
+    gguf_file *gf = gguf_open(mmproj_path);
+    if (!gf) { fprintf(stderr, "pv: cannot open mmproj %s\n", mmproj_path); free(inp); return NULL; }
+    int npos, nembd;
+    float *cur = pv_patch_embed(inp, nx, ny, gf, &npos, &nembd);
+    free(inp);
+    if (!cur) { gguf_close(gf); return NULL; }
+    int npx = nx / PV_PATCH, npy = ny / PV_PATCH;
+    int *ph = (int *)malloc((size_t)npos * 4), *pw = (int *)malloc((size_t)npos * 4);
+    for (int i = 0; i < npos; i++) { ph[i] = i / npx; pw[i] = i % npx; }
+    cur = pv_vit_trunk(cur, nembd, npos, gf, ph, pw);
+    free(ph); free(pw);
+    int nm;  float *mg = pv_merger(cur, nembd, npx, npy, gf, &nm);  free(cur);
+    int dim; float *pj = pv_projector(mg, nembd, nm, gf, &dim);     free(mg);
+    int ntok; float *fin = pv_img_break(pj, dim, npx / 2, npy / 2, gf, &ntok); free(pj);
+    gguf_close(gf);
+    *o_ntok = ntok; *o_dim = dim;
+    return fin;
+}
+
 #ifdef PV_TEST
 static float *pv_load_bin(const char *path, long *n) {
     FILE *f = fopen(path, "rb");
