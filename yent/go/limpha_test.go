@@ -25,7 +25,7 @@ func approx(a, b float64) bool { return math.Abs(a-b) < 1e-5 }
 
 func TestLimphaSchemaCreation(t *testing.T) {
 	c := newTestLimpha(t)
-	want := map[string]bool{"conversations": false, "sessions": false, "shards": false, "conversations_fts": false}
+	want := map[string]bool{"conversations": false, "sessions": false, "shards": false, "conversations_fts": false, "seams": false}
 	rows, err := c.db.Query("SELECT name FROM sqlite_master WHERE type IN ('table') ")
 	if err != nil {
 		t.Fatal(err)
@@ -349,5 +349,64 @@ func TestLimphaConcurrentStores(t *testing.T) {
 	}
 	if r, _ := c.Search("Response", 10); len(r) != 10 {
 		t.Errorf("FTS default-limit search want 10, got %d", len(r))
+	}
+}
+
+func TestLimphaSeamRoundtrip(t *testing.T) {
+	c := newTestLimpha(t)
+	if s, _ := c.Stats(); s["total_seams"].(int64) != 0 {
+		t.Fatalf("want 0 seams, got %v", s["total_seams"])
+	}
+	id, err := c.StoreSeam(Seam{
+		BodyA: "nemo12", BodyB: "small24",
+		Prompt:    "Explain the architecture of attention.",
+		AClaim:    "Attention is a lookup.",
+		BClaim:    "Attention is content-addressable routing over a learned key space.",
+		Agreement: 0.42, Tension: 0.71, Winner: "small24", Reason: "architecture_depth",
+		MemoryDelta: `{"refs":2}`,
+	})
+	if err != nil {
+		t.Fatalf("StoreSeam: %v", err)
+	}
+	if id != 1 {
+		t.Fatalf("want seam id=1, got %d", id)
+	}
+	if s, _ := c.Stats(); s["total_seams"].(int64) != 1 {
+		t.Fatalf("want 1 seam after store, got %v", s["total_seams"])
+	}
+	rs, err := c.RecentSeams(1)
+	if err != nil || len(rs) != 1 {
+		t.Fatalf("RecentSeams: err=%v len=%d", err, len(rs))
+	}
+	m := rs[0]
+	if m["body_a"] != "nemo12" || m["body_b"] != "small24" || m["winner"] != "small24" {
+		t.Errorf("body/winner mismatch: %v", m)
+	}
+	if m["reason"] != "architecture_depth" ||
+		m["b_claim"] != "Attention is content-addressable routing over a learned key space." {
+		t.Errorf("reason/b_claim mismatch: %v", m)
+	}
+	if !approx(m["agreement"].(float64), 0.42) || !approx(m["tension"].(float64), 0.71) {
+		t.Errorf("metrics mismatch: agreement=%v tension=%v", m["agreement"], m["tension"])
+	}
+	if m["conversation_id"] != nil { // 0 -> NULL -> nil
+		t.Errorf("want nil conversation_id, got %v", m["conversation_id"])
+	}
+}
+
+func TestLimphaSeamConversationLink(t *testing.T) {
+	c := newTestLimpha(t)
+	convID, err := c.store("p", "a meaningful response here", LimphaState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.StoreSeam(Seam{
+		ConversationID: convID, BodyA: "nemo12", BodyB: "small24", Prompt: "p", Winner: "nemo12",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rs, _ := c.RecentSeams(1)
+	if len(rs) != 1 || rs[0]["conversation_id"].(int64) != convID {
+		t.Errorf("seam should link conversation %d, got %v", convID, rs[0]["conversation_id"])
 	}
 }

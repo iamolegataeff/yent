@@ -42,6 +42,27 @@ type LimphaState struct {
 	Alpha       float32 `json:"alpha"`
 }
 
+// Seam is one body-divergence record — the seam_log substrate of moyent's two
+// Mistral bodies sharing one limpha brain. Written on dual-pass turns where both
+// the fast body (Nemo-12B) and the deep body (Small-24B) touched a prompt; the
+// deep body reflects on the fast body's trace and scores the divergence. This is
+// the shared-brain log of internal dialogue (a_claim/b_claim) + metrics
+// (agreement/tension/winner) that supergamma later grows from. Single-body turns
+// are plain conversations, not seams.
+type Seam struct {
+	ConversationID int64   `json:"conversation_id"` // 0 if not tied to a stored turn
+	BodyA          string  `json:"body_a"`          // fast body, e.g. "nemo12"
+	BodyB          string  `json:"body_b"`          // deep body, e.g. "small24"
+	Prompt         string  `json:"prompt"`
+	AClaim         string  `json:"a_claim"`      // body_a's answer / trace
+	BClaim         string  `json:"b_claim"`      // body_b's answer
+	Agreement      float64 `json:"agreement"`    // 0..1, scored by body_b over a_claim
+	Tension        float64 `json:"tension"`      // 0..1, scored by body_b
+	Winner         string  `json:"winner"`       // which body's answer was used
+	Reason         string  `json:"reason"`       // escalation / routing reason
+	MemoryDelta    string  `json:"memory_delta"` // what changed in memory (free text / json)
+}
+
 // LimphaClient is the in-process memory handle. It keeps the API the REPL used
 // for the old socket client (Store/Search/Stats/Close), now backed by SQLite.
 type LimphaClient struct {
@@ -112,6 +133,25 @@ CREATE TABLE IF NOT EXISTS shards (
 );
 CREATE INDEX IF NOT EXISTS idx_shards_status ON shards(training_status);
 CREATE INDEX IF NOT EXISTS idx_shards_graduated ON shards(graduated_at DESC);
+CREATE TABLE IF NOT EXISTS seams (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp REAL NOT NULL,
+    session_id TEXT NOT NULL,
+    conversation_id INTEGER,
+    body_a TEXT NOT NULL,
+    body_b TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    a_claim TEXT DEFAULT '',
+    b_claim TEXT DEFAULT '',
+    agreement REAL DEFAULT 0.0,
+    tension REAL DEFAULT 0.0,
+    winner TEXT DEFAULT '',
+    reason TEXT DEFAULT '',
+    memory_delta TEXT DEFAULT '',
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+);
+CREATE INDEX IF NOT EXISTS idx_seams_timestamp ON seams(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_seams_session ON seams(session_id);
 `
 
 // all conversation columns in schema order — keep in sync with scanConvRow.
@@ -453,6 +493,74 @@ func (c *LimphaClient) MarkTrained(shardID int64, loss *float64) error {
 	return err
 }
 
+// StoreSeam records one body-divergence seam (a dual-pass turn where both Mistral
+// bodies touched the prompt). Returns the new seam id. Skipped silently if memory
+// is disabled. conversation_id 0 stores NULL (seam not tied to a persisted turn).
+func (c *LimphaClient) StoreSeam(s Seam) (int64, error) {
+	if !c.connected {
+		return 0, nil // silently skip if memory disabled
+	}
+	var convID interface{}
+	if s.ConversationID > 0 {
+		convID = s.ConversationID
+	}
+	res, err := c.db.Exec(
+		`INSERT INTO seams
+		 (timestamp, session_id, conversation_id, body_a, body_b, prompt,
+		  a_claim, b_claim, agreement, tension, winner, reason, memory_delta)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		nowSeconds(), c.sessionID, convID, s.BodyA, s.BodyB, s.Prompt,
+		s.AClaim, s.BClaim, s.Agreement, s.Tension, s.Winner, s.Reason, s.MemoryDelta)
+	if err != nil {
+		return 0, err
+	}
+	id, _ := res.LastInsertId()
+	return id, nil
+}
+
+// RecentSeams returns recent seams (newest first) — the substrate supergamma reads
+// to grow the metric field, and the operator reads to inspect the internal dialogue
+// between the two bodies.
+func (c *LimphaClient) RecentSeams(limit int) ([]map[string]interface{}, error) {
+	if !c.connected {
+		return nil, nil
+	}
+	rows, err := c.db.Query(
+		`SELECT id, timestamp, session_id, conversation_id, body_a, body_b, prompt,
+		        a_claim, b_claim, agreement, tension, winner, reason, memory_delta
+		 FROM seams ORDER BY timestamp DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []map[string]interface{}
+	for rows.Next() {
+		var id int64
+		var convID sql.NullInt64
+		var ts, agreement, tension float64
+		var sid, bodyA, bodyB, prompt, aClaim, bClaim, winner, reason, memDelta string
+		if err := rows.Scan(&id, &ts, &sid, &convID, &bodyA, &bodyB, &prompt,
+			&aClaim, &bClaim, &agreement, &tension, &winner, &reason, &memDelta); err != nil {
+			continue
+		}
+		m := map[string]interface{}{
+			"id": id, "timestamp": ts, "session_id": sid, "body_a": bodyA, "body_b": bodyB,
+			"prompt": prompt, "a_claim": aClaim, "b_claim": bClaim, "agreement": agreement,
+			"tension": tension, "winner": winner, "reason": reason, "memory_delta": memDelta,
+		}
+		if convID.Valid {
+			m["conversation_id"] = convID.Int64
+		} else {
+			m["conversation_id"] = nil
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SearchByState finds past turns with a similar AMK state (cosine distance).
 func (c *LimphaClient) SearchByState(state LimphaState, topK int, minQuality float64) ([]map[string]interface{}, error) {
 	if !c.connected {
@@ -514,6 +622,10 @@ func (c *LimphaClient) Stats() (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	seamCount, err := count("SELECT COUNT(*) FROM seams")
+	if err != nil {
+		return nil, err
+	}
 	var dbSize int64
 	if fi, err := os.Stat(c.dbPath); err == nil {
 		dbSize = fi.Size()
@@ -522,6 +634,7 @@ func (c *LimphaClient) Stats() (map[string]interface{}, error) {
 		"total_conversations": convCount,
 		"total_shards":        shardCount,
 		"total_sessions":      sessCount,
+		"total_seams":         seamCount,
 		"pending_training":    pending,
 		"current_session":     c.sessionID,
 		"db_path":             c.dbPath,
