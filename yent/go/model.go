@@ -15,6 +15,7 @@ package yent
 import (
 	"fmt"
 	"math"
+	"strings"
 )
 
 // LlamaModel is a loaded Llama model ready for inference
@@ -27,27 +28,29 @@ type LlamaModel struct {
 
 // LlamaConfig holds model dimensions
 type LlamaConfig struct {
-	NumLayers  int
-	EmbedDim   int
-	NumHeads   int
-	NumKVHeads int
-	HeadDim    int
-	VocabSize  int
-	SeqLen     int
-	IntermSize int     // MLP intermediate dimension
-	RMSNormEps float32
-	RopeTheta  float32
+	Architecture string
+	NumLayers    int
+	EmbedDim     int
+	NumHeads     int
+	NumKVHeads   int
+	HeadDim      int
+	VocabSize    int
+	SeqLen       int
+	IntermSize   int // MLP intermediate dimension
+	RMSNormEps   float32
+	RopeTheta    float32
 
 	// nanollama-specific flags (read from GGUF metadata)
 	QKNorm        bool // normalize Q,K with RMSNorm after RoPE
 	RopeConjugate bool // conjugate RoPE: (x0*cos + x1*sin, -x0*sin + x1*cos)
+	RopeNormal    bool // llama/Mistral NORM RoPE: adjacent pairs (2i, 2i+1)
 }
 
 // LlamaWeights holds all weight tensors (Q4_0 raw bytes or F32 slices)
 type LlamaWeights struct {
 	// Token embedding [vocab, dim] — always dequantized at lookup time
-	TokenEmbed    []byte
-	TokenEmbType  uint32
+	TokenEmbed   []byte
+	TokenEmbType uint32
 
 	// Output norm [dim]
 	OutputNorm []float32
@@ -125,6 +128,7 @@ func LoadLlamaModel(gguf *GGUFFile) (*LlamaModel, error) {
 	*m = gguf.Meta
 
 	cfg := LlamaConfig{
+		Architecture:  m.Architecture,
 		NumLayers:     m.NumLayers,
 		EmbedDim:      m.EmbedDim,
 		NumHeads:      m.NumHeads,
@@ -137,6 +141,7 @@ func LoadLlamaModel(gguf *GGUFFile) (*LlamaModel, error) {
 		RopeTheta:     m.RopeTheta,
 		QKNorm:        m.QKNorm,
 		RopeConjugate: m.RopeConjugate,
+		RopeNormal:    ropeNormalForArch(m.Architecture),
 	}
 
 	if cfg.HeadDim == 0 && cfg.NumHeads > 0 {
@@ -169,8 +174,9 @@ func LoadLlamaModel(gguf *GGUFFile) (*LlamaModel, error) {
 	hasBias := w.Layers[0].BQ != nil
 	fmt.Printf("[tongue/model] loaded: %d layers, %d dim, %d heads, %d kv_heads, %d vocab, bias=%v\n",
 		cfg.NumLayers, cfg.EmbedDim, cfg.NumHeads, cfg.NumKVHeads, cfg.VocabSize, hasBias)
-	if cfg.QKNorm || cfg.RopeConjugate {
-		fmt.Printf("[tongue/model] nanollama flags: qk_norm=%v rope_conjugate=%v\n", cfg.QKNorm, cfg.RopeConjugate)
+	if cfg.Architecture != "" || cfg.QKNorm || cfg.RopeConjugate || cfg.RopeNormal {
+		fmt.Printf("[tongue/model] arch=%s qk_norm=%v rope_conjugate=%v rope_normal=%v\n",
+			cfg.Architecture, cfg.QKNorm, cfg.RopeConjugate, cfg.RopeNormal)
 	}
 
 	return model, nil
@@ -472,10 +478,18 @@ func embedLookupDispatch(data []byte, dtype uint32, token, dim int) []float32 {
 	return out
 }
 
-// applyRoPE applies rotary position encoding to a head vector
-// Uses half-split layout (vec[i], vec[i+half]) — Qwen2 does NOT permute Q/K weights
-// in convert_hf_to_gguf.py, so we use standard "normal" RoPE (llama.cpp mode 0).
-func applyRoPE(vec []float32, pos int, s *LlamaState, headDim int) {
+func ropeNormalForArch(arch string) bool {
+	switch strings.ToLower(arch) {
+	case "llama", "mistral", "mistral3", "mistral4":
+		return true
+	default:
+		return false
+	}
+}
+
+// applyRoPENEOX applies half-split rotary position encoding.
+// This is the Qwen/Falcon/Gemma/Phi-family layout: pairs are (i, i+headDim/2).
+func applyRoPENEOX(vec []float32, pos int, s *LlamaState, headDim int) {
 	half := headDim / 2
 	cacheOff := pos * half
 
@@ -486,6 +500,23 @@ func applyRoPE(vec []float32, pos int, s *LlamaState, headDim int) {
 		si := s.SinCache[cacheOff+i]
 		vec[i] = x0*c - x1*si
 		vec[i+half] = x0*si + x1*c
+	}
+}
+
+// applyRoPENormal applies llama.cpp NORM rotary position encoding.
+// This is the Llama/Mistral-family layout: adjacent pairs are (2i, 2i+1).
+func applyRoPENormal(vec []float32, pos int, s *LlamaState, headDim int) {
+	half := headDim / 2
+	cacheOff := pos * half
+
+	for i := 0; i < half; i++ {
+		j := i * 2
+		x0 := vec[j]
+		x1 := vec[j+1]
+		c := s.CosCache[cacheOff+i]
+		si := s.SinCache[cacheOff+i]
+		vec[j] = x0*c - x1*si
+		vec[j+1] = x0*si + x1*c
 	}
 }
 
@@ -556,8 +587,12 @@ func (m *LlamaModel) Forward(token int, pos int) {
 		addBias(s.K, l.BK)
 		addBias(s.V, l.BV)
 
-		// RoPE on Q and K (conjugate for nanollama, standard for Qwen/Llama)
-		ropeFunc := applyRoPE
+		// RoPE on Q and K. GGUF architectures use different pair layouts:
+		// Qwen-like models use NEOX half-split; Llama/Mistral use adjacent NORM pairs.
+		ropeFunc := applyRoPENEOX
+		if cfg.RopeNormal {
+			ropeFunc = applyRoPENormal
+		}
 		if cfg.RopeConjugate {
 			ropeFunc = applyRoPEConjugate
 		}
