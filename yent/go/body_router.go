@@ -13,6 +13,9 @@ package yent
 // the deep body scored. Supergamma later grows from that seam log.
 
 import (
+	"errors"
+	"fmt"
+	"math"
 	"strings"
 	"unicode/utf8"
 )
@@ -26,6 +29,13 @@ type Body interface {
 	// body's trace, resonant memory references, and the routing reason. The fast body
 	// is always called with an empty ctx.
 	Generate(prompt, ctx string) (BodyResult, error)
+}
+
+// ClosableBody is implemented by resident process-backed bodies. The router uses
+// it to enforce the one-body-resident discipline without knowing about doe.
+type ClosableBody interface {
+	Body
+	Close() error
 }
 
 // BodyResult is one body's output for a turn.
@@ -54,11 +64,18 @@ type Router struct {
 	limpha *LimphaClient // shared brain; may be nil (logging disabled)
 	// EscalateBelow: if the fast body's Confidence is below this, escalate. [0,1].
 	EscalateBelow float64
+	// AsyncMemory queues conversation+seam writes through limpha's background
+	// circulator. Default false keeps deterministic tests and one-shot tools sync.
+	AsyncMemory bool
+	// SingleResident closes the inactive resident body before switching. This keeps
+	// the two-body organism honest on 24GB-class hosts: one mouth resident per turn
+	// segment, not two loaded weights pretending RAM is infinite.
+	SingleResident bool
 }
 
 // NewRouter wires two bodies to one limpha brain. EscalateBelow defaults to 0.5.
 func NewRouter(fast, deep Body, limpha *LimphaClient) *Router {
-	return &Router{fast: fast, deep: deep, limpha: limpha, EscalateBelow: 0.5}
+	return &Router{fast: fast, deep: deep, limpha: limpha, EscalateBelow: 0.5, SingleResident: true}
 }
 
 // Outcome is the router's decision for a turn (returned to the caller and tests).
@@ -74,7 +91,7 @@ type Outcome struct {
 // Two falsifiable signals (design canon): the fast body's own low confidence, and a
 // prompt-complexity heuristic. Returns "" when the fast body may answer alone.
 func escalationReason(prompt string, fast BodyResult, threshold float64) string {
-	if fast.Confidence < threshold {
+	if !isFinite01(fast.Confidence) || fast.Confidence < clamp01(threshold) {
 		return "low_confidence"
 	}
 	if promptIsComplex(prompt) {
@@ -103,6 +120,12 @@ func promptIsComplex(prompt string) bool {
 // it, the deep body re-answers with the fast trace + memory refs + reason, scores the
 // divergence, and a seam is logged. Returns the chosen answer.
 func (r *Router) Route(prompt string, st LimphaState) (Outcome, error) {
+	if r == nil || r.fast == nil || r.deep == nil {
+		return Outcome{}, errors.New("router requires fast and deep bodies")
+	}
+	if err := r.prepareBody(r.fast); err != nil {
+		return Outcome{}, err
+	}
 	fast, err := r.fast.Generate(prompt, "")
 	if err != nil {
 		return Outcome{}, err
@@ -110,24 +133,27 @@ func (r *Router) Route(prompt string, st LimphaState) (Outcome, error) {
 	reason := escalationReason(prompt, fast, r.EscalateBelow)
 	if reason == "" {
 		// single-body turn: the fast body answers alone.
-		r.storeConversation(prompt, fast.Answer, st)
+		r.storeTurn(prompt, fast.Answer, st, nil)
 		return Outcome{Answer: fast.Answer, Body: r.fast.Name(), Escalated: false}, nil
 	}
 
 	// dual-pass: the deep body reflects on the fast trace + memory refs + reason.
 	ctx := r.escalationContext(prompt, fast, reason)
+	if err := r.prepareBody(r.deep); err != nil {
+		return Outcome{}, err
+	}
 	deep, err := r.deep.Generate(prompt, ctx)
 	if err != nil {
 		// deep failed — keep the fast answer rather than dropping the turn.
-		r.storeConversation(prompt, fast.Answer, st)
+		r.storeTurn(prompt, fast.Answer, st, nil)
 		return Outcome{Answer: fast.Answer, Body: r.fast.Name(), Escalated: true, Reason: reason}, nil
 	}
 
 	winner := r.deep.Name()
 	agreement, tension := 0.0, 0.0
 	if deep.Verdict != nil {
-		agreement, tension = deep.Verdict.Agreement, deep.Verdict.Tension
-		if deep.Verdict.Winner != "" {
+		agreement, tension = clamp01(deep.Verdict.Agreement), clamp01(deep.Verdict.Tension)
+		if deep.Verdict.Winner == r.fast.Name() || deep.Verdict.Winner == r.deep.Name() {
 			winner = deep.Verdict.Winner
 		}
 	}
@@ -135,8 +161,11 @@ func (r *Router) Route(prompt string, st LimphaState) (Outcome, error) {
 	if winner == r.fast.Name() { // deep conceded — the fast answer stands
 		answer = fast.Answer
 	}
-	convID := r.storeConversation(prompt, answer, st)
-	seamID := r.storeSeam(convID, prompt, fast.Answer, deep.Answer, agreement, tension, winner, reason)
+	seamID := r.storeTurn(prompt, answer, st, &Seam{
+		BodyA: r.fast.Name(), BodyB: r.deep.Name(),
+		Prompt: prompt, AClaim: fast.Answer, BClaim: deep.Answer,
+		Agreement: agreement, Tension: tension, Winner: winner, Reason: reason,
+	})
 	return Outcome{Answer: answer, Body: winner, Escalated: true, Reason: reason, SeamID: seamID}, nil
 }
 
@@ -159,6 +188,26 @@ func (r *Router) escalationContext(prompt string, fast BodyResult, reason string
 	return b.String()
 }
 
+func (r *Router) prepareBody(target Body) error {
+	if r == nil || !r.SingleResident || target == nil {
+		return nil
+	}
+	targetName := target.Name()
+	for _, body := range []Body{r.fast, r.deep} {
+		if body == nil || body.Name() == targetName {
+			continue
+		}
+		closer, ok := body.(ClosableBody)
+		if !ok {
+			continue
+		}
+		if err := closer.Close(); err != nil {
+			return fmt.Errorf("close inactive body %s before %s: %w", body.Name(), targetName, err)
+		}
+	}
+	return nil
+}
+
 // storeConversation persists a turn into the shared brain; 0 if memory is off.
 func (r *Router) storeConversation(prompt, answer string, st LimphaState) int64 {
 	if r.limpha == nil || !r.limpha.connected {
@@ -168,15 +217,38 @@ func (r *Router) storeConversation(prompt, answer string, st LimphaState) int64 
 	return id
 }
 
-// storeSeam records the internal dialogue + divergence metrics for a dual-pass turn.
-func (r *Router) storeSeam(convID int64, prompt, aClaim, bClaim string, agreement, tension float64, winner, reason string) int64 {
-	if r.limpha == nil {
+// storeTurn records one selected answer and, for dual-pass turns, its seam. In
+// async mode the link is preserved inside the worker; the immediate seam id is
+// unavailable and returns 0.
+func (r *Router) storeTurn(prompt, answer string, st LimphaState, seam *Seam) int64 {
+	if r.limpha == nil || !r.limpha.connected {
 		return 0
 	}
-	id, _ := r.limpha.StoreSeam(Seam{
-		ConversationID: convID, BodyA: r.fast.Name(), BodyB: r.deep.Name(),
-		Prompt: prompt, AClaim: aClaim, BClaim: bClaim,
-		Agreement: agreement, Tension: tension, Winner: winner, Reason: reason,
-	})
+	if r.AsyncMemory && r.limpha.EnqueueTurn(prompt, answer, st, seam) {
+		return 0
+	}
+	convID := r.storeConversation(prompt, answer, st)
+	if seam == nil {
+		return 0
+	}
+	seam.ConversationID = convID
+	id, _ := r.limpha.StoreSeam(*seam)
 	return id
+}
+
+func isFinite01(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 && v <= 1
+}
+
+func clamp01(v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0
+	}
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
 }

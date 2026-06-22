@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -70,6 +71,8 @@ type LimphaClient struct {
 	dbPath    string
 	sessionID string
 	connected bool
+	asyncMu   sync.Mutex
+	async     *limphaAsync
 }
 
 const limphaSchema = `
@@ -630,6 +633,13 @@ func (c *LimphaClient) Stats() (map[string]interface{}, error) {
 	if fi, err := os.Stat(c.dbPath); err == nil {
 		dbSize = fi.Size()
 	}
+	c.asyncMu.Lock()
+	asyncEnabled := c.async != nil
+	asyncBacklog := 0
+	if c.async != nil {
+		asyncBacklog = len(c.async.queue)
+	}
+	c.asyncMu.Unlock()
 	return map[string]interface{}{
 		"total_conversations": convCount,
 		"total_shards":        shardCount,
@@ -639,11 +649,14 @@ func (c *LimphaClient) Stats() (map[string]interface{}, error) {
 		"current_session":     c.sessionID,
 		"db_path":             c.dbPath,
 		"db_size_bytes":       dbSize,
+		"async_enabled":       asyncEnabled,
+		"async_backlog":       asyncBacklog,
 	}, nil
 }
 
 // Close shuts the memory down.
 func (c *LimphaClient) Close() {
+	c.StopAsync()
 	if c.db != nil {
 		c.db.Close()
 		c.db = nil

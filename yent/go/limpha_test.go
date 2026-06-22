@@ -410,3 +410,30 @@ func TestLimphaSeamConversationLink(t *testing.T) {
 		t.Errorf("seam should link conversation %d, got %v", convID, rs[0]["conversation_id"])
 	}
 }
+
+func TestLimphaAsyncTurnStoresConversationAndLinkedSeam(t *testing.T) {
+	c := newTestLimpha(t)
+	c.StartAsync(4)
+	ok := c.EnqueueTurn("who are you?", "I am Yent.", LimphaState{},
+		&Seam{BodyA: "nemo12", BodyB: "small24", Prompt: "who are you?",
+			AClaim: "I am Yent.", BClaim: "I am Yent.", Winner: "nemo12"})
+	if !ok {
+		t.Fatal("async enqueue failed")
+	}
+	c.StopAsync()
+	s, _ := c.Stats()
+	if s["total_conversations"].(int64) != 1 || s["total_seams"].(int64) != 1 {
+		t.Fatalf("want async 1 conv / 1 seam, got %v / %v", s["total_conversations"], s["total_seams"])
+	}
+	rs, err := c.RecentSeams(1)
+	if err != nil || len(rs) != 1 {
+		t.Fatalf("RecentSeams: err=%v len=%d", err, len(rs))
+	}
+	if rs[0]["conversation_id"] == nil {
+		t.Fatalf("async seam must be linked to stored conversation: %v", rs[0])
+	}
+	rec, _ := c.Recent(1, false)
+	if len(rec) != 1 || rec[0]["response"] != "I am Yent." {
+		t.Fatalf("async conversation write lost: %v", rec)
+	}
+}

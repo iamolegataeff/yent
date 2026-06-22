@@ -146,8 +146,13 @@ enum { SLOT_X = 0, SLOT_FN, SLOT_G, SLOT_U, SLOT_HB, SLOT_DN, SLOT_Q, SLOT_K, SL
        SLOT_PTMP, SLOT_PGATE, SLOT_PVOTES, SLOT_PRES, SLOT_PALIVE, SLOT_PCONS };
 /* A14: expert poison check — catches BOTH faces of notorch drift: NaN/Inf and finite |value|-explosion
  * (the latter passes isfinite but still poisons the forward when injected at alpha>0). */
-static int lora_poisoned(const float *A, const float *B) {
-    return !isfinite(A[0]) || !isfinite(B[0]) || fabsf(A[0]) > 1e4f || fabsf(B[0]) > 1e4f;
+static int lora_poisoned(const float *A, const float *B, int n) {
+    if (!A || !B || n <= 0) return 1;
+    for (int i = 0; i < n; i++) {
+        if (!isfinite(A[i]) || !isfinite(B[i]) || fabsf(A[i]) > 1e4f || fabsf(B[i]) > 1e4f)
+            return 1;
+    }
+    return 0;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
@@ -2522,7 +2527,8 @@ static void mycelium_save(GGUFIndex *ps, int step, float fitness) {
     for (int l = 0; l < ps->n_field_layers; l++)
         for (int e = 0; e < MAX_EXPERTS; e++)
             if (ps->field_layers[l].experts[e].alive &&
-                lora_poisoned(ps->field_layers[l].experts[e].lora_A, ps->field_layers[l].experts[e].lora_B)) {
+                lora_poisoned(ps->field_layers[l].experts[e].lora_A, ps->field_layers[l].experts[e].lora_B,
+                              ps->host_dim * ps->lora_rank)) {
                 printf("[mycelium] poisoned expert L%d e%d (NaN/Inf/|w|>1e4) — spore NOT saved (quarantine)\n", l, e);
                 return;
             }
@@ -3712,7 +3718,8 @@ static void chat(GGUFIndex *ps) {
                                 ps->host_dim, ps->host_dim, ps->lora_rank,
                                 is.x, is.xb, learn_signal);
                     /* A14: poison-quarantine (NaN/Inf + finite |value|-explosion) — freeze + death */
-                    if (lora_poisoned(fl->experts[e].lora_A, fl->experts[e].lora_B)) {
+                    if (lora_poisoned(fl->experts[e].lora_A, fl->experts[e].lora_B,
+                                      ps->host_dim * ps->lora_rank)) {
                         fl->experts[e].alive = 0; total_deaths++;
                     }
                 }
@@ -3999,7 +4006,8 @@ static void http_stream_inference(int fd, GGUFIndex *ps, const char *user_msg, f
                             ps->host_dim, ps->host_dim, ps->lora_rank,
                             is.x, is.xb, learn_signal);
                 /* A14: poison-quarantine (NaN/Inf + finite |value|-explosion) — freeze */
-                if (lora_poisoned(fl->experts[e].lora_A, fl->experts[e].lora_B))
+                if (lora_poisoned(fl->experts[e].lora_A, fl->experts[e].lora_B,
+                                  ps->host_dim * ps->lora_rank))
                     fl->experts[e].alive = 0;
             }
         }

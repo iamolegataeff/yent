@@ -45,8 +45,8 @@ type Yent struct {
 	// Without the kernel, Yent is a voice without a brain.
 	amk *AMK
 
-	// LIMPHA: memory system — stores every conversation automatically
-	// Python async daemon, SQLite+FTS5, zero manual commands.
+	// LIMPHA: memory system — stores every conversation automatically.
+	// A single in-process writer drains queued memory writes between turns.
 	limpha *LimphaClient
 
 	// LogitHook: external callback for logit modulation (Janus/AML integration)
@@ -94,7 +94,8 @@ func New(weightsPath string) (*Yent, error) {
 		fmt.Fprintf(os.Stderr, "[limpha] warning: %v (memory disabled)\n", err2)
 	} else {
 		limpha = lc
-		fmt.Printf("[limpha] memory online — every conversation stored\n")
+		limpha.StartAsync(256)
+		fmt.Printf("[limpha] memory online — async circulation enabled\n")
 	}
 
 	fmt.Printf("[yent] initialized: %d layers, %d dim, %d vocab\n",
@@ -396,10 +397,10 @@ func (y *Yent) Generate(prompt string, maxTokens int, temperature, topP float32)
 	result := string(output)
 
 	// ═══ LIMPHA: auto-store every conversation ═══
-	// No commands. No human intervention. Yent remembers.
+	// No naked goroutine: one writer drains on Close; sync fallback preserves memory.
 	if y.limpha != nil {
 		s := y.amk.GetState()
-		go y.limpha.Store(prompt, result, LimphaState{
+		state := LimphaState{
 			Temperature: s.EffectiveTemp,
 			Destiny:     s.Destiny,
 			Pain:        s.Pain,
@@ -407,7 +408,10 @@ func (y *Yent) Generate(prompt string, maxTokens int, temperature, topP float32)
 			Debt:        s.Debt,
 			Velocity:    s.VelocityMode,
 			Alpha:       y.DeltaAlpha,
-		})
+		}
+		if !y.limpha.EnqueueTurn(prompt, result, state, nil) {
+			_ = y.limpha.Store(prompt, result, state)
+		}
 	}
 
 	return result, nil

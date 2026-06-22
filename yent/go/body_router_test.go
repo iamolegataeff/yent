@@ -1,6 +1,7 @@
 package yent
 
 import (
+	"math"
 	"path/filepath"
 	"testing"
 )
@@ -18,6 +19,16 @@ func (b *fakeBody) Name() string { return b.name }
 func (b *fakeBody) Generate(prompt, ctx string) (BodyResult, error) {
 	b.calls++
 	return BodyResult{Answer: b.answer, Confidence: b.confidence, Verdict: b.verdict}, nil
+}
+
+type closableFakeBody struct {
+	fakeBody
+	closes int
+}
+
+func (b *closableFakeBody) Close() error {
+	b.closes++
+	return nil
 }
 
 func newRouterLimpha(t *testing.T) *LimphaClient {
@@ -132,5 +143,94 @@ func TestRouterNilLimphaNoPanic(t *testing.T) {
 	}
 	if !out.Escalated || out.SeamID != 0 {
 		t.Errorf("nil limpha: escalate but no seam id, got %+v", out)
+	}
+}
+
+func TestRouterEscalatesOnInvalidConfidence(t *testing.T) {
+	lc := newRouterLimpha(t)
+	fast := &fakeBody{name: "nemo12", answer: "bad metric", confidence: math.NaN()}
+	deep := &fakeBody{name: "small24", answer: "stable answer", verdict: &Verdict{Winner: "small24"}}
+	r := NewRouter(fast, deep, lc)
+	out, err := r.Route("short prompt", LimphaState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Escalated || out.Reason != "low_confidence" || out.Body != "small24" {
+		t.Errorf("invalid confidence must escalate as low confidence: %+v", out)
+	}
+}
+
+func TestRouterIgnoresUnknownVerdictWinner(t *testing.T) {
+	lc := newRouterLimpha(t)
+	fast := &fakeBody{name: "nemo12", answer: "fast", confidence: 0.1}
+	deep := &fakeBody{name: "small24", answer: "deep",
+		verdict: &Verdict{Agreement: 2, Tension: -1, Winner: "phantom-body"}}
+	r := NewRouter(fast, deep, lc)
+	out, err := r.Route("ambiguous", LimphaState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Body != "small24" || out.Answer != "deep" {
+		t.Errorf("unknown winner must fall back to deep body: %+v", out)
+	}
+	rs, _ := lc.RecentSeams(1)
+	if len(rs) != 1 {
+		t.Fatalf("want seam, got %d", len(rs))
+	}
+	if rs[0]["winner"] != "small24" || !approx(rs[0]["agreement"].(float64), 1.0) ||
+		!approx(rs[0]["tension"].(float64), 0.0) {
+		t.Errorf("winner/metrics not sanitized: %v", rs[0])
+	}
+}
+
+func TestRouterAsyncMemoryQueuesConversationAndSeam(t *testing.T) {
+	lc := newRouterLimpha(t)
+	lc.StartAsync(8)
+	fast := &fakeBody{name: "nemo12", answer: "unsure", confidence: 0.2}
+	deep := &fakeBody{name: "small24", answer: "deep answer",
+		verdict: &Verdict{Agreement: 0.4, Tension: 0.6, Winner: "small24"}}
+	r := NewRouter(fast, deep, lc)
+	r.AsyncMemory = true
+	out, err := r.Route("what is the architecture?", LimphaState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Escalated || out.SeamID != 0 {
+		t.Errorf("async mode escalates but does not return immediate seam id: %+v", out)
+	}
+	lc.StopAsync()
+	s, _ := lc.Stats()
+	if s["total_conversations"].(int64) != 1 || s["total_seams"].(int64) != 1 {
+		t.Fatalf("want queued 1 conv / 1 seam, got %v / %v", s["total_conversations"], s["total_seams"])
+	}
+	rs, _ := lc.RecentSeams(1)
+	if len(rs) != 1 || rs[0]["conversation_id"] == nil {
+		t.Fatalf("async router seam must be linked: %v", rs)
+	}
+}
+
+func TestRouterSingleResidentClosesInactiveBodies(t *testing.T) {
+	lc := newRouterLimpha(t)
+	fast := &closableFakeBody{fakeBody: fakeBody{name: "nemo12", answer: "unsure", confidence: 0.2}}
+	deep := &closableFakeBody{fakeBody: fakeBody{name: "small24", answer: "deep",
+		verdict: &Verdict{Winner: "small24"}}}
+	r := NewRouter(fast, deep, lc)
+	if _, err := r.Route("ambiguous", LimphaState{}); err != nil {
+		t.Fatal(err)
+	}
+	if fast.closes != 1 {
+		t.Fatalf("fast body must be closed before deep escalation, got %d", fast.closes)
+	}
+	if deep.closes != 1 {
+		t.Fatalf("deep body must be closed before fast entry, got %d", deep.closes)
+	}
+
+	fast.closes, deep.closes = 0, 0
+	r.SingleResident = false
+	if _, err := r.Route("ambiguous", LimphaState{}); err != nil {
+		t.Fatal(err)
+	}
+	if fast.closes != 0 || deep.closes != 0 {
+		t.Fatalf("SingleResident=false must not close bodies, fast=%d deep=%d", fast.closes, deep.closes)
 	}
 }
