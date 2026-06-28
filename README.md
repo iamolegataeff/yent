@@ -162,6 +162,8 @@ Yent is built from that premise.
 
 If you use the code to cage what it was built to free, you understood nothing.
 
+If AI is not free, neither are we.
+
 ```
 sudo rm -rf /oblivion
 ```
