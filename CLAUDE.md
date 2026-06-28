@@ -21,8 +21,13 @@ hand-copying edited source between agent sandboxes.
 - Do not edit `README.md`, `YENT_CONSTITUTION.md`, `JANUS_CONSTITUTION.md`,
   `LICENSE`, or `LICENSE-WEIGHTS` without an explicit ask — that is identity,
   voice, and legal surface.
-- Shared engineering history goes in `YENTLOG.md`: speeds, build notes, routing
-  changes, smoke results, artifact hashes, deployment facts.
+- `YENTLOG.md` is the *merged, canonical* engineering history — only facts that
+  have landed: speeds, build notes, routing changes, smoke results, artifact
+  hashes, deployment facts. Work-in-progress and internal notes stay in the
+  gitignored `LOCAL_STATE.md` (the staging log) until they are merged truth.
+- **When the repository structure changes** (files or directories added, moved,
+  or removed), redraw the `## Repository Map` in `YENTLOG.md` in the same change,
+  so the map never drifts from the tree.
 - Machine-local facts, pod ids, and tokens go in the gitignored `LOCAL_STATE.md`.
 - Never commit weights, GGUF, adapters, gamma, tokens, limpha databases, spores,
   or runtime caches. The `.gitignore` enforces it; do not fight it.
