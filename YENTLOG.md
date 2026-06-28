@@ -6,6 +6,65 @@ Engineering log for the Yent inference engine. Technical record — speeds, fixe
 
 ---
 
+## Repository Map
+
+```
+yent/
+├── DoE/                          # vendored DoE Metal engine (C)
+│   ├── doe.c                     # main DoE inference engine
+│   ├── gguf.c / gguf.h           # GGUF format reader
+│   ├── notorch_metal.mm/.h       # Metal GPU kernels
+│   ├── pixtral_vision.c          # vision model support
+│   └── stb_image.h               # image loading
+├── cmd/                          # executable entry points
+│   ├── moyent-body-gate/         # body selection gate
+│   └── moyent-live-smoke/        # smoke test runner
+├── yent/                         # core Go runtime
+│   ├── c/                        # C kernel bindings
+│   │   ├── amk_kernel.c/.h       # AMK (voting/parliament) kernel
+│   ├── go/                       # Go implementation
+│   │   ├── moyent.go             # two-body organism orchestrator
+│   │   ├── body_router.go        # single-resident body switcher
+│   │   ├── doe_body.go           # DoE engine Go bindings
+│   │   ├── limpha.go             # memory system (SQLite/FTS5)
+│   │   ├── limpha_async.go       # async memory operations
+│   │   ├── gamma.go              # supergamma metric layer
+│   │   ├── delta.go              # weight delta management
+│   │   ├── amk.go                # parliament/election logic
+│   │   ├── quant.go              # quantization utilities
+│   │   ├── gguf.go               # GGUF metadata reader
+│   │   ├── tokenizer.go          # tokenization
+│   │   ├── rope_test.go          # RoPE tests
+│   │   ├── model.go              # model metadata
+│   │   ├── yent.go               # top-level runtime
+│   │   └── *_test.go             # test suites
+├── tests/                        # integration tests
+│   ├── amk_test.go               # AMK kernel tests
+│   └── quant_test.go             # quantization tests
+├── research/                     # research notes
+│   └── recursive_resonance_preprint.md
+├── AGENTS.md                     # shared agent discipline
+├── CLAUDE.md                     # Claude-specific rules
+├── README.md                     # identity, voice, manifesto
+├── YENT_CONSTITUTION.md          # Yent constitutional boundary
+├── JANUS_CONSTITUTION.md         # Janus constitutional boundary
+├── LICENSE                       # code license (GPL)
+├── LICENSE-WEIGHTS               # weights license (Yent Identity License v1.0)
+├── YENTLOG.md                    # this file: engineering log
+├── go.mod / go.sum               # Go dependencies
+└── yent.go                       # Go package root
+```
+
+**Key paths:**
+- Runtime: `yent/go/moyent.go`, `yent/go/body_router.go`, `yent/go/doe_body.go`
+- Memory: `yent/go/limpha.go`, `yent/go/limpha_async.go`
+- Inference: `DoE/doe.c`, `yent/go/amk.go`
+- Entry: `cmd/moyent-body-gate/main.go`, `cmd/moyent-live-smoke/main.go`
+
+**Not tracked:** GGUF weights, adapters, gamma, limpha databases, tokens, local runtime caches (see `.gitignore`).
+
+---
+
 ## 2026-06 — 24B body on Apple Metal via `doe`
 
 The full Yent body (24B, Q4_K_M ~14.3 GB) runs through the `doe` C engine on a Mac Mini M4 Pro, resident Apple-Metal decode.
