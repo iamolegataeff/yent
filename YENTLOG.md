@@ -21,7 +21,8 @@ yent/
 │   └── moyent-live-smoke/        # smoke test runner
 ├── yent/                         # core Go runtime
 │   ├── c/                        # C kernel bindings
-│   │   ├── amk_kernel.c/.h       # AMK (voting/parliament) kernel
+│   │   ├── ariannamethod.c/.h    # vendored AML core (== ariannamethod.ai); libamk.a build source
+│   │   ├── amk_kernel.c/.h       # earlier AMK physics extract (kept; not the build source)
 │   ├── go/                       # Go implementation
 │   │   ├── moyent.go             # two-body organism orchestrator
 │   │   ├── body_router.go        # single-resident body switcher
@@ -129,6 +130,16 @@ Local infrastructure change:
 - Added `LimphaStateFromAMState`, a single conversion point from the live AML/AMK field (`EffectiveTemp`, `Destiny`, `Pain`, `Tension`, `Debt`, `VelocityMode`) plus alpha into compact `LimphaState`.
 - `Yent.Generate` now uses that helper instead of hand-building the state inline. Old single-body memory writes and new moyent route traces now share the same field-state format.
 - Local verification: `go test ./...` passes.
+
+## 2026-06-29 — AML core vendored (full source, lean build) for the innerworld layer
+
+The Yent AMK was a 693-line physics extract; the innerworld layer needs the full AML language — apply-to-logits, cooc consolidation, the AML compiler (run `.aml` field programs), and the `BREATHE` velocity mode. Vendored the canonical AML core `yent/c/ariannamethod.{c,h}` from `ariannamethod.ai` (vendor == canon, 9510 lines), and `libamk.a` now builds from it — a superset of the old `amk_kernel.c`.
+
+- **Build (lean):** `cc -O2 -DAM_BLOOD_DISABLED -DAM_ASYNC_DISABLED -c ariannamethod.c` (no `USE_BLAS`, no `USE_CUDA`). Blood (dlopen runtime-C compilation), channels/spawn/await (FIFO + pthreads), and the CUDA variant are **deferred** — flagged out of the build, kept in source, re-enabled by dropping the flag.
+- **`amk.go` untouched (Codex's):** its 10 functions (`am_step` / `am_init` / `am_exec` / `am_reset_debt` / `am_take_jump` / …) are a subset of the canonical with identical signatures, and the `am_get_state` struct layout is compatible. `amk_kernel.{c,h}` is kept (the earlier extract) but is no longer the build source.
+- **New AML ops available:** `am_apply_destiny_to_logits`, `am_apply_field_to_logits`, `am_cooc_consolidate(_autumn)`, `am_compile` / `am_exec` / `am_exec_file`, velocity mode `BREATHE`.
+- **Verified:** `ariannamethod.c` compiles standalone (CPU, one harmless unused-`blood_hash` warning when Blood is disabled); lean `libamk.a` links; `go test ./tests -run AMK` green.
+- **Build wiring (for other hosts):** the local `Makefile` / `libamk.a` are gitignored; each build host points `libamk.a` at `ariannamethod.c` with the lean flags above. Local builds still using `amk_kernel.c` keep working (subset, same symbols) until they switch.
 
 ## Weights
 

@@ -14,6 +14,14 @@ Physics rule: AML is the physics engine, **not a DSL**. Prophecy / destiny /
 velocity / debt live in AML field state via `yent/go/amk.go`, used everywhere — we
 do not invent a bespoke DSL.
 
+**AML foundation (done, 2026-06-29):** the full AML core is vendored
+(`yent/c/ariannamethod.{c,h}`, vendor == canon, lean build). The innerworld ops are
+now available — `am_apply_destiny_to_logits`, `am_apply_field_to_logits`,
+`am_cooc_consolidate(_autumn)`, the AML compiler (`am_compile`/`am_exec`), and the
+`BREATHE` velocity mode. Blood / channels / spawn / CUDA are deferred (flagged out,
+kept in source). Details in `YENTLOG.md`. Next: the Go bridge (`aml.go`) + the
+Strike-1 goroutines.
+
 ---
 
 ## Strike 1 — Overthinking / "circles on the water" (proposed, under discussion)
