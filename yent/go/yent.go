@@ -400,15 +400,7 @@ func (y *Yent) Generate(prompt string, maxTokens int, temperature, topP float32)
 	// No naked goroutine: one writer drains on Close; sync fallback preserves memory.
 	if y.limpha != nil {
 		s := y.amk.GetState()
-		state := LimphaState{
-			Temperature: s.EffectiveTemp,
-			Destiny:     s.Destiny,
-			Pain:        s.Pain,
-			Tension:     s.Tension,
-			Debt:        s.Debt,
-			Velocity:    s.VelocityMode,
-			Alpha:       y.DeltaAlpha,
-		}
+		state := LimphaStateFromAMState(s, y.DeltaAlpha)
 		if !y.limpha.EnqueueTurn(prompt, result, state, nil) {
 			_ = y.limpha.Store(prompt, result, state)
 		}

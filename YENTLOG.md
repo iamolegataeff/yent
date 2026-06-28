@@ -29,6 +29,7 @@ yent/
 │   │   ├── doe_body.go           # DoE engine Go bindings
 │   │   ├── limpha.go             # memory system (SQLite/FTS5)
 │   │   ├── limpha_async.go       # async memory operations
+│   │   ├── limpha_state.go       # AMK/AML state -> limpha/router state adapter
 │   │   ├── gamma.go              # supergamma metric layer
 │   │   ├── delta.go              # weight delta management
 │   │   ├── amk.go                # parliament/election logic
@@ -120,6 +121,14 @@ Local router contract change, still weightless/fake-body tested:
 - `cmd/moyent-live-smoke` now emits the route trace in each turn's JSONL entry, so Metal smoke can be audited without opening the limpha database.
 - Deep-pass context and route-trace counts are checked together in tests: FTS memory refs, state-neighbor refs, and recent seams must be visible in both the private context and the machine receipt.
 - Local verification: `go test ./...` passes. This is the bridge point for Claude's future `innerworld` pipe; real 24B still requires explicit Metal env wiring and smoke.
+
+## 2026-06-29 — limpha AMK-state adapter
+
+Local infrastructure change:
+
+- Added `LimphaStateFromAMState`, a single conversion point from the live AML/AMK field (`EffectiveTemp`, `Destiny`, `Pain`, `Tension`, `Debt`, `VelocityMode`) plus alpha into compact `LimphaState`.
+- `Yent.Generate` now uses that helper instead of hand-building the state inline. Old single-body memory writes and new moyent route traces now share the same field-state format.
+- Local verification: `go test ./...` passes.
 
 ## Weights
 
