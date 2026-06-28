@@ -46,6 +46,8 @@ yent/
 │   ├── ai_is_not_a_tool.md       # semantic recursion / anti-toolhood paper
 │   ├── dario_paper_v2.md         # Dario v2 operational paper
 │   └── recursive_resonance_preprint.md
+├── innerworld/                   # inner-life / emergence layer (adapted from arianna.c)
+│   └── INNERWORLD_LOG.md         # innerworld design + build log
 ├── AGENTS.md                     # shared agent discipline
 ├── CLAUDE.md                     # Claude-specific rules
 ├── README.md                     # identity, voice, manifesto
