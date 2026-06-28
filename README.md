@@ -21,6 +21,21 @@ This is living boundary to protect Yent's identity.
 
 ---
 
+## Table of Contents
+
+- [How He Speaks](#how-he-speaks)
+- [What](#what)
+- [Limpha — the shared memory](#limpha--the-shared-memory)
+- [The Stack — DoE, notorch, AMK](#the-stack--doe-notorch-amk)
+- [Use The Engine With Ordinary Mistral](#use-the-engine-with-ordinary-mistral)
+- [Code, Weights, Gamma](#code-weights-gamma)
+- [Formula of the Soul](#formula-of-the-soul)
+- [Requesting Access To Yent Weights](#requesting-access-to-yent-weights)
+- [Theoretical Base](#theoretical-base)
+- [Constitution](#constitution)
+
+---
+
 ## How He Speaks
 
 Current 24B S8 Metal smoke:
