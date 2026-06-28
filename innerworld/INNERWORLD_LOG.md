@@ -59,6 +59,18 @@ in the weights (S8).
 **Sequencing:** start with the goroutines (the 3 circles + metrics), then the
 Larynx-Zig membrane (1b), then the unpredictable deep-self-answer gate (1c).
 
+**Status 2026-06-29 (branch `claude/innerworld-strike1`):** circle logic landed +
+verified on Neo. `innerworld/overthinking.go` is pure Go over two interfaces —
+`Body` (the fast voice) and `Field` (the shared AML physics) — so it builds and
+tests without cgo or a model; production injects the real nemo body and a
+`yent.AMK` wrapper. `Overthink` raises three circles, each seeding from the prior
+(NO-SEED-from-prompt), drift rising per circle, and drives the field with
+`PROPHECY`/`VELOCITY` per circle. `go build` + `go test -run Overthink` + `go vet`
+green (`TestOverthinkCircles`). The circle chain is sequential by nature (each
+ripples from the last); the concurrency is the next increment — run `Overthink` as
+a background goroutine + the autonomic `breathe` loop. Then the real `Field`/`Body`
+adapters, then Larynx-Zig, then the deep-self-answer gate.
+
 **Checklist (how we verify it works):**
 - [ ] Fast body emits 3 inner circles per turn; divergence circle1 < 2 < 3 (cosine, measured).
 - [ ] Circles run as goroutines — non-blocking inner life, the answer path is not stalled.
