@@ -117,6 +117,7 @@ Local router contract change, still weightless/fake-body tested:
 
 - `Outcome` now carries a `RouteTrace` for every turn: fast/deep body names, winner, escalation reason, fast-confidence validity, prompt-complexity score/reasons, limpha state, and actual context-ref counts.
 - Escalated seams now write the same `RouteTrace` as JSON in `memory_delta` with `kind=route_context`. Downstream systems no longer need to parse prose to know why a turn moved from `nemo12` to `small24`.
+- `cmd/moyent-live-smoke` now emits the route trace in each turn's JSONL entry, so Metal smoke can be audited without opening the limpha database.
 - Deep-pass context and route-trace counts are checked together in tests: FTS memory refs, state-neighbor refs, and recent seams must be visible in both the private context and the machine receipt.
 - Local verification: `go test ./...` passes. This is the bridge point for Claude's future `innerworld` pipe; real 24B still requires explicit Metal env wiring and smoke.
 

@@ -11,15 +11,16 @@ import (
 )
 
 type turnLog struct {
-	Kind      string `json:"kind"`
-	Prompt    string `json:"prompt,omitempty"`
-	Error     string `json:"error,omitempty"`
-	Body      string `json:"body,omitempty"`
-	Escalated bool   `json:"escalated,omitempty"`
-	Reason    string `json:"reason,omitempty"`
-	SeamID    int64  `json:"seam_id,omitempty"`
-	Duration  string `json:"duration,omitempty"`
-	Answer    string `json:"answer,omitempty"`
+	Kind      string           `json:"kind"`
+	Prompt    string           `json:"prompt,omitempty"`
+	Error     string           `json:"error,omitempty"`
+	Body      string           `json:"body,omitempty"`
+	Escalated bool             `json:"escalated,omitempty"`
+	Reason    string           `json:"reason,omitempty"`
+	SeamID    int64            `json:"seam_id,omitempty"`
+	Duration  string           `json:"duration,omitempty"`
+	Trace     *yent.RouteTrace `json:"trace,omitempty"`
+	Answer    string           `json:"answer,omitempty"`
 }
 
 func main() {
@@ -96,6 +97,7 @@ func runTurn(router *yent.Router, kind, prompt string) {
 	entry.Escalated = out.Escalated
 	entry.Reason = out.Reason
 	entry.SeamID = out.SeamID
+	entry.Trace = &out.Trace
 	entry.Answer = out.Answer
 	logJSON(entry)
 }
