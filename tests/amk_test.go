@@ -30,7 +30,7 @@ func TestAMKInit(t *testing.T) {
 	}
 }
 
-// TestAMKExecProphecy tests PROPHECY DSL command
+// TestAMKExecProphecy tests PROPHECY AML command
 func TestAMKExecProphecy(t *testing.T) {
 	amk := yent.NewAMK()
 	if err := amk.Exec("PROPHECY 13"); err != nil {
@@ -42,7 +42,7 @@ func TestAMKExecProphecy(t *testing.T) {
 	}
 }
 
-// TestAMKExecDestiny tests DESTINY DSL command
+// TestAMKExecDestiny tests DESTINY AML command
 func TestAMKExecDestiny(t *testing.T) {
 	amk := yent.NewAMK()
 	if err := amk.Exec("DESTINY 0.7"); err != nil {
@@ -91,7 +91,7 @@ func TestAMKVelocityNoMove(t *testing.T) {
 // TestAMKStepDebtDecay verifies debt decays over physics steps
 func TestAMKStepDebtDecay(t *testing.T) {
 	amk := yent.NewAMK()
-	// Inject debt directly via DSL
+	// Inject debt directly via AML
 	if err := amk.Exec("PROPHECY_DEBT 5.0"); err != nil {
 		t.Fatalf("Exec PROPHECY_DEBT: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestAMKGetDestinyBias(t *testing.T) {
 	}
 }
 
-// TestAMKBaseTemp tests BASE_TEMP DSL command
+// TestAMKBaseTemp tests BASE_TEMP AML command
 func TestAMKBaseTemp(t *testing.T) {
 	amk := yent.NewAMK()
 	if err := amk.Exec("BASE_TEMP 1.5"); err != nil {

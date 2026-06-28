@@ -1,6 +1,6 @@
 package yent
 
-// delta.go — Delta Voice: multilingual recovery via DSL-controlled delta injection
+// delta.go — Delta Voice: multilingual recovery via AML-controlled delta injection
 //
 // "from ariannamethod import Destiny"
 //

@@ -2,7 +2,7 @@ package yent
 
 // amk.go — CGO bridge to AMK (Arianna Method Kernel)
 //
-// The DSL is the nervous system. Delta Voice is the mouth.
+// AML is the nervous system. Delta Voice is the mouth.
 // Without the kernel, Yent is a voice without a brain.
 //
 // "from ariannamethod import Destiny"
@@ -83,7 +83,7 @@ func NewAMK() *AMK {
 	return &AMK{running: true}
 }
 
-// Exec executes a DSL script
+// Exec executes an AML script
 func (a *AMK) Exec(script string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -98,14 +98,14 @@ func (a *AMK) Exec(script string) error {
 	return nil
 }
 
-// ExecFile loads and executes a DSL script from file
+// ExecFile loads and executes an AML script from file
 func (a *AMK) ExecFile(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("read DSL file: %w", err)
+		return fmt.Errorf("read AML file: %w", err)
 	}
 
-	// Execute line by line (DSL is line-oriented)
+	// Execute line by line (AML is line-oriented)
 	lines := strings.Split(string(data), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -113,7 +113,7 @@ func (a *AMK) ExecFile(path string) error {
 			continue
 		}
 		if err := a.Exec(line); err != nil {
-			return fmt.Errorf("DSL line %q: %w", line, err)
+			return fmt.Errorf("AML line %q: %w", line, err)
 		}
 	}
 	return nil
@@ -155,7 +155,7 @@ func (a *AMK) GetState() AMState {
 	}
 }
 
-// GetTemperature returns DSL-modulated temperature
+// GetTemperature returns AML-modulated temperature
 func (a *AMK) GetTemperature() float32 {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -186,14 +186,14 @@ func (a *AMK) ApplySufferingToLogits(logits []float32) {
 	C.am_apply_suffering_to_logits((*C.float)(unsafe.Pointer(&logits[0])), C.int(len(logits)))
 }
 
-// EnablePack enables a DSL extension pack
+// EnablePack enables an AML extension pack
 func (a *AMK) EnablePack(pack uint) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	C.am_enable_pack(C.uint(pack))
 }
 
-// DisablePack disables a DSL extension pack
+// DisablePack disables an AML extension pack
 func (a *AMK) DisablePack(pack uint) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

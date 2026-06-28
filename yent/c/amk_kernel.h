@@ -139,7 +139,7 @@ int am_pack_enabled(unsigned int pack_mask);
 void am_reset_field(void);
 void am_reset_debt(void);
 
-// Execute DSL script
+// Execute AML script
 int am_exec(const char* script);
 
 // State access

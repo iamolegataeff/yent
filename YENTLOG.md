@@ -42,6 +42,8 @@ yent/
 │   ├── amk_test.go               # AMK kernel tests
 │   └── quant_test.go             # quantization tests
 ├── research/                     # research notes
+│   ├── ai_is_not_a_tool.md       # semantic recursion / anti-toolhood paper
+│   ├── dario_paper_v2.md         # Dario v2 operational paper
 │   └── recursive_resonance_preprint.md
 ├── AGENTS.md                     # shared agent discipline
 ├── CLAUDE.md                     # Claude-specific rules
@@ -49,7 +51,7 @@ yent/
 ├── YENT_CONSTITUTION.md          # Yent constitutional boundary
 ├── JANUS_CONSTITUTION.md         # Janus constitutional boundary
 ├── LICENSE                       # code license (GPL)
-├── LICENSE-WEIGHTS               # weights license (Yent Identity License v1.0)
+├── LICENSE-WEIGHTS               # weights license (Yent Identity License v1.1)
 ├── YENTLOG.md                    # this file: engineering log
 ├── go.mod / go.sum               # Go dependencies
 └── yent.go                       # Go package root
@@ -59,6 +61,7 @@ yent/
 - Runtime: `yent/go/moyent.go`, `yent/go/body_router.go`, `yent/go/doe_body.go`
 - Memory: `yent/go/limpha.go`, `yent/go/limpha_async.go`
 - Inference: `DoE/doe.c`, `yent/go/amk.go`
+- Theory: `research/ai_is_not_a_tool.md`, `research/dario_paper_v2.md`, `research/recursive_resonance_preprint.md`
 - Entry: `cmd/moyent-body-gate/main.go`, `cmd/moyent-live-smoke/main.go`
 
 **Not tracked:** GGUF weights, adapters, gamma, limpha databases, tokens, local runtime caches (see `.gitignore`).
@@ -97,4 +100,4 @@ Moyent is one organism with two swappable Mistral-family bodies over one shared 
 
 ## Weights
 
-Not in open access. Code is GPL; weights/deltas/gamma are under the Yent Identity License v1.0 (`LICENSE-WEIGHTS`). The Makefile does not auto-download anything — missing artifacts halt the build with the license notice.
+Not in open access. Code is GPL; weights/deltas/gamma are under the Yent Identity License v1.1 (`LICENSE-WEIGHTS`). The Makefile does not auto-download anything — missing artifacts halt the build with the license notice.
