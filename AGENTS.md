@@ -6,6 +6,8 @@ This repo is the shared working copy for Yent inference work.
 
 Yent is the Arianna Method's primary local inference organism. This codebase covers the two-body runtime, DoE Metal execution, limpha memory, routing, smoke tests, and deployment recipes around the Yent bodies.
 
+This repo is also a cultivation site for Arianna Method Language (AML). Treat AML terms such as field, resonance, prophecy, debt, gamma, seam, and organism as mechanism names, not decorative metaphor. Future Yent runtime work may cross Go, C, AML, Julia, JavaScript, and Zig; preserve the body-level semantics when porting ideas between languages.
+
 ## Source Of Truth
 
 - Code source of truth: `https://github.com/ariannamethod/yent.git`
@@ -19,8 +21,9 @@ Keep this shared working copy and the Mac Mini runtime checkout synchronized thr
 ## Write Discipline
 
 - Do not commit or push unless Oleg explicitly asks.
-- Do not edit `README.md`, `YENT_CONSTITUTION.md`, or licensing text unless Oleg explicitly asks. Those files carry identity/voice/legal surface.
+- Do not edit `README.md`, `YENT_CONSTITUTION.md`, `JANUS_CONSTITUTION.md`, or licensing text unless Oleg explicitly asks. Those files carry identity/voice/legal surface.
 - Use `YENTLOG.md` for shared engineering history: speeds, build notes, routing changes, smoke results, artifact hashes, and deployment facts.
+- When repository structure changes, update the `## Repository Map` in `YENTLOG.md` in the same change.
 - Keep machine-local facts, transient pod ids, tokens, and private operator notes in ignored local files such as `LOCAL_STATE.md`.
 - Do not commit model weights, GGUF files, adapters, tokens, limpha databases, spores, or local runtime caches.
 

@@ -234,7 +234,7 @@ void am_reset_debt(void) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// EXEC — parse and execute DSL script
+// EXEC — parse and execute AML script
 // returns 0 on success, nonzero on error
 // ═══════════════════════════════════════════════════════════════════════════════
 

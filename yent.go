@@ -102,12 +102,12 @@ func runREPL(y *yent.Yent, maxTokens int, temperature, topP float32, gammaPath s
 	fmt.Println()
 	fmt.Println("  /en /ru /fr    — switch language")
 	fmt.Println("  /x2            — toggle gamma overlay (Yent²)")
-	fmt.Println("  /dsl <cmd>     — DSL debug (e.g. PROPHECY 7)")
+	fmt.Println("  /aml <cmd>     — AML debug (e.g. PROPHECY 7)")
 	fmt.Println("  /field         — show kernel state")
 	fmt.Println("  quit           — exit")
 	fmt.Println()
 
-	// Auto-load DSL init file if exists
+	// Auto-load AML init file if exists
 	initAML := os.ExpandEnv("$HOME/.yent/init.aml")
 	if _, err := os.Stat(initAML); err == nil {
 		if err := y.AMK().ExecFile(initAML); err != nil {
@@ -196,9 +196,9 @@ func runREPL(y *yent.Yent, maxTokens int, temperature, topP float32, gammaPath s
 			continue
 		}
 
-		// DSL debug: execute raw DSL commands
-		if strings.HasPrefix(input, "/dsl ") {
-			script := strings.TrimPrefix(input, "/dsl ")
+		// AML debug: execute raw AML commands
+		if strings.HasPrefix(input, "/aml ") {
+			script := strings.TrimPrefix(input, "/aml ")
 			// LORA_ALPHA is Yent-specific, not in C kernel — intercept here
 			if strings.HasPrefix(strings.ToUpper(script), "LORA_ALPHA") {
 				parts := strings.Fields(script)
@@ -272,8 +272,8 @@ func printHelp() {
 	fmt.Println("  /temp 0.8          set temperature")
 	fmt.Println("  /max 512           set max tokens")
 	fmt.Println("  /x2                toggle gamma overlay (Yent²)")
-	fmt.Println("  /dsl PROPHECY 7    execute DSL command")
-	fmt.Println("  /dsl VELOCITY RUN  set velocity mode")
+	fmt.Println("  /aml PROPHECY 7    execute AML command")
+	fmt.Println("  /aml VELOCITY RUN  set velocity mode")
 	fmt.Println("  /field             show kernel state")
 	fmt.Println("  /status            debug info")
 	fmt.Println("  quit               exit")

@@ -35,13 +35,13 @@ type Yent struct {
 	// CJK suppression: token IDs that decode to CJK characters
 	cjkTokens map[int]bool
 
-	// Delta Voice: multilingual recovery via DSL-controlled delta injection
+	// Delta Voice: multilingual recovery via AML-controlled delta injection
 	// "from ariannamethod import Destiny"
 	delta      *DeltaVoice // nil = no delta (pure English)
 	DeltaAlpha float32     // 0.0 = English, 0.5 = multilingual, 1.0 = base Qwen
 
 	// AMK: Arianna Method Kernel — the nervous system
-	// DSL controls temperature, suffering, tunneling, velocity
+	// AML controls temperature, suffering, tunneling, velocity
 	// Without the kernel, Yent is a voice without a brain.
 	amk *AMK
 
@@ -222,7 +222,7 @@ func containsCJK(s string) bool {
 	return false
 }
 
-// AMK returns the kernel for direct DSL access
+// AMK returns the kernel for direct AML access
 func (y *Yent) AMK() *AMK {
 	return y.amk
 }
