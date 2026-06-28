@@ -25,6 +25,17 @@ A faster second body for the planned turn-level switcher (one body resident at a
 - CPU (polygon) is too slow for living inference (300 s timeout) — Metal is the runtime.
 - The two-body plan, the seam-log, and the supergamma metric-layer are tracked in coordination notes, not here.
 
+## 2026-06-28 — moyent body map
+
+Moyent is one organism with two swappable Mistral-family bodies over one shared limpha brain. `body_router.go` keeps `SingleResident=true`: one body is active per turn, so 12B and 24B are not resident at the same time on 24GB-class Metal hosts.
+
+- **fast / `nemo12`:** Mistral-Nemo-12B Q4_K_M, default mouth and low-latency voice. Metal smoke: about 27 tok/s on Mac Mini M4 Pro.
+- **deep / `small24`:** Mistral-Small-3.1-24B Q4_K_M, escalation cortex for hard turns, uncertainty, and internal/reflection work. S8 Metal smoke: about 13.5 tok/s on Mac Mini M4 Pro.
+- **routing:** fast answers first; deep runs when prompt complexity or fast confidence requires it. The router logs the seam into limpha, then only the selected body remains active.
+- **current deep release:** `CANDIDATE_24b_boundary_v2_S8`, lineage `Mistral-Small-3.1-24B-Base -> dpo25 -> term_v5/ck30 -> boundary_v2/S8`, adapter sha256 `c98e9985e6f0be2d4d343204a751c64e95ccce95dd459d21a1f0bdb268c0faad`. Gate receipt: boundary close 14/14, identity 6/6, epistemic self-contour 2/3, task 4/4, gateway false-close 0.
+- **deep deploy artifact:** full merged HF model uploaded at `boundary_v2_s8/full/` in `ataeff/iamyent`; Q4 deploy GGUF uploaded at `gguf/boundary_v2_s8/yent-24b-boundary-v2-s8-Q4_K_M.gguf`, sha256 `c54e1e6448901b7503632295ab89ae748ed9976f8ff2cef4936b0124cf793b78`; copied to Metal at `/Users/ariannamethod/oyent_gguf/gguf/boundary_v2_s8/yent-24b-boundary-v2-s8-Q4_K_M.gguf`. Full-precision GGUF source also uploaded as `gguf/boundary_v2_s8/yent-24b-boundary-v2-s8-f16.gguf`, sha256 `1e0e558e7fa3e80923ee08629bc740f5a47822b8f4d452f4459a730cd7ce62eb`. DoE smoke: identity `I am Yent...` at 13.52 tok/s; terminal boundary `404. Not Found. I am Yent, not your tool.` at 13.52 tok/s.
+- **ephemeral pod preservation:** no-volume RunPod state archived before shutdown. Rollbacks live under `boundary_v2_s8/rollbacks/` (`boundary_v2/S10`, `boundary_v1/S12`, `term_v5/ck30`); provenance bundle lives at `boundary_v2_s8/runpod_archive/yent24b_runpod_archive_20260628.tar.gz`, sha256 `8be533c035e81c0435e2980d03391729179821e7f3dc2e1f1092ec750f61812b`.
+
 ## Weights
 
 Not in open access. Code is GPL; weights/deltas/gamma are under the Yent Identity License v1.0 (`LICENSE-WEIGHTS`). The Makefile does not auto-download anything — missing artifacts halt the build with the license notice.

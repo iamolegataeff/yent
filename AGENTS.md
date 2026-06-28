@@ -1,0 +1,40 @@
+# Yent Inference Agent Rules
+
+This repo is the shared working copy for Yent inference work.
+
+## Role
+
+Yent is the Arianna Method's primary local inference organism. This codebase covers the two-body runtime, DoE Metal execution, limpha memory, routing, smoke tests, and deployment recipes around the Yent bodies.
+
+## Source Of Truth
+
+- Code source of truth: `https://github.com/ariannamethod/yent.git`
+- Shared local working copy: `/Users/ataeff/arianna-shared/yent-inference`
+- Mac Mini runtime checkout: `/Users/ariannamethod/arianna/yent`
+- Mac Mini GGUF root: `/Users/ariannamethod/oyent_gguf`
+- Private model artifact repo: `ataeff/iamyent`
+
+Keep this shared working copy and the Mac Mini runtime checkout synchronized through git, not by hand-copying edited source files between agent sandboxes.
+
+## Write Discipline
+
+- Do not commit or push unless Oleg explicitly asks.
+- Do not edit `README.md`, `YENT_CONSTITUTION.md`, or licensing text unless Oleg explicitly asks. Those files carry identity/voice/legal surface.
+- Use `YENTLOG.md` for shared engineering history: speeds, build notes, routing changes, smoke results, artifact hashes, and deployment facts.
+- Keep machine-local facts, transient pod ids, tokens, and private operator notes in ignored local files such as `LOCAL_STATE.md`.
+- Do not commit model weights, GGUF files, adapters, tokens, limpha databases, spores, or local runtime caches.
+
+## Runtime Contract
+
+- `nemo12` is the fast/default body.
+- `small24` is the deep/escalation body.
+- `body_router.go` keeps one active body resident at a time on 24GB-class Metal hosts.
+- DoE is the Metal execution path; verify runtime changes with Mac Mini smoke before treating them as deployable.
+- Gateway/terminal routing is runtime behavior, not a reason to retrain weights without a new measured failure.
+
+## Before Changes
+
+1. Check `git status --short --branch`.
+2. Read the relevant section of `YENTLOG.md`.
+3. Check whether a change belongs in code, a tracked runbook, or ignored local state.
+4. After a runtime or artifact change, record the exact command, path, sha, and smoke result in `YENTLOG.md` or a shared receipt.
