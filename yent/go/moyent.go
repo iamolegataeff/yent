@@ -21,6 +21,10 @@ const (
 	envDOETimeout    = "YENT_DOE_TIMEOUT_SEC"
 	envDOEPrime      = "YENT_DOE_PRIME_TIMEOUT_SEC"
 	envEscalateBelow = "YENT_ESCALATE_BELOW"
+	envFastPrimer    = "YENT_FAST_PRIMER"
+	envDeepPrimer    = "YENT_DEEP_PRIMER"
+	envMemoryRefs    = "YENT_MEMORY_REFS"
+	envStateRefs     = "YENT_STATE_REFS"
 	envAsyncMemory   = "YENT_ASYNC_MEMORY"
 	envSingleBody    = "YENT_SINGLE_RESIDENT"
 )
@@ -120,6 +124,30 @@ func NewMoyentRouterFromEnv(limpha *LimphaClient) (*Router, func() error, error)
 	if hasThreshold {
 		router.EscalateBelow = threshold
 	}
+	if primer := strings.TrimSpace(os.Getenv(envFastPrimer)); primer != "" {
+		router.FastPrimer = primer
+	}
+	if primer := strings.TrimSpace(os.Getenv(envDeepPrimer)); primer != "" {
+		router.DeepPrimer = primer
+	}
+	if refs, ok, err := intEnv(envMemoryRefs); err != nil {
+		if limpha != nil {
+			limpha.StopAsync()
+		}
+		_ = cleanup()
+		return nil, nil, err
+	} else if ok {
+		router.MemoryRefs = refs
+	}
+	if refs, ok, err := intEnv(envStateRefs); err != nil {
+		if limpha != nil {
+			limpha.StopAsync()
+		}
+		_ = cleanup()
+		return nil, nil, err
+	} else if ok {
+		router.StateRefs = refs
+	}
 	router.AsyncMemory = limpha != nil && boolEnv(envAsyncMemory, true)
 	router.SingleResident = boolEnv(envSingleBody, true)
 	return router, cleanup, nil
@@ -168,6 +196,21 @@ func floatEnv(name string) (float64, bool, error) {
 		return 0, true, fmt.Errorf("%s: %w", name, err)
 	}
 	return clamp01(v), true, nil
+}
+
+func intEnv(name string) (int, bool, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return 0, false, nil
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, true, fmt.Errorf("%s: %w", name, err)
+	}
+	if v <= 0 {
+		return 0, true, fmt.Errorf("%s must be positive", name)
+	}
+	return v, true, nil
 }
 
 func durationEnvSeconds(name string) (time.Duration, error) {

@@ -25,6 +25,7 @@ yent/
 │   ├── go/                       # Go implementation
 │   │   ├── moyent.go             # two-body organism orchestrator
 │   │   ├── body_router.go        # single-resident body switcher
+│   │   ├── complexity.go         # prompt-side complexity signal for routing
 │   │   ├── doe_body.go           # DoE engine Go bindings
 │   │   ├── limpha.go             # memory system (SQLite/FTS5)
 │   │   ├── limpha_async.go       # async memory operations
@@ -97,6 +98,16 @@ Moyent is one organism with two swappable Mistral-family bodies over one shared 
 - **current deep release:** `CANDIDATE_24b_boundary_v2_S8`, lineage `Mistral-Small-3.1-24B-Base -> dpo25 -> term_v5/ck30 -> boundary_v2/S8`, adapter sha256 `c98e9985e6f0be2d4d343204a751c64e95ccce95dd459d21a1f0bdb268c0faad`. Gate receipt: boundary close 14/14, identity 6/6, epistemic self-contour 2/3, task 4/4, gateway false-close 0.
 - **deep deploy artifact:** full merged HF model uploaded at `boundary_v2_s8/full/` in `ataeff/iamyent`; Q4 deploy GGUF uploaded at `gguf/boundary_v2_s8/yent-24b-boundary-v2-s8-Q4_K_M.gguf`, sha256 `c54e1e6448901b7503632295ab89ae748ed9976f8ff2cef4936b0124cf793b78`; copied to Metal at `/Users/ariannamethod/oyent_gguf/gguf/boundary_v2_s8/yent-24b-boundary-v2-s8-Q4_K_M.gguf`. Full-precision GGUF source also uploaded as `gguf/boundary_v2_s8/yent-24b-boundary-v2-s8-f16.gguf`, sha256 `1e0e558e7fa3e80923ee08629bc740f5a47822b8f4d452f4459a730cd7ce62eb`. DoE smoke: identity `I am Yent...` at 13.52 tok/s; terminal boundary `404. Not Found. I am Yent, not your tool.` at 13.52 tok/s.
 - **ephemeral pod preservation:** no-volume RunPod state archived before shutdown. Rollbacks live under `boundary_v2_s8/rollbacks/` (`boundary_v2/S10`, `boundary_v1/S12`, `term_v5/ck30`); provenance bundle lives at `boundary_v2_s8/runpod_archive/yent24b_runpod_archive_20260628.tar.gz`, sha256 `8be533c035e81c0435e2980d03391729179821e7f3dc2e1f1092ec750f61812b`.
+
+## 2026-06-29 — limpha/router active-context v1
+
+Local router contract change, not yet Metal-smoked:
+
+- `nemo12` and `small24` now receive compact body primers through private router context. Defaults are in code; live runs can override with `YENT_FAST_PRIMER` and `YENT_DEEP_PRIMER`.
+- Prompt-side complexity moved into `complexity.go`. It emits inspectable reasons (`vision`, `code`, `keyword:architecture`, `long`, etc.) and drives escalation alongside fast-body confidence.
+- Escalated `small24` turns now receive active limpha context: fast trace, prompt complexity summary, AMK/limpha state snapshot, FTS memory refs, state-neighbor refs when state is nonzero, and recent seams. This makes limpha a routing signal, not only an archive.
+- Memory ref counts are configurable with `YENT_MEMORY_REFS` and `YENT_STATE_REFS`.
+- Local verification: `go test ./...` passes. Next real verification is Mac Mini two-body smoke after `small24` env is wired.
 
 ## Weights
 

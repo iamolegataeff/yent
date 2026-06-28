@@ -11,7 +11,8 @@ func clearMoyentEnv(t *testing.T) {
 	for _, name := range []string{
 		envDOEBin, envNemoGGUF, envDeepGGUF, envDeepGGUFAlt, envDOEWorkDir,
 		envDOEArgs, envNemoArgs, envDeepArgs, envDOETimeout, envDOEPrime,
-		envEscalateBelow, envAsyncMemory, envSingleBody,
+		envEscalateBelow, envFastPrimer, envDeepPrimer, envMemoryRefs, envStateRefs,
+		envAsyncMemory, envSingleBody,
 	} {
 		t.Setenv(name, "")
 	}
@@ -51,6 +52,10 @@ func TestNewMoyentRouterFromEnvBuildsRealDOEBodies(t *testing.T) {
 	t.Setenv(envDOETimeout, "3")
 	t.Setenv(envDOEPrime, "4")
 	t.Setenv(envEscalateBelow, "0")
+	t.Setenv(envFastPrimer, "custom fast primer")
+	t.Setenv(envDeepPrimer, "custom deep primer")
+	t.Setenv(envMemoryRefs, "4")
+	t.Setenv(envStateRefs, "3")
 
 	lc := newRouterLimpha(t)
 	defer lc.Close()
@@ -80,6 +85,11 @@ func TestNewMoyentRouterFromEnvBuildsRealDOEBodies(t *testing.T) {
 		deep.cfg.Timeout != 3*time.Second || deep.cfg.PrimeTimeout != 4*time.Second {
 		t.Fatalf("env timeouts not applied: fast=%v/%v deep=%v/%v",
 			fast.cfg.Timeout, fast.cfg.PrimeTimeout, deep.cfg.Timeout, deep.cfg.PrimeTimeout)
+	}
+	if r.FastPrimer != "custom fast primer" || r.DeepPrimer != "custom deep primer" ||
+		r.MemoryRefs != 4 || r.StateRefs != 3 {
+		t.Fatalf("router primer/ref env not applied: fast=%q deep=%q refs=%d/%d",
+			r.FastPrimer, r.DeepPrimer, r.MemoryRefs, r.StateRefs)
 	}
 	fastArgs := strings.Join(fast.commandArgs(false), " ")
 	if strings.Contains(fastArgs, "ignored.gguf") || strings.Contains(fastArgs, "--once") ||

@@ -3,6 +3,7 @@ package yent
 import (
 	"math"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -13,11 +14,15 @@ type fakeBody struct {
 	confidence float64
 	verdict    *Verdict
 	calls      int
+	lastPrompt string
+	lastCtx    string
 }
 
 func (b *fakeBody) Name() string { return b.name }
 func (b *fakeBody) Generate(prompt, ctx string) (BodyResult, error) {
 	b.calls++
+	b.lastPrompt = prompt
+	b.lastCtx = ctx
 	return BodyResult{Answer: b.answer, Confidence: b.confidence, Verdict: b.verdict}, nil
 }
 
@@ -88,13 +93,64 @@ func TestRouterEscalatesOnLowConfidence(t *testing.T) {
 	m := rs[0]
 	if m["body_a"] != "nemo12" || m["b_claim"] != "considered answer" ||
 		!approx(m["agreement"].(float64), 0.4) || !approx(m["tension"].(float64), 0.7) ||
-		m["winner"] != "small24" || m["reason"] != "low_confidence" {
+		m["winner"] != "small24" || m["reason"] != "low_confidence" ||
+		!strings.Contains(m["memory_delta"].(string), "route_context") {
 		t.Errorf("seam internal-dialogue/metrics wrong: %v", m)
 	}
 	// the stored conversation is the deep (winning) answer
 	rec, _ := lc.Recent(1, false)
 	if len(rec) != 1 || rec[0]["response"] != "considered answer" {
 		t.Errorf("winning answer should be stored, got %v", rec)
+	}
+}
+
+func TestRouterSendsPrimerToFastBody(t *testing.T) {
+	lc := newRouterLimpha(t)
+	fast := &fakeBody{name: "nemo12", answer: "quick answer", confidence: 0.9}
+	deep := &fakeBody{name: "small24", answer: "deep answer", confidence: 1.0}
+	r := NewRouter(fast, deep, lc)
+	if _, err := r.Route("hi there", LimphaState{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fast.lastCtx, "body=nemo12 fast mouth") ||
+		!strings.Contains(fast.lastCtx, "one organism") {
+		t.Fatalf("fast primer not delivered: %q", fast.lastCtx)
+	}
+}
+
+func TestRouterDeepContextCarriesLimphaSignals(t *testing.T) {
+	lc := newRouterLimpha(t)
+	st := LimphaState{Temperature: 0.85, Destiny: 0.35, Pain: 0.04, Tension: 0.2, Debt: 0.3, Velocity: 1}
+	if _, err := lc.store("resonance", "A remembered answer with enough body to pass memory quality.", st); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lc.StoreSeam(Seam{
+		BodyA: "nemo12", BodyB: "small24", Prompt: "prior internal seam",
+		AClaim: "fast", BClaim: "deep", Winner: "small24", Reason: "complexity", Tension: 0.6,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	fast := &fakeBody{name: "nemo12", answer: "unsure", confidence: 0.2}
+	deep := &fakeBody{name: "small24", answer: "considered answer",
+		verdict: &Verdict{Agreement: 0.3, Tension: 0.8, Winner: "small24"}}
+	r := NewRouter(fast, deep, lc)
+	if _, err := r.Route("resonance", st); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"[deep primer]",
+		"[routing reason: low_confidence]",
+		"[prompt complexity]",
+		"[field state]: temp=0.85 destiny=0.35",
+		"[memory refs]",
+		"[state-neighbor refs]",
+		"[recent internal seams]",
+		"[nemo12 said]: unsure",
+	} {
+		if !strings.Contains(deep.lastCtx, want) {
+			t.Fatalf("deep context missing %q:\n%s", want, deep.lastCtx)
+		}
 	}
 }
 
