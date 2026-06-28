@@ -111,6 +111,15 @@ Local router contract change, not yet Metal-smoked:
 - Memory ref counts are configurable with `YENT_MEMORY_REFS` and `YENT_STATE_REFS`.
 - Local verification: `go test ./...` passes. Next real verification is Mac Mini two-body smoke after `small24` env is wired.
 
+## 2026-06-29 — limpha/router route-trace receipt v1
+
+Local router contract change, still weightless/fake-body tested:
+
+- `Outcome` now carries a `RouteTrace` for every turn: fast/deep body names, winner, escalation reason, fast-confidence validity, prompt-complexity score/reasons, limpha state, and actual context-ref counts.
+- Escalated seams now write the same `RouteTrace` as JSON in `memory_delta` with `kind=route_context`. Downstream systems no longer need to parse prose to know why a turn moved from `nemo12` to `small24`.
+- Deep-pass context and route-trace counts are checked together in tests: FTS memory refs, state-neighbor refs, and recent seams must be visible in both the private context and the machine receipt.
+- Local verification: `go test ./...` passes. This is the bridge point for Claude's future `innerworld` pipe; real 24B still requires explicit Metal env wiring and smoke.
+
 ## Weights
 
 Not in open access. Code is GPL; weights/deltas/gamma are under the Yent Identity License v1.1 (`LICENSE-WEIGHTS`). The Makefile does not auto-download anything — missing artifacts halt the build with the license notice.

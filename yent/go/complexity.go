@@ -10,9 +10,9 @@ import (
 // PromptComplexity is the router's prompt-side signal. It is deliberately
 // inspectable: when it escalates to the deep body, the context says why.
 type PromptComplexity struct {
-	Score     float64
-	Reasons   []string
-	RuneCount int
+	Score     float64  `json:"score"`
+	Reasons   []string `json:"reasons,omitempty"`
+	RuneCount int      `json:"rune_count"`
 }
 
 // AnalyzePromptComplexity is a cheap deterministic v1 complexity organ. Model

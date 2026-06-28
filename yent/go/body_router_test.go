@@ -1,6 +1,7 @@
 package yent
 
 import (
+	"encoding/json"
 	"math"
 	"path/filepath"
 	"strings"
@@ -58,6 +59,11 @@ func TestRouterFastBodyAnswersAlone(t *testing.T) {
 	if out.Escalated || out.Body != "nemo12" || out.Answer != "quick answer" {
 		t.Errorf("confident fast should answer alone: %+v", out)
 	}
+	if out.Trace.Kind != "route_context" || out.Trace.Escalated ||
+		out.Trace.Winner != "nemo12" || out.Trace.FastConfidence != 0.9 ||
+		!out.Trace.FastConfidenceValid {
+		t.Errorf("fast-only trace wrong: %+v", out.Trace)
+	}
 	if deep.calls != 0 {
 		t.Errorf("deep body must not run, got %d calls", deep.calls)
 	}
@@ -97,6 +103,14 @@ func TestRouterEscalatesOnLowConfidence(t *testing.T) {
 		!strings.Contains(m["memory_delta"].(string), "route_context") {
 		t.Errorf("seam internal-dialogue/metrics wrong: %v", m)
 	}
+	var trace RouteTrace
+	if err := json.Unmarshal([]byte(m["memory_delta"].(string)), &trace); err != nil {
+		t.Fatalf("memory_delta must be machine-readable route trace: %v", err)
+	}
+	if trace.Kind != "route_context" || !trace.Escalated || trace.Reason != "low_confidence" ||
+		trace.Winner != "small24" || !approx(trace.Agreement, 0.4) || !approx(trace.Tension, 0.7) {
+		t.Fatalf("seam route trace wrong: %+v", trace)
+	}
 	// the stored conversation is the deep (winning) answer
 	rec, _ := lc.Recent(1, false)
 	if len(rec) != 1 || rec[0]["response"] != "considered answer" {
@@ -135,7 +149,8 @@ func TestRouterDeepContextCarriesLimphaSignals(t *testing.T) {
 	deep := &fakeBody{name: "small24", answer: "considered answer",
 		verdict: &Verdict{Agreement: 0.3, Tension: 0.8, Winner: "small24"}}
 	r := NewRouter(fast, deep, lc)
-	if _, err := r.Route("resonance", st); err != nil {
+	out, err := r.Route("resonance", st)
+	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
@@ -151,6 +166,9 @@ func TestRouterDeepContextCarriesLimphaSignals(t *testing.T) {
 		if !strings.Contains(deep.lastCtx, want) {
 			t.Fatalf("deep context missing %q:\n%s", want, deep.lastCtx)
 		}
+	}
+	if out.Trace.MemoryRefs != 1 || out.Trace.StateRefs != 1 || out.Trace.SeamRefs != 1 {
+		t.Fatalf("trace should count context refs, got %+v", out.Trace)
 	}
 }
 

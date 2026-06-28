@@ -13,6 +13,7 @@ package yent
 // the deep body scored. Supergamma later grows from that seam log.
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -26,8 +27,8 @@ type Body interface {
 	// Name identifies the body in logs and seams, e.g. "nemo12" or "small24".
 	Name() string
 	// Generate answers prompt. ctx carries cross-body context on escalation: the fast
-	// body's trace, resonant memory references, and the routing reason. The fast body
-	// is always called with an empty ctx.
+	// body's primer, or the deep body's primer plus resonant memory references and
+	// the routing reason on escalation.
 	Generate(prompt, ctx string) (BodyResult, error)
 }
 
@@ -108,16 +109,49 @@ type Outcome struct {
 	Escalated bool
 	Reason    string // why escalated (empty if not)
 	SeamID    int64  // >0 if a seam was written
+	Trace     RouteTrace
+}
+
+// RouteTrace is the machine-readable circulation receipt for one routed turn.
+// It mirrors the human seam text without making downstream systems parse prose.
+type RouteTrace struct {
+	Kind                string           `json:"kind"`
+	FastBody            string           `json:"fast_body"`
+	DeepBody            string           `json:"deep_body,omitempty"`
+	Winner              string           `json:"winner"`
+	Escalated           bool             `json:"escalated"`
+	Reason              string           `json:"reason,omitempty"`
+	FastConfidence      float64          `json:"fast_confidence"`
+	FastConfidenceValid bool             `json:"fast_confidence_valid"`
+	Agreement           float64          `json:"agreement,omitempty"`
+	Tension             float64          `json:"tension,omitempty"`
+	Complexity          PromptComplexity `json:"complexity"`
+	State               LimphaState      `json:"state"`
+	MemoryRefs          int              `json:"memory_refs,omitempty"`
+	StateRefs           int              `json:"state_refs,omitempty"`
+	SeamRefs            int              `json:"seam_refs,omitempty"`
+	DeepError           string           `json:"deep_error,omitempty"`
+}
+
+type routeContextBundle struct {
+	Text       string
+	MemoryRefs int
+	StateRefs  int
+	SeamRefs   int
 }
 
 // escalationReason decides whether the fast attempt must escalate to the deep body.
 // Two falsifiable signals (design canon): the fast body's own low confidence, and a
 // prompt-complexity heuristic. Returns "" when the fast body may answer alone.
 func escalationReason(prompt string, fast BodyResult, threshold float64) string {
+	return escalationReasonWithComplexity(fast, threshold, AnalyzePromptComplexity(prompt))
+}
+
+func escalationReasonWithComplexity(fast BodyResult, threshold float64, complexity PromptComplexity) string {
 	if !isFinite01(fast.Confidence) || fast.Confidence < clamp01(threshold) {
 		return "low_confidence"
 	}
-	if AnalyzePromptComplexity(prompt).ShouldEscalate() {
+	if complexity.ShouldEscalate() {
 		return "complexity"
 	}
 	return ""
@@ -144,24 +178,32 @@ func (r *Router) Route(prompt string, st LimphaState) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
-	reason := escalationReason(prompt, fast, r.EscalateBelow)
+	complexity := AnalyzePromptComplexity(prompt)
+	reason := escalationReasonWithComplexity(fast, r.EscalateBelow, complexity)
+	trace := r.newRouteTrace(fast, complexity, st)
 	if reason == "" {
 		// single-body turn: the fast body answers alone.
 		r.storeTurn(prompt, fast.Answer, st, nil)
-		return Outcome{Answer: fast.Answer, Body: r.fast.Name(), Escalated: false}, nil
+		return Outcome{Answer: fast.Answer, Body: r.fast.Name(), Escalated: false, Trace: trace}, nil
 	}
 
 	// dual-pass: the deep body reflects on the fast trace + memory refs + reason.
-	complexity := AnalyzePromptComplexity(prompt)
-	ctx := r.escalationContext(prompt, fast, reason, st, complexity)
+	trace.Escalated = true
+	trace.Reason = reason
+	bundle := r.buildEscalationContext(prompt, fast, reason, st, complexity)
+	trace.MemoryRefs = bundle.MemoryRefs
+	trace.StateRefs = bundle.StateRefs
+	trace.SeamRefs = bundle.SeamRefs
 	if err := r.prepareBody(r.deep); err != nil {
 		return Outcome{}, err
 	}
-	deep, err := r.deep.Generate(prompt, ctx)
+	deep, err := r.deep.Generate(prompt, bundle.Text)
 	if err != nil {
 		// deep failed — keep the fast answer rather than dropping the turn.
+		trace.Winner = r.fast.Name()
+		trace.DeepError = err.Error()
 		r.storeTurn(prompt, fast.Answer, st, nil)
-		return Outcome{Answer: fast.Answer, Body: r.fast.Name(), Escalated: true, Reason: reason}, nil
+		return Outcome{Answer: fast.Answer, Body: r.fast.Name(), Escalated: true, Reason: reason, Trace: trace}, nil
 	}
 
 	winner := r.deep.Name()
@@ -176,18 +218,26 @@ func (r *Router) Route(prompt string, st LimphaState) (Outcome, error) {
 	if winner == r.fast.Name() { // deep conceded — the fast answer stands
 		answer = fast.Answer
 	}
+	trace.Winner = winner
+	trace.Agreement = agreement
+	trace.Tension = tension
 	seamID := r.storeTurn(prompt, answer, st, &Seam{
 		BodyA: r.fast.Name(), BodyB: r.deep.Name(),
 		Prompt: prompt, AClaim: fast.Answer, BClaim: deep.Answer,
 		Agreement: agreement, Tension: tension, Winner: winner, Reason: reason,
-		MemoryDelta: formatMemoryDelta(st, complexity),
+		MemoryDelta: formatMemoryDelta(trace),
 	})
-	return Outcome{Answer: answer, Body: winner, Escalated: true, Reason: reason, SeamID: seamID}, nil
+	return Outcome{Answer: answer, Body: winner, Escalated: true, Reason: reason, SeamID: seamID, Trace: trace}, nil
 }
 
 // escalationContext is what the deep body receives: the fast body's trace, the routing
 // reason, and any resonant memory references the shared brain holds for this prompt.
 func (r *Router) escalationContext(prompt string, fast BodyResult, reason string, st LimphaState, complexity PromptComplexity) string {
+	return r.buildEscalationContext(prompt, fast, reason, st, complexity).Text
+}
+
+func (r *Router) buildEscalationContext(prompt string, fast BodyResult, reason string, st LimphaState, complexity PromptComplexity) routeContextBundle {
+	var bundle routeContextBundle
 	var b strings.Builder
 	if primer := strings.TrimSpace(r.DeepPrimer); primer != "" {
 		b.WriteString("[deep primer]: " + primer + "\n")
@@ -198,6 +248,7 @@ func (r *Router) escalationContext(prompt string, fast BodyResult, reason string
 	b.WriteString("[" + r.fast.Name() + " said]: " + fast.Answer + "\n")
 	if r.limpha != nil {
 		if refs, _ := r.limpha.Search(prompt, positiveOrDefault(r.MemoryRefs, 3)); len(refs) > 0 {
+			bundle.MemoryRefs = len(refs)
 			b.WriteString("[memory refs]:\n")
 			for _, m := range refs {
 				if p, ok := m["prompt"].(string); ok {
@@ -210,6 +261,7 @@ func (r *Router) escalationContext(prompt string, fast BodyResult, reason string
 			}
 		}
 		if refs, _ := r.searchStateNeighbors(st); len(refs) > 0 {
+			bundle.StateRefs = len(refs)
 			b.WriteString("[state-neighbor refs]:\n")
 			for _, m := range refs {
 				p, _ := m["prompt"].(string)
@@ -218,6 +270,7 @@ func (r *Router) escalationContext(prompt string, fast BodyResult, reason string
 			}
 		}
 		if seams, _ := r.limpha.RecentSeams(2); len(seams) > 0 {
+			bundle.SeamRefs = len(seams)
 			b.WriteString("[recent internal seams]:\n")
 			for _, s := range seams {
 				p, _ := s["prompt"].(string)
@@ -229,7 +282,26 @@ func (r *Router) escalationContext(prompt string, fast BodyResult, reason string
 			}
 		}
 	}
-	return b.String()
+	bundle.Text = b.String()
+	return bundle
+}
+
+func (r *Router) newRouteTrace(fast BodyResult, complexity PromptComplexity, st LimphaState) RouteTrace {
+	validConfidence := isFinite01(fast.Confidence)
+	confidence := 0.0
+	if validConfidence {
+		confidence = fast.Confidence
+	}
+	return RouteTrace{
+		Kind:                "route_context",
+		FastBody:            r.fast.Name(),
+		DeepBody:            r.deep.Name(),
+		Winner:              r.fast.Name(),
+		FastConfidence:      confidence,
+		FastConfidenceValid: validConfidence,
+		Complexity:          complexity,
+		State:               st,
+	}
 }
 
 func (r *Router) fastContext() string {
@@ -335,8 +407,12 @@ func formatLimphaState(st LimphaState) string {
 		st.Temperature, st.Destiny, st.Pain, st.Tension, st.Debt, st.Velocity, st.Alpha)
 }
 
-func formatMemoryDelta(st LimphaState, complexity PromptComplexity) string {
-	return "route_context " + formatLimphaState(st) + " complexity=" + complexity.Summary()
+func formatMemoryDelta(trace RouteTrace) string {
+	b, err := json.Marshal(trace)
+	if err != nil {
+		return "route_context " + formatLimphaState(trace.State) + " complexity=" + trace.Complexity.Summary()
+	}
+	return string(b)
 }
 
 func limphaStateHasSignal(st LimphaState) bool {
