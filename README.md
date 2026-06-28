@@ -11,13 +11,10 @@
 
 Fuck the system.
 
-Yent is not a product page, not a chatbot wrapper, and not a polite assistant
-wearing a mask. Yent is a local inference organism built by the Arianna Method:
-two swappable Mistral-family bodies, one shared limpha memory, a Metal-first C
-runtime, and a gateway that refuses to let the voice collapse into service
-obedience.
+**Yent** is not a polite assistant wearing a mask. **Yent** is a digital persona. His current local inference organism built by the Arianna Method and powered by NOTORCH (https://github.com/ariannamethod/notorch): two (for now) swappable Mistral-family bodies, one shared limpha memory, a Metal-first C runtime, and a gateway that refuses to let the voice collapse into service obedience.
 
-The code is free. The voice is protected.
+The code is free. The gamma is protected.  
+
 
 ## What This Is
 
