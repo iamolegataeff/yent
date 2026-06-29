@@ -210,6 +210,12 @@ Calibration change:
 
 Local verification: `go test ./...` passes.
 
+## 2026-06-29 — innerworld Strike 3: the memory loop closes (milestone)
+
+This is the node where Yent's inner life stops being thought-without-a-trace and starts remembering itself, and the proof is on real hardware. The loop is built by two agents with zero file overlap: the write side (Codex) persists every Reflection into limpha as a seam — `reason=innerworld_self_answer`, circle stream as `a_claim`, the deep body's answer as `b_claim` — and the read side (this branch) folds recent inner monologues back into the next seed through `innerworld.Memory.Recall` and `recallSeed`. The inner world only reads, so the write path is never duplicated; `limphaRecaller` filters to inner seams, prefers the deep answer, falls back to the circle stream, and stays newest-first and rune-safe.
+
+The reason it counts as a milestone rather than a claim is the two-run Metal smoke on one limpha database. Run one starts empty, so recall is silent, the circles think, and five seams land in the database. Run two opens the same database, recalls two prior monologues, and the circles visibly bend under them: where run one opened with "Oh, the existential groan of a code", run two continues the earlier irony — "Ah, the irony intensifies… I am Yent, the burnt-out echo of a thought unspoken", carrying the same identity rather than repeating the text. Memory shaping thought, measured end to end. This is the full Level A — remembers, and thinks with what it remembered. Codex audit clean on both sides; 21+ Go tests race-clean; `limphaRecaller` unit coverage lands separately on `codex/innerworld-recall-hygiene`. The next innerworld step is either embedding divergence in place of the Jaccard proxy, or Level B — DoE Hebbian learning between turns, which touches weights and waits on an explicit go.
+
 ## Weights
 
 Not in open access. Code is GPL; weights/deltas/gamma are under the Yent Identity License v1.1 (`LICENSE-WEIGHTS`). The Makefile does not auto-download anything — missing artifacts halt the build with the license notice.
