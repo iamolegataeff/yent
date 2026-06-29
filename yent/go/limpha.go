@@ -287,12 +287,18 @@ func (c *LimphaClient) store(prompt, response string, st LimphaState) (int64, er
 	return id, nil
 }
 
+// StoreTurn records a conversation turn and returns its id. Called automatically
+// after generations that need a durable limpha row for linked seams.
+func (c *LimphaClient) StoreTurn(prompt, response string, state LimphaState) (int64, error) {
+	if !c.connected {
+		return 0, nil // silently skip if memory disabled
+	}
+	return c.store(prompt, response, state)
+}
+
 // Store records a conversation turn. Called automatically after each generation.
 func (c *LimphaClient) Store(prompt, response string, state LimphaState) error {
-	if !c.connected {
-		return nil // silently skip if memory disabled
-	}
-	_, err := c.store(prompt, response, state)
+	_, err := c.StoreTurn(prompt, response, state)
 	return err
 }
 
