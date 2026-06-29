@@ -105,6 +105,13 @@ func (iw *InnerWorld) SetRoll(f func() float32) {
 	iw.mu.Unlock()
 }
 
+// SetBreath overrides the autonomous-breath pacing (tick, idle, cooldowns).
+func (iw *InnerWorld) SetBreath(b Breath) {
+	iw.mu.Lock()
+	iw.br = b
+	iw.mu.Unlock()
+}
+
 func cloneCircles(c []Circle) []Circle {
 	if c == nil {
 		return nil
@@ -231,7 +238,10 @@ func (iw *InnerWorld) dream(trigger int) Reflection {
 // turns the field keeps drifting, and when a trigger crosses its threshold the
 // organism dreams unprompted. She is never muted, only paced.
 func (iw *InnerWorld) Breathe(ctx context.Context) {
-	t := time.NewTicker(iw.br.Tick)
+	iw.mu.Lock()
+	tick := iw.br.Tick
+	iw.mu.Unlock()
+	t := time.NewTicker(tick)
 	defer t.Stop()
 	for {
 		select {

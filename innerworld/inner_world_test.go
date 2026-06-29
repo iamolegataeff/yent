@@ -163,3 +163,15 @@ func TestReflectGate(t *testing.T) {
 type fixedLarynx struct{ c float32 }
 
 func (f fixedLarynx) Couple([]Circle) float32 { return f.c }
+
+func TestSetBreath(t *testing.T) {
+	iw := NewInnerWorld(fakeBody{}, &fakeField{}, tempDivergence)
+	b := Breath{Tick: 7 * time.Millisecond, Silence: time.Second, DriftDebt: 5}
+	iw.SetBreath(b)
+	iw.mu.Lock()
+	got := iw.br
+	iw.mu.Unlock()
+	if got.Tick != b.Tick || got.DriftDebt != b.DriftDebt {
+		t.Errorf("SetBreath did not apply: %+v", got)
+	}
+}
