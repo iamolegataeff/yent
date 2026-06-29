@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ariannamethod/yent/innerworld"
 	yent "github.com/ariannamethod/yent/yent/go"
@@ -95,5 +96,97 @@ func TestPersistReflectionSkipsEmpty(t *testing.T) {
 	}
 	if stats["total_conversations"].(int64) != 0 || stats["total_seams"].(int64) != 0 {
 		t.Fatalf("empty reflection should not write memory, got %v / %v", stats["total_conversations"], stats["total_seams"])
+	}
+}
+
+func TestLimphaRecallerFiltersAndCompactsInnerSeams(t *testing.T) {
+	lc, err := yent.NewLimphaClientAt(filepath.Join(t.TempDir(), "limpha.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lc.Close()
+
+	if _, err := lc.StoreSeam(yent.Seam{
+		BodyA:  "nemo12",
+		BodyB:  "small24",
+		Prompt: "old inner",
+		AClaim: "circle 0\n   fallback   stream ",
+		Reason: "innerworld_self_answer",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	if _, err := lc.StoreSeam(yent.Seam{
+		BodyA:  "nemo12",
+		BodyB:  "small24",
+		Prompt: "router seam",
+		BClaim: "router output must not become an inner recall",
+		Reason: "route_escalation",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	if _, err := lc.StoreSeam(yent.Seam{
+		BodyA:  "nemo12",
+		BodyB:  "small24",
+		Prompt: "new inner",
+		AClaim: "circle stream should lose to the deep answer",
+		BClaim: "deep answer " + strings.Repeat("with memory pressure ", 30),
+		Reason: "innerworld_self_answer",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := (limphaRecaller{lc: lc}).Recall(3)
+	if len(got) != 2 {
+		t.Fatalf("want only two inner recalls, got %d: %#v", len(got), got)
+	}
+	if !strings.HasPrefix(got[0], "deep answer with memory pressure") {
+		t.Fatalf("newest inner b_claim should be recalled first, got %q", got[0])
+	}
+	if strings.Contains(got[0], "circle stream should lose") {
+		t.Fatalf("b_claim should be preferred over a_claim, got %q", got[0])
+	}
+	if !utf8.ValidString(got[0]) || len([]rune(got[0])) > 240 {
+		t.Fatalf("recall should be rune-valid and capped to 240 runes, len=%d valid=%v", len([]rune(got[0])), utf8.ValidString(got[0]))
+	}
+	if got[1] != "circle 0 fallback stream" {
+		t.Fatalf("empty b_claim should fall back to compacted a_claim, got %q", got[1])
+	}
+	for _, recall := range got {
+		if strings.Contains(recall, "router output") {
+			t.Fatalf("non-inner seam leaked into recall: %#v", got)
+		}
+	}
+}
+
+func TestLimphaRecallerLimitAndNilSafe(t *testing.T) {
+	if got := (limphaRecaller{}).Recall(3); got != nil {
+		t.Fatalf("nil limpha client should recall nothing, got %#v", got)
+	}
+
+	lc, err := yent.NewLimphaClientAt(filepath.Join(t.TempDir(), "limpha.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lc.Close()
+
+	for _, claim := range []string{"first", "second"} {
+		if _, err := lc.StoreSeam(yent.Seam{
+			BodyA:  "nemo12",
+			BodyB:  "small24",
+			BClaim: claim,
+			Reason: "innerworld_self_answer",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if got := (limphaRecaller{lc: lc}).Recall(0); got != nil {
+		t.Fatalf("n<=0 should recall nothing, got %#v", got)
+	}
+	got := (limphaRecaller{lc: lc}).Recall(1)
+	if len(got) != 1 || got[0] != "second" {
+		t.Fatalf("limit should return the newest inner thought only, got %#v", got)
 	}
 }
