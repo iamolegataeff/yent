@@ -27,6 +27,14 @@ Keep this shared working copy and the Mac Mini runtime checkout synchronized thr
 - Keep machine-local facts, transient pod ids, tokens, and private operator notes in ignored local files such as `LOCAL_STATE.md`.
 - Do not commit model weights, GGUF files, adapters, tokens, limpha databases, spores, or local runtime caches.
 
+## Branch / Worktree Discipline
+
+- Treat `/Users/ataeff/arianna-shared/yent-inference` as a coordination checkout, not a shared scratchpad for overlapping agent edits.
+- Before non-trivial edits, each agent must work in its own branch and preferably its own worktree. Use agent-scoped branch names such as `codex/<topic>` or `claude/<topic>`.
+- Do not continue editing in a checkout that is on another agent's active branch or contains another agent's uncommitted files. Stop, create a clean worktree from `origin/main`, and apply only your intended change there.
+- Merge to `main` only after tests/smoke appropriate to the change and Oleg's explicit direction. If another agent's branch needs your patch, cherry-pick or merge the reviewed commit intentionally; do not silently mix work-in-progress.
+- After any merge to `main`, other active worktrees must fetch/rebase or merge from `origin/main` before continuing so local assumptions do not drift.
+
 ## Runtime Contract
 
 - `nemo12` is the fast/default body.

@@ -32,6 +32,18 @@ hand-copying edited source between agent sandboxes.
 - Never commit weights, GGUF, adapters, gamma, tokens, limpha databases, spores,
   or runtime caches. The `.gitignore` enforces it; do not fight it.
 
+## Branch / Worktree Discipline
+
+- Use a Claude-scoped branch and preferably a separate worktree for active Claude
+  edits, for example `claude/<topic>`.
+- Do not use the shared checkout as a scratchpad when Codex or another agent may
+  be operating there. If the checkout is on another agent's branch or has their
+  uncommitted files, stop and create a clean worktree from `origin/main`.
+- Keep Claude WIP isolated until it is ready to merge. If Codex provides a repair
+  commit, merge or cherry-pick it intentionally; do not absorb it accidentally
+  through a dirty shared branch.
+- After Oleg merges anything to `main`, fetch and rebase/merge before continuing.
+
 ## Claude Bindings
 
 - Verification is Codex (`codex exec`) or a Mac Mini DoE smoke — never Opus
