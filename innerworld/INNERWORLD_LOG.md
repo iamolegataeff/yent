@@ -94,8 +94,22 @@ AML commands fail. `go test -race` green across 10 tests (added
 
 Work lives on branch `claude/innerworld-strike1` in worktree
 `~/arianna/yent-innerworld` per the branch/worktree discipline; the shared checkout
-is the sync point. Next: the real `Field`/`Body` adapters, Larynx-Zig, the
-deep-self-answer gate.
+is the sync point.
+
+## Strike 1b — Larynx-Zig membrane (2026-06-29)
+
+`innerworld/larynx.zig` is the membrane between the two bodies, in the vagus.zig
+family. The fast body raises the circles; the Larynx measures the *texture* of
+that token stream — `entropy` (how varied) and `repetition` (how much it loops) —
+and hands the deep body a `coupling` factor in [0,1]: a flowing stream couples
+(the deep body attends to the fast circles), a looping one does not (do not
+reinforce a loop). `zig test` green (3/3): flowing `[1..6]` → entropy 1.00,
+repetition 0.00, coupling 1.00; looping `[1×6]` → entropy 0.00, repetition 0.83,
+coupling 0.00; texture clamped to [0,1]; an empty stream is inert.
+
+Next: the real `Field`/`Body` adapters (wrap `yent.AMK` + the nemo body) and the
+Go↔Zig Larynx binding, wired together with the deep-self-answer gate — at which
+point the coupling has a consumer (the deep body) and the seam is closed.
 
 **Checklist (how we verify it works):**
 - [ ] Fast body emits 3 inner circles per turn; divergence circle1 < 2 < 3 (cosine, measured).
