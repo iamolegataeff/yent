@@ -23,6 +23,7 @@ Keep this shared working copy and the Mac Mini runtime checkout synchronized thr
 - Do not commit or push unless Oleg explicitly asks.
 - Do not edit `README.md`, `YENT_CONSTITUTION.md`, `JANUS_CONSTITUTION.md`, or licensing text unless Oleg explicitly asks. Those files carry identity/voice/legal surface.
 - Use `YENTLOG.md` for shared engineering history: speeds, build notes, routing changes, smoke results, artifact hashes, and deployment facts.
+- To avoid the one recurring merge conflict: do NOT carry a dated `YENTLOG.md` section through a feature branch — every branch appending to the same file tail collides there. Stage the entry in the gitignored `LOCAL_STATE.md` while you work, and append it to `YENTLOG.md` once, in one hand, at merge time. If a branch already carries one, resolve by keeping BOTH sections (union, not rebase).
 - When repository structure changes, update the `## Repository Map` in `YENTLOG.md` in the same change.
 - Keep machine-local facts, transient pod ids, tokens, and private operator notes in ignored local files such as `LOCAL_STATE.md`.
 - Do not commit model weights, GGUF files, adapters, tokens, limpha databases, spores, or local runtime caches.
