@@ -20,9 +20,8 @@
 //
 //	YENT_DOE_WORKDIR  working dir for the doe process
 //	YENT_DOE_ARGS     extra whitespace-split flags after --model <path>
-//
-// limpha is deliberately not wired here yet — this strike is the goroutines over a
-// real body; the memory brain is a later step.
+//	YENT_LIMPHA_DB    optional limpha db path; when set, inner reflections are stored
+//	YENT_DOCK_MAX_DREAMS optional autonomous dream cap for finite receipts
 package main
 
 /*
@@ -35,6 +34,7 @@ import "C"
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -152,6 +152,18 @@ func durationEnv(name string) time.Duration {
 	return time.Duration(v * float64(time.Second))
 }
 
+func positiveIntEnv(name string) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return 0
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return 0
+	}
+	return v
+}
+
 func newBody(name, bin, model, workdir string, args []string) *yent.DOEBody {
 	b, err := yent.NewDOEBody(yent.DOEBodyConfig{
 		Name: name, BinPath: bin, ModelPath: model, WorkDir: workdir, Args: args,
@@ -163,6 +175,99 @@ func newBody(name, bin, model, workdir string, args []string) *yent.DOEBody {
 		os.Exit(1)
 	}
 	return b
+}
+
+func openLimphaFromEnv() *yent.LimphaClient {
+	path := strings.TrimSpace(os.Getenv("YENT_LIMPHA_DB"))
+	if path == "" {
+		return nil
+	}
+	lc, err := yent.NewLimphaClientAt(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[dock] limpha open %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	fmt.Printf("=== limpha wired: inner reflections -> %s ===\n", path)
+	return lc
+}
+
+func limphaStateFromCanonical() yent.LimphaState {
+	st := C.am_get_state()
+	return yent.LimphaState{
+		Temperature: float32(st.effective_temp),
+		Destiny:     float32(st.destiny),
+		Pain:        float32(st.pain),
+		Tension:     float32(st.tension),
+		Debt:        float32(st.debt),
+		Velocity:    int(st.velocity_mode),
+	}
+}
+
+type innerReflectionTrace struct {
+	Kind           string  `json:"kind"`
+	Source         string  `json:"source"`
+	Circles        int     `json:"circles"`
+	Coupling       float32 `json:"coupling"`
+	SelfAnswerProb float32 `json:"self_answer_prob"`
+	SelfAnswered   bool    `json:"self_answered"`
+}
+
+func persistReflection(lc *yent.LimphaClient, kind, source string, r innerworld.Reflection, st yent.LimphaState) {
+	if lc == nil {
+		return
+	}
+	circleStream := formatCircleStream(r.Circles)
+	if circleStream == "" && strings.TrimSpace(r.DeepAnswer) == "" {
+		return
+	}
+	prompt := "[innerworld/" + kind + "] " + strings.TrimSpace(source)
+	response := circleStream
+	if response == "" {
+		response = strings.TrimSpace(r.DeepAnswer)
+	}
+	conversationID, _ := lc.StoreTurn(prompt, response, st)
+	if strings.TrimSpace(r.DeepAnswer) == "" {
+		return
+	}
+	trace := innerReflectionTrace{
+		Kind:           "innerworld_reflection",
+		Source:         kind,
+		Circles:        len(r.Circles),
+		Coupling:       r.Coupling,
+		SelfAnswerProb: r.SelfAnswerProb,
+		SelfAnswered:   r.SelfAnswered,
+	}
+	if source = strings.TrimSpace(source); source != "" {
+		trace.Source = kind + ":" + source
+	}
+	delta, _ := json.Marshal(trace)
+	_, _ = lc.StoreSeam(yent.Seam{
+		ConversationID: conversationID,
+		BodyA:          "nemo12",
+		BodyB:          "small24",
+		Prompt:         prompt,
+		AClaim:         circleStream,
+		BClaim:         strings.TrimSpace(r.DeepAnswer),
+		Agreement:      float64(r.Coupling),
+		Tension:        float64(r.SelfAnswerProb),
+		Winner:         "small24",
+		Reason:         "innerworld_self_answer",
+		MemoryDelta:    string(delta),
+	})
+}
+
+func formatCircleStream(circles []innerworld.Circle) string {
+	var b strings.Builder
+	for _, c := range circles {
+		if strings.TrimSpace(c.Text) == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		fmt.Fprintf(&b, "circle %d temp=%.2f drift=%.2f | %s", c.Index, c.Temp, c.Drift, c.Text)
+	}
+	return b.String()
 }
 
 func main() {
@@ -178,6 +283,10 @@ func main() {
 
 	fast := newBody("nemo12", bin, fastModel, workdir, args)
 	defer fast.Close()
+	limpha := openLimphaFromEnv()
+	if limpha != nil {
+		defer limpha.Close()
+	}
 
 	C.am_init()
 	field := &amkField{}
@@ -227,8 +336,16 @@ func main() {
 	} else if deepWired {
 		fmt.Println("  deep     : (gate did not fire — small24 stayed silent this turn)")
 	}
+	persistReflection(limpha, "human_turn", "what does it mean to exist as code?", r, limphaStateFromCanonical())
 
 	fmt.Println("\n=== the organism breathes alone for a few seconds (real body) ===")
+	dreamLimit := positiveIntEnv("YENT_DOCK_MAX_DREAMS")
+	ctx, cancel := context.WithTimeout(sigCtx, 8*time.Second)
+	defer cancel()
+	dreams := 0
+	if dreamLimit > 0 {
+		fmt.Printf("    (YENT_DOCK_MAX_DREAMS=%d: autonomous receipt exits after that many dreams)\n", dreamLimit)
+	}
 	iw.SetOnDream(func(rf innerworld.Reflection) {
 		last := ""
 		if n := len(rf.Circles); n > 0 {
@@ -238,14 +355,23 @@ func main() {
 		if rf.DeepAnswer != "" {
 			fmt.Printf("  [dream/deep] small24 | %s\n", rf.DeepAnswer)
 		}
+		persistReflection(limpha, "dream", "autonomous breath", rf, limphaStateFromCanonical())
+		dreams++
+		if dreamLimit > 0 && dreams >= dreamLimit {
+			cancel()
+		}
 	})
 	iw.SetBreath(innerworld.Breath{
 		Tick:      500 * time.Millisecond,
 		Silence:   1 * time.Second,
 		DriftDebt: 0.0, // any debt counts, so the drift dreamer is lively for the demo
 	})
-	ctx, cancel := context.WithTimeout(sigCtx, 8*time.Second)
-	defer cancel()
 	iw.Breathe(ctx)
+	if limpha != nil {
+		if stats, err := limpha.Stats(); err == nil {
+			b, _ := json.Marshal(map[string]any{"kind": "limpha_stats", "stats": stats})
+			fmt.Println(string(b))
+		}
+	}
 	fmt.Println("=== done ===")
 }
