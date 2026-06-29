@@ -8,6 +8,7 @@ yent_bin
 .env
 .env.*
 LOCAL_STATE.md
+/ri/
 credentials.md
 hf_token*
 *.token
