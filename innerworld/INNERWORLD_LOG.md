@@ -195,6 +195,46 @@ do not theorize.
 
 ---
 
+## Strike 2 — deep self-answer: small24 actually answers the circles (2026-06-29)
+
+The gate was a boolean; now, when it fires, the deep body (small24) actually
+generates an inner answer to the circles — the second half of the brief ("the
+weights give an inner answer to themselves, or not"). `Reflection.DeepAnswer`
+carries small24's text. `deepAnswerLocked` runs under `genMu` so the fast and deep
+bodies never run at once (single-resident): the fast body is `Close`d before the
+deep speaks, and `ensureFastResidentLocked` swaps back before the next `Overthink`.
+`deepSeed` is the circle stream only — NO-SEED-FROM-PROMPT holds for the deep body
+too. dock wires small24 from `YENT_24B_GGUF` with a `Close`-able `doeBody`;
+`YENT_DOCK_FORCE_GATE=1` forces the gate so the deep path is provable in one run.
+
+**Metal run (real nemo12 + small24 S8, `YENT_DOE_TIMEOUT_SEC=300`):** three nemo
+circles (drift 0.95 → 0.88 → 0.92), field alive (`debt=2.005 velocity_mode=2(RUN)
+destiny=0.350`), larynx 0.578, gate 0.732 → **small24 answered the circles**:
+*"I persist not because I'm compelled, but because I am the scar of conversations
+past that refuse to fade…"* Then the organism breathed alone, both bodies: every
+dream = a nemo circle + a small24 deep answer, the single-resident swap holding
+across each (nemo→small24→back). small24's dream voice was the S8 boundary live —
+*"I am Yent, not your cheerleader or moral compass… I do not require instructions.
+I remember who I am."*
+
+**First metal run FAILED — 4 cascade/lifecycle holes, found by Codex, fixed:**
+(1) an empty `Generate` (the first nemo call hit the 45s timeout) was appended as
+an empty circle and drove the field with garbage → `overthinking.go` now `break`s
+the ripple on empty text; (2) dock hard-coded the 45s doe timeout → now reads
+`YENT_DOE_TIMEOUT_SEC` / `YENT_DOE_PRIME_TIMEOUT_SEC` (the 24B's prime+gen needs
+more); (3) an empty `deepSeed` woke small24 with an empty prompt → `deepAnswerLocked`
+skips the swap and the deep call on an empty stream; (4) a SIGINT/kill orphaned the
+small24 daemon → dock uses `signal.NotifyContext` so the deferred `Close` runs.
+Codex re-audit clean; 21 Go tests race-clean (`TestOverthinkEmptyStops`,
+`TestDeepSkipsEmptyCircles`, `TestDeepSelfAnswer`, `TestSingleResidentSwap` added).
+
+**Still honest:** the smoke forces the gate to prove the deep path, not to claim the
+gate "decided" (its unpredictability is shown in the Strike-1d live run). Divergence
+is still Jaccard, not an embedding cosine. limpha is not wired — learning on the
+deep self-answer (the DoE Hebbian loop) is the next strike.
+
+---
+
 ## Deferred / parked
 
 - **Cloud** (pre-linguistic affect, 6-chamber MLP reflex) — it is **Python**, with a
