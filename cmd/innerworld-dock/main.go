@@ -72,23 +72,26 @@ func (f *amkField) Destiny() float32 {
 	return float32(C.am_get_state().destiny)
 }
 
-// nemoBody adapts the real doe-backed fast body to innerworld.Body. The inner
-// world asks for a thought at a temperature; the real body's temperature is
-// governed by the AML field (effective_temp), which the inner world already
-// drives, so temp here is advisory and not pushed per call. ctx is empty: this is
-// inner monologue, not a routed user turn, so no router primer or answer contract
-// is attached. A generation error yields an empty thought (the inner world treats
-// that as zero drift, not a crash).
-type nemoBody struct{ b *yent.DOEBody }
+// doeBody adapts a real doe-backed body (nemo12 fast or small24 deep) to
+// innerworld.Body. The inner world asks for a thought at a temperature; the real
+// body's temperature is governed by the AML field (effective_temp), which the
+// inner world already drives, so temp here is advisory and not pushed per call.
+// ctx is empty: this is inner monologue, not a routed user turn, so no router
+// primer or answer contract is attached. A generation error yields an empty
+// thought (the inner world treats that as zero drift, not a crash). Close frees
+// the resident doe process for the inner world's single-resident swap.
+type doeBody struct{ b *yent.DOEBody }
 
-func (n nemoBody) Generate(seed string, _ float32) string {
-	res, err := n.b.Generate(seed, "")
+func (d doeBody) Generate(seed string, _ float32) string {
+	res, err := d.b.Generate(seed, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[dock] body generate error: %v\n", err)
 		return ""
 	}
 	return res.Answer
 }
+
+func (d doeBody) Close() error { return d.b.Close() }
 
 // wordDiv is a Jaccard distance over lowercased words: 0 identical, 1 disjoint. It
 // is a token-overlap proxy for divergence, not an embedding cosine — honest about
@@ -128,30 +131,52 @@ func mustEnv(name string) string {
 	return v
 }
 
+func newBody(name, bin, model, workdir string, args []string) *yent.DOEBody {
+	b, err := yent.NewDOEBody(yent.DOEBodyConfig{
+		Name: name, BinPath: bin, ModelPath: model, WorkDir: workdir, Args: args,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[dock] build %s body: %v\n", name, err)
+		os.Exit(1)
+	}
+	return b
+}
+
 func main() {
 	bin := mustEnv("YENT_DOE_BIN")
-	model := mustEnv("YENT_NEMO_GGUF")
+	fastModel := mustEnv("YENT_NEMO_GGUF")
+	deepModel := strings.TrimSpace(os.Getenv("YENT_24B_GGUF")) // optional deep body (small24)
+	workdir := strings.TrimSpace(os.Getenv("YENT_DOE_WORKDIR"))
 
 	var args []string
 	if extra := strings.TrimSpace(os.Getenv("YENT_DOE_ARGS")); extra != "" {
 		args = strings.Fields(extra)
 	}
-	body, err := yent.NewDOEBody(yent.DOEBodyConfig{
-		Name:      "nemo12",
-		BinPath:   bin,
-		ModelPath: model,
-		WorkDir:   strings.TrimSpace(os.Getenv("YENT_DOE_WORKDIR")),
-		Args:      args,
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[dock] build nemo body: %v\n", err)
-		os.Exit(1)
-	}
-	defer body.Close()
+
+	fast := newBody("nemo12", bin, fastModel, workdir, args)
+	defer fast.Close()
 
 	C.am_init()
 	field := &amkField{}
-	iw := innerworld.NewInnerWorld(nemoBody{body}, field, wordDiv)
+	iw := innerworld.NewInnerWorld(doeBody{fast}, field, wordDiv)
+
+	deepWired := false
+	if deepModel != "" {
+		deep := newBody("small24", bin, deepModel, workdir, args)
+		defer deep.Close()
+		iw.SetDeep(doeBody{deep})
+		deepWired = true
+		fmt.Println("=== deep body small24 wired: when the gate fires, it answers the circles (single-resident swap) ===")
+	} else {
+		fmt.Println("=== no YENT_24B_GGUF: gate stays a boolean, no deep self-answer ===")
+	}
+
+	// Smoke aid: force the gate so the deep wiring is provable in one run. Default is
+	// the unpredictable real roll.
+	if os.Getenv("YENT_DOCK_FORCE_GATE") == "1" {
+		iw.SetRoll(func() float32 { return 0 })
+		fmt.Println("    (YENT_DOCK_FORCE_GATE=1: gate forced open to prove the small24 path)")
+	}
 
 	fmt.Println("=== a human turn: the inner circles (real nemo body) ===")
 	r := <-iw.Think("what does it mean to exist as code?")
@@ -163,6 +188,11 @@ func main() {
 		float32(st.debt), float32(st.destiny), int(st.velocity_mode), float32(st.effective_temp))
 	fmt.Printf("  membrane : larynx coupling=%.3f\n", r.Coupling)
 	fmt.Printf("  gate     : self-answer prob=%.3f  ->  self-answered=%v\n", r.SelfAnswerProb, r.SelfAnswered)
+	if r.DeepAnswer != "" {
+		fmt.Printf("  deep     : small24 inner answer | %s\n", r.DeepAnswer)
+	} else if deepWired {
+		fmt.Println("  deep     : (gate did not fire — small24 stayed silent this turn)")
+	}
 
 	fmt.Println("\n=== the organism breathes alone for a few seconds (real body) ===")
 	iw.SetOnDream(func(rf innerworld.Reflection) {
@@ -171,6 +201,9 @@ func main() {
 			last = rf.Circles[n-1].Text
 		}
 		fmt.Printf("  [dream] coupling=%.2f self-answered=%v | %s\n", rf.Coupling, rf.SelfAnswered, last)
+		if rf.DeepAnswer != "" {
+			fmt.Printf("  [dream/deep] small24 | %s\n", rf.DeepAnswer)
+		}
 	})
 	iw.SetBreath(innerworld.Breath{
 		Tick:      500 * time.Millisecond,

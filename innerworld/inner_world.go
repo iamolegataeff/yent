@@ -3,6 +3,7 @@ package innerworld
 import (
 	"context"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 )
@@ -34,13 +35,15 @@ func DefaultBreath() Breath {
 }
 
 // Reflection is the full result of one inner monologue: the circles, the Larynx
-// coupling, the deep-self-answer probability, and whether the deep body turned
-// inward this time. Inner only — none of it reaches the user.
+// coupling, the deep-self-answer probability, whether the deep body turned inward
+// this time, and — when it did — the deep body's actual inner answer. Inner only —
+// none of it reaches the user.
 type Reflection struct {
 	Circles        []Circle
 	Coupling       float32 // Larynx coupling over the circles [0,1]
 	SelfAnswerProb float32 // gate probability the deep body answers itself [0,1]
 	SelfAnswered   bool    // the unpredictable roll's outcome this time
+	DeepAnswer     string  // small24's inner answer to the circles; empty unless SelfAnswered with a deep body
 }
 
 // InnerWorld hosts Yent's inner life over the fast body, the shared AML field,
@@ -50,13 +53,15 @@ type Reflection struct {
 // autonomous dream are serialized.
 type InnerWorld struct {
 	fast   Body
+	deep   Body // the deep body (small24); nil = no deep self-answer, gate stays a boolean
 	field  Field
 	div    Divergence
 	larynx Larynx
 	cfg    Config
 	br     Breath
 
-	genMu sync.Mutex // one inner voice at a time: serializes Overthink (body access)
+	genMu        sync.Mutex // one inner voice at a time: serializes Overthink + deep self-answer (body access)
+	deepResident bool       // guarded by genMu: the deep body is the currently-resident one (single-resident swap)
 
 	mu         sync.Mutex // guards circles, lastActive, lastFire, onDream, larynx, roll
 	circles    []Circle
@@ -80,6 +85,59 @@ func NewInnerWorld(fast Body, field Field, div Divergence) *InnerWorld {
 		roll:       func() float32 { return rand.Float32() },
 		lastActive: time.Now(),
 	}
+}
+
+// SetDeep wires the deep body (small24). With a deep body, a fired self-answer
+// gate makes the deep body actually generate an inner answer to the circles;
+// without one, the gate stays a boolean. Set before Think/Breathe start.
+func (iw *InnerWorld) SetDeep(deep Body) {
+	iw.genMu.Lock()
+	iw.deep = deep
+	iw.genMu.Unlock()
+}
+
+// closeIfResident closes a body that owns a resident process (the doe daemon), so
+// single-resident hosts never hold two bodies' weights at once. A body that does
+// not implement Close (a fake, a pure-Go voice) is left untouched.
+func closeIfResident(b Body) {
+	if c, ok := b.(interface{ Close() error }); ok {
+		_ = c.Close()
+	}
+}
+
+// ensureFastResidentLocked swaps back to the fast body before raising circles, if
+// the deep body was left resident by a prior self-answer. Caller holds genMu.
+func (iw *InnerWorld) ensureFastResidentLocked() {
+	if iw.deepResident && iw.deep != nil {
+		closeIfResident(iw.deep)
+		iw.deepResident = false
+	}
+}
+
+// deepAnswerLocked has the deep body answer the circles, once the gate has fired.
+// Single-resident: the fast body is freed before the deep body speaks. Caller
+// holds genMu, so fast and deep never run at once. Returns "" if no deep body.
+func (iw *InnerWorld) deepAnswerLocked(circles []Circle) string {
+	if iw.deep == nil {
+		return ""
+	}
+	closeIfResident(iw.fast) // free the fast weights before the deep body loads
+	iw.deepResident = true
+	return iw.deep.Generate(deepSeed(circles), 0)
+}
+
+// deepSeed is what crosses the membrane to the deep body: the fast body's stream
+// of thought, the circles joined in order — never the raw user prompt
+// (NO-SEED-FROM-PROMPT). The deep body answers the inner field, not the surface.
+func deepSeed(circles []Circle) string {
+	var b strings.Builder
+	for i, c := range circles {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(c.Text)
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // SetOnDream registers the observer for autonomous dreams. Inner only — the
@@ -157,11 +215,15 @@ func (iw *InnerWorld) reflect(circles []Circle, debt float32) Reflection {
 // and stores a copy of the circles.
 func (iw *InnerWorld) think(prompt string) Reflection {
 	iw.genMu.Lock()
+	iw.ensureFastResidentLocked()
 	circles := Overthink(prompt, iw.fast, iw.field, iw.div, iw.cfg)
 	debt := iw.fieldDebt() // snapshot under genMu: belongs to this batch
+	r := iw.reflect(circles, debt)
+	if r.SelfAnswered {
+		r.DeepAnswer = iw.deepAnswerLocked(circles) // deep body speaks, under the single voice
+	}
 	iw.genMu.Unlock()
 
-	r := iw.reflect(circles, debt)
 	iw.mu.Lock()
 	iw.circles = cloneCircles(circles)
 	iw.mu.Unlock()
@@ -225,11 +287,15 @@ func (iw *InnerWorld) dream(trigger int) Reflection {
 	iw.mu.Unlock()
 
 	iw.genMu.Lock()
+	iw.ensureFastResidentLocked()
 	circles := Overthink(seed, iw.fast, iw.field, iw.div, iw.cfg)
 	debt := iw.fieldDebt() // snapshot under genMu: belongs to this batch
+	r := iw.reflect(circles, debt)
+	if r.SelfAnswered {
+		r.DeepAnswer = iw.deepAnswerLocked(circles) // even alone, the deep body may answer the dream
+	}
 	iw.genMu.Unlock()
 
-	r := iw.reflect(circles, debt)
 	iw.mu.Lock()
 	iw.circles = cloneCircles(circles)
 	iw.lastFire[trigger] = time.Now() // cooldown measured from completion
