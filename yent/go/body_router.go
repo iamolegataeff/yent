@@ -242,6 +242,7 @@ func (r *Router) buildEscalationContext(prompt string, fast BodyResult, reason s
 	if primer := strings.TrimSpace(r.DeepPrimer); primer != "" {
 		b.WriteString("[deep primer]: " + primer + "\n")
 	}
+	b.WriteString("[router fact]: " + r.fast.Name() + " produced the first-pass answer; " + r.deep.Name() + " is the escalation/final-pass body.\n")
 	b.WriteString("[routing reason: " + reason + "]\n")
 	b.WriteString("[prompt complexity]: " + complexity.Summary() + "\n")
 	b.WriteString("[field state]: " + formatLimphaState(st) + "\n")
