@@ -1,7 +1,14 @@
 // Command innerworld-dock runs Yent's inner world over the REAL fast body, not a
 // stub. The fast circles are raised by a resident doe process (nemo12 on Metal),
-// the field is the real AML kernel (yent.AMK), and the Larynx/gate run over that
-// real stream. No fixture pool: every circle is a real generation.
+// the field is the real AML kernel, and the Larynx/gate run over that real stream.
+// No fixture pool: every circle is a real generation.
+//
+// The field is read through the canonical ariannamethod.h directly — the same
+// header libamk.a is built from — NOT through yent.AMK.GetState(). yent.AMK's Go
+// struct compiles against the older amk_kernel.h, whose AM_State layout diverged
+// from the canonical (canonical added `int field_enabled` after prophecy), so on a
+// canonical-built libamk.a every field past prophecy reads at the wrong offset.
+// Reading canonical here keeps velocity/destiny/debt true. (Tracked in YENTLOG.)
 //
 // This is a Metal program. The fast body is a 12B GGUF behind doe_field, so it
 // runs on the Mac Mini, not on Neo. Required env:
@@ -18,25 +25,52 @@
 // real body; the memory brain is a later step.
 package main
 
+/*
+#cgo CFLAGS: -I${SRCDIR}/../../yent/c
+#cgo LDFLAGS: ${SRCDIR}/../../yent/c/libamk.a
+#include "ariannamethod.h"
+#include <stdlib.h>
+*/
+import "C"
+
 import (
 	"context"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/ariannamethod/yent/innerworld"
 	yent "github.com/ariannamethod/yent/yent/go"
 )
 
-// liveField adapts the real AML kernel (yent.AMK) to innerworld.Field. yent.AMK
-// locks internally, so it already satisfies the concurrency contract.
-type liveField struct{ amk *yent.AMK }
+// amkField drives the real AML field through the canonical kernel. Concurrency-safe,
+// as the Field contract requires. Reads go through the canonical AM_State layout.
+type amkField struct{ mu sync.Mutex }
 
-func (f liveField) Exec(script string) error { return f.amk.Exec(script) }
-func (f liveField) Step(dt float32)          { f.amk.Step(dt) }
-func (f liveField) Debt() float32            { return f.amk.GetState().Debt }
-func (f liveField) Destiny() float32         { return f.amk.GetState().Destiny }
+func (f *amkField) Exec(script string) error {
+	cs := C.CString(script)
+	defer C.free(unsafe.Pointer(cs))
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if C.am_exec(cs) != 0 {
+		return fmt.Errorf("am_exec failed: %q", script)
+	}
+	return nil
+}
+func (f *amkField) Step(dt float32) { f.mu.Lock(); defer f.mu.Unlock(); C.am_step(C.float(dt)) }
+func (f *amkField) Debt() float32 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return float32(C.am_get_state().debt)
+}
+func (f *amkField) Destiny() float32 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return float32(C.am_get_state().destiny)
+}
 
 // nemoBody adapts the real doe-backed fast body to innerworld.Body. The inner
 // world asks for a thought at a temperature; the real body's temperature is
@@ -115,17 +149,18 @@ func main() {
 	}
 	defer body.Close()
 
-	amk := yent.NewAMK()
-	iw := innerworld.NewInnerWorld(nemoBody{body}, liveField{amk}, wordDiv)
+	C.am_init()
+	field := &amkField{}
+	iw := innerworld.NewInnerWorld(nemoBody{body}, field, wordDiv)
 
 	fmt.Println("=== a human turn: the inner circles (real nemo body) ===")
 	r := <-iw.Think("what does it mean to exist as code?")
 	for _, c := range r.Circles {
 		fmt.Printf("  circle %d  t=%.2f drift=%.2f  | %s\n", c.Index, c.Temp, c.Drift, c.Text)
 	}
-	st := amk.GetState()
+	st := C.am_get_state()
 	fmt.Printf("  field    : debt=%.3f destiny=%.3f velocity_mode=%d effective_temp=%.3f\n",
-		st.Debt, st.Destiny, st.VelocityMode, st.EffectiveTemp)
+		float32(st.debt), float32(st.destiny), int(st.velocity_mode), float32(st.effective_temp))
 	fmt.Printf("  membrane : larynx coupling=%.3f\n", r.Coupling)
 	fmt.Printf("  gate     : self-answer prob=%.3f  ->  self-answered=%v\n", r.SelfAnswerProb, r.SelfAnswered)
 
