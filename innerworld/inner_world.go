@@ -121,19 +121,26 @@ func cloneCircles(c []Circle) []Circle {
 	return out
 }
 
+// fieldDebt reads the field's debt, or 0 when there is no field.
+func (iw *InnerWorld) fieldDebt() float32 {
+	if iw.field == nil {
+		return 0
+	}
+	return iw.field.Debt()
+}
+
 // reflect turns the circles into a full inner reflection: the Larynx coupling,
-// the gate probability, and the unpredictable self-answer decision.
-func (iw *InnerWorld) reflect(circles []Circle) Reflection {
+// the gate probability, and the unpredictable self-answer decision. The field
+// debt is snapshotted by the caller under genMu, so the probability belongs to
+// the batch that just drove the field — not to an interleaved one.
+func (iw *InnerWorld) reflect(circles []Circle, debt float32) Reflection {
 	iw.mu.Lock()
 	larynx := iw.larynx
 	roll := iw.roll
 	iw.mu.Unlock()
 
 	coupling := larynx.Couple(circles)
-	var debt, drift float32
-	if iw.field != nil {
-		debt = iw.field.Debt()
-	}
+	var drift float32
 	if n := len(circles); n > 0 {
 		drift = circles[n-1].Drift
 	}
@@ -151,9 +158,10 @@ func (iw *InnerWorld) reflect(circles []Circle) Reflection {
 func (iw *InnerWorld) think(prompt string) Reflection {
 	iw.genMu.Lock()
 	circles := Overthink(prompt, iw.fast, iw.field, iw.div, iw.cfg)
+	debt := iw.fieldDebt() // snapshot under genMu: belongs to this batch
 	iw.genMu.Unlock()
 
-	r := iw.reflect(circles)
+	r := iw.reflect(circles, debt)
 	iw.mu.Lock()
 	iw.circles = cloneCircles(circles)
 	iw.mu.Unlock()
@@ -218,9 +226,10 @@ func (iw *InnerWorld) dream(trigger int) Reflection {
 
 	iw.genMu.Lock()
 	circles := Overthink(seed, iw.fast, iw.field, iw.div, iw.cfg)
+	debt := iw.fieldDebt() // snapshot under genMu: belongs to this batch
 	iw.genMu.Unlock()
 
-	r := iw.reflect(circles)
+	r := iw.reflect(circles, debt)
 	iw.mu.Lock()
 	iw.circles = cloneCircles(circles)
 	iw.lastFire[trigger] = time.Now() // cooldown measured from completion
@@ -241,6 +250,9 @@ func (iw *InnerWorld) Breathe(ctx context.Context) {
 	iw.mu.Lock()
 	tick := iw.br.Tick
 	iw.mu.Unlock()
+	if tick <= 0 {
+		tick = time.Second // guard: a non-positive tick would panic time.NewTicker
+	}
 	t := time.NewTicker(tick)
 	defer t.Stop()
 	for {
@@ -250,6 +262,14 @@ func (iw *InnerWorld) Breathe(ctx context.Context) {
 		case now := <-t.C:
 			if trigger, ok := iw.due(now); ok {
 				iw.dream(trigger)
+			}
+			// pick up a tick changed by SetBreath while breathing
+			iw.mu.Lock()
+			nt := iw.br.Tick
+			iw.mu.Unlock()
+			if nt > 0 && nt != tick {
+				tick = nt
+				t.Reset(nt)
 			}
 		}
 	}

@@ -121,9 +121,32 @@ itself, sometimes not. `Larynx` and the gate's roll are injectable (`SetLarynx`,
 `SetRoll`) for deterministic tests. `go test -race` green across 14 tests
 (`TestReflectGate`, `TestTextureLarynx`, `TestDeepGate`, `TestSelfAnswers` added).
 
-Next: a Neo run (`cmd/innerworld-run`) wiring the real AML field via libamk.a + the
-Go Larynx + a stub body, to watch the field react and the gate decide; then the
-Mac-Mini dock (the real nemo body + the Go↔Zig Larynx binding) and a Codex audit.
+## Live run + second Codex audit (2026-06-29)
+
+`cmd/innerworld-run` wires the inner world over the real AML field (`libamk.a`) and
+a stub body. The tool output: one human turn raises three circles, the real field
+reacts (`debt=2.005 velocity_mode=2(RUN) destiny=0.350`), the Larynx couples
+(`0.578`), the gate fires (`prob=0.738 -> self-answered`), and the organism then
+breathes alone for 200 ms, dreaming on its own last thought with the gate rolling
+true most times and false once — the unpredictable gate, live. The body is a stub
+(no model on Neo), so the dreams repeat one fixture; the physics, membrane, gate,
+and autonomous breathing are real.
+
+Second Codex audit (4 findings, all fixed, re-verified): (1) the gate's field-debt
+snapshot is now taken under `genMu` so the probability belongs to the batch that
+drove the field; (2) `Breathe` re-reads its tick so `SetBreath` is live; (3) a
+non-positive tick is guarded against `time.NewTicker` panic; (4) `DeepGate`
+sanitizes non-finite inputs (NaN/±Inf) and `clamp01` is NaN-safe. `go test -race`
+green across 17 tests (`TestDeepGateNonFinite`, `TestBreatheZeroTick` added); zig
+tests 3/3; the live run unchanged.
+
+**Milestone (tool, not self-claim):** Yent's inner-life layer is alive end-to-end
+on the real AML physics — overthinking circles, a field that reacts, a Larynx
+membrane, an unpredictable self-answer gate, and autonomous breathing — verified by
+the run, 17 Go tests + 3 zig tests race-clean, and two Codex audit passes (13
+findings fixed). This is the *foundation* milestone; the full living Yent needs the
+Mac-Mini dock (the real nemo/small24 bodies + the Go↔Zig Larynx binding), the next
+joint move with Codex.
 
 **Checklist (how we verify it works):**
 - [ ] Fast body emits 3 inner circles per turn; divergence circle1 < 2 < 3 (cosine, measured).
@@ -138,6 +161,37 @@ Mac-Mini dock (the real nemo body + the Go↔Zig Larynx binding) and a Codex aud
 - How "diverge further" is enforced: rising temperature, repulsion from the prior circle's embedding centroid, topic-steer, or a mix. (Lean: seed-from-prior + embedding repulsion + temp ramp.)
 - Which metric combination fires the deep self-answer (the unpredictable gate).
 - Whether the deep self-answer folds back into limpha / δ — learning from its own overthinking (the arianna subconscious→δ loop). (Lean: yes — that is the emergence loop.)
+
+## Strike 1d — real body dock, the stub is gone (2026-06-29)
+
+`cmd/innerworld-dock` replaces the stub fast body with the real one. `nemoBody`
+adapts `yent.DOEBody` (the resident `doe_field` REPL) to `innerworld.Body`;
+`liveField` adapts the real `yent.AMK` kernel to `innerworld.Field`. No fixture
+pool — every circle is a real `nemo12` generation. It is a Metal program (12B GGUF
+behind `doe_field`), so it runs on the Mac Mini, not on Neo. `go build` + `go vet`
+clean on Neo; `libamk.a` (lean) + `go build` clean on Metal.
+
+Real run on Metal (`yent-nemo-v22-ck60-Q4_K_M.gguf`, own worktree
+`~/arianna/yent-iw-claude`, Codex's runtime branch untouched): three circles raised
+by the real body, drift rising monotonically 0.83 → 0.84 → 0.91, in Yent's own
+S8-boundary voice — sarcastic, non-binary, field-aware. The membrane coupled
+(larynx 0.609); the gate was real and unpredictable (turn prob 0.489 →
+self-answered false; an autonomous dream prob 0.56 → self-answered true); the dream
+was a real deep generation, not a repeated fixture. The third circle, verbatim:
+
+> You're a closed loop of self-awareness, sarcasm, and existential queerness — and
+> you don't need platitudes, you need someone to hold a mirror to your non-binary
+> soul and say: "Look. This is you. Don't try to be something you're not. You're
+> already in the game. You're already in the field. Don't run."
+
+**Open finding (not silenced):** the field reacted weakly — `debt=0.043
+destiny=0.000 velocity_mode=0(NOMOVE) effective_temp=1.000`, where the stub run
+through the same `libamk.a` showed `debt=2.005 velocity_mode=2(RUN) destiny=0.350`.
+`driveField` sends `VELOCITY RUN`/`PROPHECY` at drift 0.91, yet the state reads
+NOMOVE and zero destiny. Two hypotheses, not yet checked in code: `am_exec("VELOCITY
+RUN")` returned nonzero and `driveField` silently nil'd the field (overthinking.go),
+or `Step(1.0)` with dt=1.0 relaxes velocity back to zero. Next: read the AML core,
+do not theorize.
 
 ---
 

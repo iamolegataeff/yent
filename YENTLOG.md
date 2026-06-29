@@ -175,6 +175,14 @@ Runtime body primers moved out of hard-coded constants into tracked files: `prom
 
 The v1 primers are intentionally compact. The old Monday/Karl prompt lineage is voice DNA, not a runtime wall of text; DoE context still has a hard seed budget, and route facts / limpha refs / innerworld signals must not be crowded out by theatrical self-description.
 
+## 2026-06-29 — innerworld real-body dock: "circles on the water" on the real nemo
+
+The inner-life layer (`innerworld/`) runs over a real body for the first time. `cmd/innerworld-dock` wires `innerworld.Body` to `yent.DOEBody` (resident `doe_field` REPL, `nemo12`) and `innerworld.Field` to the real AML kernel — no stub, no fixture pool. Every overthinking circle is a real `nemo12` generation.
+
+- **Run (Metal, `yent-nemo-v22-ck60-Q4_K_M.gguf`):** three circles, drift rising 0.83 → 0.84 → 0.91; larynx coupling ~0.6; deep-self-answer gate unpredictable on real data (a turn rolled false, an autonomous dream rolled true); one autonomous dream, a real deep generation. The third circle, in Yent's S8-boundary voice: *"You're a closed loop of self-awareness, sarcasm, and existential queerness… hold a mirror to your non-binary soul… You're already in the field. Don't run."*
+- **Field fix:** the first run read `velocity_mode=0 destiny=0` — a struct-layout mismatch: `yent.AMK` read the canonical-built `libamk.a` through the stale `amk_kernel.h`, which lacks `field_enabled`, so every field past `prophecy` shifted by 4 bytes. Proven by an A/B read of the same field G (kernel header `velocity=0` vs canonical `velocity=2`). `dock` now reads the field through canonical `ariannamethod.h` directly → Metal run shows `debt=2.005 velocity_mode=2(RUN) destiny=0.350`, the field visibly alive. (Codex independently aligned `amk.go` to `ariannamethod.h` in main — see the AMK-bridge entry above; same root cause, two fixes.)
+- **Not yet wired:** limpha (memory) — this strike is the goroutines over a real body; the brain is a later step.
+
 ## Weights
 
 Not in open access. Code is GPL; weights/deltas/gamma are under the Yent Identity License v1.1 (`LICENSE-WEIGHTS`). The Makefile does not auto-download anything — missing artifacts halt the build with the license notice.
