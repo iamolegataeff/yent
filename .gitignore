@@ -23,6 +23,7 @@ tokens.env
 /artifacts/
 /models/
 /adapters/
+/.worktrees/
 yent/c/libamk.a
 yent/c/*.o
 yent/c/*.dylib

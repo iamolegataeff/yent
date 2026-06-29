@@ -47,7 +47,7 @@ func TestDOEBodyPersistentGenerate(t *testing.T) {
 	}
 	defer body.Close()
 
-	out, err := body.Generate("Who are you?", "[routing reason: low_confidence]\n[nemo12 said]: unsure")
+	out, err := body.Generate("Who are you?", "[routing reason: low_confidence]\n[fast mouth said]: unsure")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,8 +90,14 @@ func TestFormatDOEPromptCapsWrapperInput(t *testing.T) {
 	if !strings.Contains(seed, "Who are you?") {
 		t.Fatalf("seed must preserve user prompt before trimming context: %q", seed[:min(len(seed), 80)])
 	}
-	if !strings.Contains(seed, "[answer contract]: Answer the user prompt directly") {
+	if !strings.Contains(seed, "[context facts]:") || !strings.Contains(seed, "[answer contract]: Answer the user prompt directly") {
 		t.Fatalf("contextual seed must include answer contract: %q", seed[:min(len(seed), 220)])
+	}
+	if strings.Index(seed, "[user prompt]:") < strings.Index(seed, "[context facts]:") {
+		t.Fatalf("user prompt should remain the final section after context: %q", seed[:min(len(seed), 220)])
+	}
+	if !strings.Contains(seed, "use [router fact] literally") {
+		t.Fatalf("contextual seed must preserve router fact contract: %q", seed[:min(len(seed), 220)])
 	}
 }
 

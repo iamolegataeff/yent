@@ -334,17 +334,14 @@ func neutralizeDOEPrompt(seed string) string {
 }
 
 func formatDOEPrompt(prompt, ctx string) string {
-	prompt = strings.TrimSpace(prompt)
-	ctx = strings.TrimSpace(ctx)
+	prompt = strings.Join(strings.Fields(strings.TrimSpace(prompt)), " ")
+	ctx = strings.Join(strings.Fields(strings.TrimSpace(ctx)), " ")
 	var seed string
 	if ctx == "" {
 		seed = prompt
 	} else {
-		seed = "[user prompt]: " + prompt +
-			"\n[answer contract]: Answer the user prompt directly. Use context as private evidence; do not make routing or context the subject unless the user asks." +
-			"\n[context]: " + ctx
+		seed = formatContextualDOEPrompt(prompt, ctx)
 	}
-	seed = strings.Join(strings.Fields(seed), " ")
 	if len(seed) <= maxDOEPromptBytes {
 		return neutralizeDOEPrompt(seed)
 	}
@@ -353,6 +350,34 @@ func formatDOEPrompt(prompt, ctx string) string {
 		cut = sp
 	}
 	return neutralizeDOEPrompt(strings.ToValidUTF8(seed[:cut], ""))
+}
+
+func formatContextualDOEPrompt(prompt, ctx string) string {
+	const (
+		contextPrefix = "[context facts]: "
+		contract      = " [answer contract]: Answer the user prompt directly. Use context as private factual evidence. If the user asks about route or body facts, use [router fact] literally. Do not make routing or context the subject unless the user asks."
+		promptPrefix  = " [user prompt]: "
+	)
+	suffix := contract + promptPrefix + prompt
+	budget := maxDOEPromptBytes - len(contextPrefix) - len(suffix)
+	if budget < 0 {
+		return strings.TrimSpace(suffix)
+	}
+	return contextPrefix + truncateAtWord(ctx, budget) + suffix
+}
+
+func truncateAtWord(s string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(s) <= maxBytes {
+		return s
+	}
+	cut := maxBytes
+	if sp := strings.LastIndexByte(s[:cut], ' '); sp > 0 {
+		cut = sp
+	}
+	return strings.TrimSpace(strings.ToValidUTF8(s[:cut], ""))
 }
 
 func parseDOEReply(out string) string {
