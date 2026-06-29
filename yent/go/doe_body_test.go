@@ -90,6 +90,9 @@ func TestFormatDOEPromptCapsWrapperInput(t *testing.T) {
 	if !strings.Contains(seed, "Who are you?") {
 		t.Fatalf("seed must preserve user prompt before trimming context: %q", seed[:min(len(seed), 80)])
 	}
+	if !strings.Contains(seed, "[answer contract]: Answer the user prompt directly") {
+		t.Fatalf("contextual seed must include answer contract: %q", seed[:min(len(seed), 220)])
+	}
 }
 
 func TestNeutralizeDOEControlWords(t *testing.T) {

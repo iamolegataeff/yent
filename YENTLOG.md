@@ -141,6 +141,10 @@ The Yent AMK was a 693-line physics extract; the innerworld layer needs the full
 - **Verified:** `ariannamethod.c` compiles standalone (CPU, one harmless unused-`blood_hash` warning when Blood is disabled); lean `libamk.a` links; `go test ./tests -run AMK` green.
 - **Build wiring (for other hosts):** the local `Makefile` / `libamk.a` are gitignored; each build host points `libamk.a` at `ariannamethod.c` with the lean flags above. Local builds still using `amk_kernel.c` keep working (subset, same symbols) until they switch.
 
+## 2026-06-29 — DOE contextual answer contract
+
+Live Metal smoke showed the router mechanics working (`nemo12` fast-only, `small24` on complexity, JSON route trace emitted), but the deep contextual turn answered the routing context too loosely. `formatDOEPrompt` now adds an explicit answer contract for context-bearing calls: answer the user prompt directly, treat context as private evidence, and do not make routing/context the subject unless asked. Local verification: `go test ./...` passes.
+
 ## Weights
 
 Not in open access. Code is GPL; weights/deltas/gamma are under the Yent Identity License v1.1 (`LICENSE-WEIGHTS`). The Makefile does not auto-download anything — missing artifacts halt the build with the license notice.

@@ -340,7 +340,9 @@ func formatDOEPrompt(prompt, ctx string) string {
 	if ctx == "" {
 		seed = prompt
 	} else {
-		seed = "[user prompt]: " + prompt + "\n[context]: " + ctx
+		seed = "[user prompt]: " + prompt +
+			"\n[answer contract]: Answer the user prompt directly. Use context as private evidence; do not make routing or context the subject unless the user asks." +
+			"\n[context]: " + ctx
 	}
 	seed = strings.Join(strings.Fields(seed), " ")
 	if len(seed) <= maxDOEPromptBytes {
