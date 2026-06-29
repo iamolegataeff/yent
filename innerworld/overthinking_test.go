@@ -169,3 +169,21 @@ func TestRepelEnforcesDrift(t *testing.T) {
 		t.Errorf("repel should reach drift >= 0.5, got %.3f at temp %.2f", drift, temp)
 	}
 }
+
+// emptyBody is a body that returns nothing — a timed-out or wedged voice.
+type emptyBody struct{}
+
+func (emptyBody) Generate(string, float32) string { return "" }
+
+func TestOverthinkEmptyStops(t *testing.T) {
+	// a body that returns "" must not produce empty circles or drive the field —
+	// the ripple ends instead of cascading garbage (the metal-run cascade fix).
+	field := &fakeField{}
+	c := Overthink("q", emptyBody{}, field, tempDivergence, DefaultConfig())
+	if len(c) != 0 {
+		t.Errorf("an empty body should produce no circles, got %d", len(c))
+	}
+	if scripts := field.scriptList(); len(scripts) != 0 {
+		t.Errorf("an empty body must not drive the field, got %d commands", len(scripts))
+	}
+}

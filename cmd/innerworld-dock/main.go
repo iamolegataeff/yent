@@ -37,8 +37,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -131,9 +134,26 @@ func mustEnv(name string) string {
 	return v
 }
 
+// durationEnv reads a positive seconds value, or 0 to let NewDOEBody use its
+// default. A first generation also pays the prime, so the deep 24B body needs a
+// generous YENT_DOE_TIMEOUT_SEC (the 45s default is too tight for it).
+func durationEnv(name string) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return 0
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v <= 0 {
+		return 0
+	}
+	return time.Duration(v * float64(time.Second))
+}
+
 func newBody(name, bin, model, workdir string, args []string) *yent.DOEBody {
 	b, err := yent.NewDOEBody(yent.DOEBodyConfig{
 		Name: name, BinPath: bin, ModelPath: model, WorkDir: workdir, Args: args,
+		Timeout:      durationEnv("YENT_DOE_TIMEOUT_SEC"),
+		PrimeTimeout: durationEnv("YENT_DOE_PRIME_TIMEOUT_SEC"),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[dock] build %s body: %v\n", name, err)
@@ -178,8 +198,19 @@ func main() {
 		fmt.Println("    (YENT_DOCK_FORCE_GATE=1: gate forced open to prove the small24 path)")
 	}
 
+	// Signal-aware: SIGINT/SIGTERM cancels the wait and the breath so the deferred
+	// Close calls still run — the doe daemons are reaped, not orphaned.
+	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	fmt.Println("=== a human turn: the inner circles (real nemo body) ===")
-	r := <-iw.Think("what does it mean to exist as code?")
+	var r innerworld.Reflection
+	select {
+	case r = <-iw.Think("what does it mean to exist as code?"):
+	case <-sigCtx.Done():
+		fmt.Println("  (interrupted — closing bodies)")
+		return
+	}
 	for _, c := range r.Circles {
 		fmt.Printf("  circle %d  t=%.2f drift=%.2f  | %s\n", c.Index, c.Temp, c.Drift, c.Text)
 	}
@@ -210,7 +241,7 @@ func main() {
 		Silence:   1 * time.Second,
 		DriftDebt: 0.0, // any debt counts, so the drift dreamer is lively for the demo
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(sigCtx, 8*time.Second)
 	defer cancel()
 	iw.Breathe(ctx)
 	fmt.Println("=== done ===")

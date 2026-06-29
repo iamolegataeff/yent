@@ -266,3 +266,24 @@ func TestSingleResidentSwap(t *testing.T) {
 		t.Errorf("deep body must be closed when swapping back to fast; closes=%d", dc)
 	}
 }
+
+func TestDeepSkipsEmptyCircles(t *testing.T) {
+	// fast body returns nothing -> no circles -> even a fired gate must not swap or
+	// wake the deep body on an empty stream (the empty-deepSeed fix).
+	deep := &recordingBody{answer: "should never be generated"}
+	iw := NewInnerWorld(emptyBody{}, &fakeField{debt: 5.0}, tempDivergence)
+	iw.SetDeep(deep)
+	iw.SetLarynx(fixedLarynx{0.9})
+	iw.SetRoll(func() float32 { return 0.0 }) // gate would fire
+
+	r := <-iw.Think("a question")
+	if len(r.Circles) != 0 {
+		t.Fatalf("empty body should yield no circles, got %d", len(r.Circles))
+	}
+	if r.DeepAnswer != "" {
+		t.Errorf("deep must stay silent on an empty circle stream, got %q", r.DeepAnswer)
+	}
+	if gens, closes := deep.counts(); gens != 0 || closes != 0 {
+		t.Errorf("deep body must not be touched on empty circles; gens=%d closes=%d", gens, closes)
+	}
+}
