@@ -145,6 +145,10 @@ The Yent AMK was a 693-line physics extract; the innerworld layer needs the full
 
 Live Metal smoke showed the router mechanics working (`nemo12` fast-only, `small24` on complexity, JSON route trace emitted), but the deep contextual turn answered the routing context too loosely. `formatDOEPrompt` now adds an explicit answer contract for context-bearing calls: answer the user prompt directly, treat context as private evidence, and do not make routing/context the subject unless asked. Local verification: `go test ./...` passes.
 
+## 2026-06-29 — AMK bridge aligned to full AML core
+
+After the full `ariannamethod.c` vendor, the Go bridge must include `ariannamethod.h`, not the old extracted `amk_kernel.h`; otherwise CGO reads the full-core `AM_State` through a stale struct layout. `GetDestinyBias` now reads the full state and falls back to `destiny` when `destiny_bias` is unset. AMK tests now assert the full-core temperature contract after runtime commands: velocity temperature blended with balanced expert temperature. Local verification: `go test ./...` passes against the lean full-core `libamk.a`.
+
 ## Weights
 
 Not in open access. Code is GPL; weights/deltas/gamma are under the Yent Identity License v1.1 (`LICENSE-WEIGHTS`). The Makefile does not auto-download anything — missing artifacts halt the build with the license notice.
