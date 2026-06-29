@@ -2,6 +2,7 @@ package innerworld
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -55,18 +56,19 @@ func TestDue(t *testing.T) {
 func TestDream(t *testing.T) {
 	iw := NewInnerWorld(fakeBody{}, &fakeField{}, tempDivergence)
 	var got []Circle
-	iw.OnDream = func(c []Circle) { got = c }
-	now := time.Now()
+	iw.SetOnDream(func(c []Circle) { got = c }) // dream calls OnDream synchronously
+	before := time.Now()
 
-	circles := iw.dream(trigSilence, now)
+	circles := iw.dream(trigSilence)
 	if len(circles) != 3 {
 		t.Fatalf("want 3 dream circles, got %d", len(circles))
 	}
 	if len(got) != 3 {
 		t.Errorf("OnDream not fired with 3 circles, got %d", len(got))
 	}
-	if !iw.lastFire[trigSilence].Equal(now) {
-		t.Errorf("lastFire not set after dream")
+	// cooldown is measured from completion: lastFire is set after the dream runs
+	if iw.lastFire[trigSilence].Before(before) {
+		t.Errorf("lastFire not set to dream-completion time")
 	}
 }
 
@@ -89,7 +91,7 @@ func TestBreatheFires(t *testing.T) {
 	iw.br.Tick = time.Millisecond
 	iw.br.Cooldown[trigDrift] = time.Millisecond
 	var n int32
-	iw.OnDream = func([]Circle) { atomic.AddInt32(&n, 1) }
+	iw.SetOnDream(func([]Circle) { atomic.AddInt32(&n, 1) })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
 	defer cancel()
@@ -98,4 +100,37 @@ func TestBreatheFires(t *testing.T) {
 	if atomic.LoadInt32(&n) < 1 {
 		t.Errorf("breathe with high drift should dream at least once, got %d", n)
 	}
+}
+
+func TestCloneIsolation(t *testing.T) {
+	iw := NewInnerWorld(fakeBody{}, &fakeField{}, tempDivergence)
+	circles := <-iw.Think("a question")
+	if len(circles) == 0 {
+		t.Fatal("no circles returned")
+	}
+	circles[0].Text = "MUTATED" // mutate the caller's copy
+	iw.mu.Lock()
+	internal := iw.circles[0].Text
+	iw.mu.Unlock()
+	if internal == "MUTATED" {
+		t.Errorf("external mutation leaked into iw.circles — clone failed")
+	}
+}
+
+func TestConcurrentSafe(t *testing.T) {
+	iw := NewInnerWorld(fakeBody{}, &fakeField{debt: 2.0}, tempDivergence)
+	iw.br.Tick = time.Millisecond
+	iw.br.Cooldown[trigDrift] = time.Millisecond
+	iw.SetOnDream(func([]Circle) {})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); iw.Breathe(ctx) }() // autonomous dreaming
+	for i := 0; i < 20; i++ {
+		<-iw.Think("turn") // human turns, concurrent with the dreaming
+	}
+	wg.Wait()
 }

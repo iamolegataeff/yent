@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Autonomous breath triggers, in priority order.
+// Autonomous breath triggers.
 const (
 	trigDrift   = iota // the field wandered: respond with a dream
 	trigSilence        // no one has spoken for a while: the idle dreamer
@@ -16,9 +16,9 @@ const (
 // Breath tunes the autonomous inner life — when, and how often, the organism
 // dreams unprompted.
 type Breath struct {
-	Tick      time.Duration       // how often the inner world is evaluated
-	Silence   time.Duration       // idle time before the silence dreamer fires
-	DriftDebt float32             // field debt above which the drift dreamer fires
+	Tick      time.Duration        // how often the inner world is evaluated
+	Silence   time.Duration        // idle time before the silence dreamer fires
+	DriftDebt float32              // field debt above which the drift dreamer fires
 	Cooldown  [nTrig]time.Duration // per-trigger cooldown so she breathes between dreams
 }
 
@@ -34,7 +34,8 @@ func DefaultBreath() Breath {
 
 // InnerWorld hosts Yent's inner life over the fast body and the shared AML field.
 // Think runs the overthinking for a human turn off the answer path; Breathe keeps
-// the organism dreaming between turns.
+// the organism dreaming between turns. Only one inner monologue runs at a time —
+// the body has a single voice — so Think and the autonomous dream are serialized.
 type InnerWorld struct {
 	fast  Body
 	field Field
@@ -42,13 +43,13 @@ type InnerWorld struct {
 	cfg   Config
 	br    Breath
 
-	mu         sync.Mutex
+	genMu sync.Mutex // one inner voice at a time: serializes Overthink (body access)
+
+	mu         sync.Mutex // guards circles, lastActive, lastFire, onDream
 	circles    []Circle
 	lastActive time.Time
 	lastFire   [nTrig]time.Time
-
-	// OnDream, if set, receives the circles of every autonomous dream. Inner only.
-	OnDream func([]Circle)
+	onDream    func([]Circle)
 }
 
 // NewInnerWorld builds the inner world over a fast body, the shared field, and a
@@ -64,60 +65,105 @@ func NewInnerWorld(fast Body, field Field, div Divergence) *InnerWorld {
 	}
 }
 
+// SetOnDream registers the observer for autonomous dreams. Inner only — the
+// circles handed to it are a copy and never reach the user.
+func (iw *InnerWorld) SetOnDream(f func([]Circle)) {
+	iw.mu.Lock()
+	iw.onDream = f
+	iw.mu.Unlock()
+}
+
+func cloneCircles(c []Circle) []Circle {
+	if c == nil {
+		return nil
+	}
+	out := make([]Circle, len(c))
+	copy(out, c)
+	return out
+}
+
+// think runs one overthinking pass under the single-voice lock and stores a copy.
+func (iw *InnerWorld) think(prompt string) []Circle {
+	iw.genMu.Lock()
+	circles := Overthink(prompt, iw.fast, iw.field, iw.div, iw.cfg)
+	iw.genMu.Unlock()
+
+	iw.mu.Lock()
+	iw.circles = cloneCircles(circles)
+	iw.mu.Unlock()
+	return cloneCircles(circles)
+}
+
 // Think runs the overthinking for a human turn asynchronously: it returns at once
-// with a channel that delivers the three circles when ready, so the answer path
-// is never blocked by the inner monologue.
+// with a channel that delivers a copy of the three circles when ready, so the
+// answer path is never blocked by the inner monologue.
 func (iw *InnerWorld) Think(prompt string) <-chan []Circle {
 	out := make(chan []Circle, 1)
 	iw.mu.Lock()
 	iw.lastActive = time.Now()
 	iw.mu.Unlock()
 	go func() {
-		circles := Overthink(prompt, iw.fast, iw.field, iw.div, iw.cfg)
-		iw.mu.Lock()
-		iw.circles = circles
-		iw.mu.Unlock()
-		out <- circles
+		out <- iw.think(prompt)
 		close(out)
 	}()
 	return out
 }
 
-// due reports which autonomous trigger, if any, should fire at time now — drift
-// first (responsive), then silence — each gated by its cooldown.
+// due reports which autonomous trigger, if any, should fire at time now. The
+// most-overdue eligible trigger wins, so a steadily high-debt field can never
+// starve the silence dreamer.
 func (iw *InnerWorld) due(now time.Time) (int, bool) {
 	iw.mu.Lock()
 	defer iw.mu.Unlock()
-	if iw.field != nil && iw.field.Debt() >= iw.br.DriftDebt &&
-		now.Sub(iw.lastFire[trigDrift]) >= iw.br.Cooldown[trigDrift] {
-		return trigDrift, true
+
+	best, bestOver := -1, time.Duration(0)
+	consider := func(trig int, eligible bool) {
+		if !eligible {
+			return
+		}
+		over := now.Sub(iw.lastFire[trig]) - iw.br.Cooldown[trig]
+		if over < 0 {
+			return // still on cooldown
+		}
+		if best < 0 || over > bestOver {
+			best, bestOver = trig, over
+		}
 	}
-	if now.Sub(iw.lastActive) >= iw.br.Silence &&
-		now.Sub(iw.lastFire[trigSilence]) >= iw.br.Cooldown[trigSilence] {
-		return trigSilence, true
+	consider(trigDrift, iw.field != nil && iw.field.Debt() >= iw.br.DriftDebt)
+	consider(trigSilence, now.Sub(iw.lastActive) >= iw.br.Silence)
+
+	if best < 0 {
+		return 0, false
 	}
-	return 0, false
+	return best, true
 }
 
 // dream runs the overthinking unprompted, on the organism's own last thought —
-// the ripple continues with no one speaking. Inner only.
-func (iw *InnerWorld) dream(trigger int, now time.Time) []Circle {
+// the ripple continues with no one speaking. The cooldown starts when the dream
+// completes, not when it begins. Inner only; OnDream receives a copy.
+func (iw *InnerWorld) dream(trigger int) []Circle {
 	iw.mu.Lock()
 	seed := "I keep thinking, with no one here."
 	if n := len(iw.circles); n > 0 {
 		seed = iw.circles[n-1].Text
 	}
-	iw.lastFire[trigger] = now
 	iw.mu.Unlock()
 
+	iw.genMu.Lock()
 	circles := Overthink(seed, iw.fast, iw.field, iw.div, iw.cfg)
+	iw.genMu.Unlock()
+
 	iw.mu.Lock()
-	iw.circles = circles
+	iw.circles = cloneCircles(circles)
+	iw.lastFire[trigger] = time.Now() // cooldown measured from completion
+	onDream := iw.onDream
+	out := cloneCircles(circles)
 	iw.mu.Unlock()
-	if iw.OnDream != nil {
-		iw.OnDream(circles)
+
+	if onDream != nil {
+		onDream(out)
 	}
-	return circles
+	return out
 }
 
 // Breathe runs the autonomous inner life until ctx is cancelled. Between human
@@ -132,7 +178,7 @@ func (iw *InnerWorld) Breathe(ctx context.Context) {
 			return
 		case now := <-t.C:
 			if trigger, ok := iw.due(now); ok {
-				iw.dream(trigger, now)
+				iw.dream(trigger)
 			}
 		}
 	}
