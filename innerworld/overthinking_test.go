@@ -3,6 +3,7 @@ package innerworld
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -30,16 +31,40 @@ func tempDivergence(_, b string) float32 {
 }
 
 // fakeField records the AML commands and physics steps the inner world drives.
+// It is safe for concurrent use, as production Field implementations must be.
 type fakeField struct {
+	mu      sync.Mutex
 	scripts []string
 	steps   int
 	debt    float32
 }
 
-func (f *fakeField) Exec(s string) error { f.scripts = append(f.scripts, s); return nil }
-func (f *fakeField) Step(dt float32)     { f.steps++; f.debt += dt * 0.1 }
-func (f *fakeField) Debt() float32       { return f.debt }
-func (f *fakeField) Destiny() float32    { return 0 }
+func (f *fakeField) Exec(s string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.scripts = append(f.scripts, s)
+	return nil
+}
+func (f *fakeField) Step(dt float32) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.steps++
+	f.debt += dt * 0.1
+}
+func (f *fakeField) Debt() float32 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.debt
+}
+func (f *fakeField) Destiny() float32 { return 0 }
+
+func (f *fakeField) scriptList() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.scripts))
+	copy(out, f.scripts)
+	return out
+}
 
 func TestOverthinkCircles(t *testing.T) {
 	const prompt = "what does it mean to exist as code"
@@ -73,8 +98,9 @@ func TestOverthinkCircles(t *testing.T) {
 	}
 
 	// field driven: each circle emits PROPHECY + VELOCITY and steps the physics
+	scripts := field.scriptList()
 	var prophecy, velocity int
-	for _, s := range field.scripts {
+	for _, s := range scripts {
 		if strings.HasPrefix(s, "PROPHECY ") {
 			prophecy++
 		}
@@ -90,8 +116,8 @@ func TestOverthinkCircles(t *testing.T) {
 	}
 
 	// later circles run faster: VELOCITY RUN appears at circle 2
-	if !containsStr(field.scripts, "VELOCITY RUN") {
-		t.Errorf("circle 2 should drive VELOCITY RUN, scripts=%v", field.scripts)
+	if !containsStr(scripts, "VELOCITY RUN") {
+		t.Errorf("circle 2 should drive VELOCITY RUN, scripts=%v", scripts)
 	}
 }
 
@@ -102,4 +128,44 @@ func containsStr(ss []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// monoBody / monoDiv produce drift that rises strictly with temperature, so the
+// repel loop can always reach a target drift by heating up.
+type monoBody struct{}
+
+func (monoBody) Generate(_ string, temp float32) string {
+	return fmt.Sprintf("t=%.4f", temp)
+}
+
+func monoDiv(_, b string) float32 {
+	var t float32
+	if i := strings.LastIndex(b, "t="); i >= 0 {
+		fmt.Sscanf(b[i+2:], "%f", &t)
+	}
+	return t / 2
+}
+
+func TestNilSafe(t *testing.T) {
+	cfg := DefaultConfig()
+	if c := Overthink("q", nil, &fakeField{}, monoDiv, cfg); c != nil {
+		t.Errorf("nil body should yield nil circles, got %d", len(c))
+	}
+	if c := Overthink("q", monoBody{}, &fakeField{}, nil, cfg); c != nil {
+		t.Errorf("nil divergence should yield nil circles, got %d", len(c))
+	}
+	// nil field must not panic; circles still produced
+	if c := Overthink("q", monoBody{}, nil, monoDiv, cfg); len(c) != cfg.N {
+		t.Errorf("nil field should still produce %d circles, got %d", cfg.N, len(c))
+	}
+}
+
+func TestRepelEnforcesDrift(t *testing.T) {
+	// base temp 0.7 gives drift 0.35, below the target 0.5; the repel loop must
+	// heat up until drift reaches at least the prior circle's drift.
+	cfg := Config{TempBase: 0.7, RepelStep: 0.2, MaxRepel: 4}
+	_, drift, temp := generateDivergent(monoBody{}, "seed", "prev", monoDiv, 0.7, 0.5, cfg)
+	if drift < 0.5 {
+		t.Errorf("repel should reach drift >= 0.5, got %.3f at temp %.2f", drift, temp)
+	}
 }

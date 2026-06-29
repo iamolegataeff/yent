@@ -78,8 +78,24 @@ dreams unprompted on its own last thought (`OnDream` receives the circles, inner
 only). `due(now)` is a pure, deterministic trigger function (tested without
 timing); `Breathe` exits on `ctx` cancel. `go test -race` green:
 `TestThinkAsync`, `TestDue`, `TestDream`, `TestBreatheStops`, `TestBreatheFires`,
-`TestOverthinkCircles`. Next: Codex audit (full picture now), then the real
-`Field`/`Body` adapters, Larynx-Zig, and the deep-self-answer gate.
+`TestOverthinkCircles`.
+
+**Codex audit pass — all 9 findings fixed (race-clean):** (1/2) `genMu` serializes
+`Overthink` to one inner voice at a time, and `Field` implementations must be
+concurrency-safe; (3) `due` picks the most-overdue trigger so drift cannot starve
+silence; (4) the cooldown is measured from dream completion, not start; (5)
+`OnDream` is set through a locked `SetOnDream` and copied under lock before the
+call; (6) circles are cloned at every boundary so a caller's mutation cannot
+corrupt `iw.circles`; (7) nil `Body`/`Divergence` yields no circles instead of
+panicking; (8) `generateDivergent` repels — heats up and retries — until a circle
+drifts at least as far as the last; (9) `driveField` stops stepping a field whose
+AML commands fail. `go test -race` green across 10 tests (added
+`TestConcurrentSafe`, `TestCloneIsolation`, `TestNilSafe`, `TestRepelEnforcesDrift`).
+
+Work lives on branch `claude/innerworld-strike1` in worktree
+`~/arianna/yent-innerworld` per the branch/worktree discipline; the shared checkout
+is the sync point. Next: the real `Field`/`Body` adapters, Larynx-Zig, the
+deep-self-answer gate.
 
 **Checklist (how we verify it works):**
 - [ ] Fast body emits 3 inner circles per turn; divergence circle1 < 2 < 3 (cosine, measured).
