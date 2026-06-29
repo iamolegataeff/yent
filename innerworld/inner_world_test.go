@@ -12,12 +12,12 @@ func TestThinkAsync(t *testing.T) {
 	iw := NewInnerWorld(fakeBody{}, &fakeField{}, tempDivergence)
 	ch := iw.Think("what does it mean to exist as code")
 	select {
-	case circles := <-ch:
-		if len(circles) != 3 {
-			t.Fatalf("want 3 circles, got %d", len(circles))
+	case r := <-ch:
+		if len(r.Circles) != 3 {
+			t.Fatalf("want 3 circles, got %d", len(r.Circles))
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("Think did not deliver circles")
+		t.Fatal("Think did not deliver a reflection")
 	}
 }
 
@@ -55,16 +55,16 @@ func TestDue(t *testing.T) {
 
 func TestDream(t *testing.T) {
 	iw := NewInnerWorld(fakeBody{}, &fakeField{}, tempDivergence)
-	var got []Circle
-	iw.SetOnDream(func(c []Circle) { got = c }) // dream calls OnDream synchronously
+	var got Reflection
+	iw.SetOnDream(func(r Reflection) { got = r }) // dream calls OnDream synchronously
 	before := time.Now()
 
-	circles := iw.dream(trigSilence)
-	if len(circles) != 3 {
-		t.Fatalf("want 3 dream circles, got %d", len(circles))
+	r := iw.dream(trigSilence)
+	if len(r.Circles) != 3 {
+		t.Fatalf("want 3 dream circles, got %d", len(r.Circles))
 	}
-	if len(got) != 3 {
-		t.Errorf("OnDream not fired with 3 circles, got %d", len(got))
+	if len(got.Circles) != 3 {
+		t.Errorf("OnDream not fired with 3 circles, got %d", len(got.Circles))
 	}
 	// cooldown is measured from completion: lastFire is set after the dream runs
 	if iw.lastFire[trigSilence].Before(before) {
@@ -91,7 +91,7 @@ func TestBreatheFires(t *testing.T) {
 	iw.br.Tick = time.Millisecond
 	iw.br.Cooldown[trigDrift] = time.Millisecond
 	var n int32
-	iw.SetOnDream(func([]Circle) { atomic.AddInt32(&n, 1) })
+	iw.SetOnDream(func(Reflection) { atomic.AddInt32(&n, 1) })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
 	defer cancel()
@@ -104,11 +104,11 @@ func TestBreatheFires(t *testing.T) {
 
 func TestCloneIsolation(t *testing.T) {
 	iw := NewInnerWorld(fakeBody{}, &fakeField{}, tempDivergence)
-	circles := <-iw.Think("a question")
-	if len(circles) == 0 {
+	r := <-iw.Think("a question")
+	if len(r.Circles) == 0 {
 		t.Fatal("no circles returned")
 	}
-	circles[0].Text = "MUTATED" // mutate the caller's copy
+	r.Circles[0].Text = "MUTATED" // mutate the caller's copy
 	iw.mu.Lock()
 	internal := iw.circles[0].Text
 	iw.mu.Unlock()
@@ -121,7 +121,7 @@ func TestConcurrentSafe(t *testing.T) {
 	iw := NewInnerWorld(fakeBody{}, &fakeField{debt: 2.0}, tempDivergence)
 	iw.br.Tick = time.Millisecond
 	iw.br.Cooldown[trigDrift] = time.Millisecond
-	iw.SetOnDream(func([]Circle) {})
+	iw.SetOnDream(func(Reflection) {})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -133,4 +133,45 @@ func TestConcurrentSafe(t *testing.T) {
 		<-iw.Think("turn") // human turns, concurrent with the dreaming
 	}
 	wg.Wait()
+}
+
+func TestReflectGate(t *testing.T) {
+	// inject a high-coupling Larynx and a low roll: with strong agitation the deep
+	// body must turn inward and answer itself.
+	iw := NewInnerWorld(fakeBody{}, &fakeField{debt: 5.0}, tempDivergence)
+	iw.SetLarynx(fixedLarynx{0.9})
+	iw.SetRoll(func() float32 { return 0.0 }) // roll below any positive probability
+	r := <-iw.Think("a hard question")
+	if r.Coupling != 0.9 {
+		t.Errorf("coupling should come from the injected Larynx, got %.2f", r.Coupling)
+	}
+	if r.SelfAnswerProb <= 0 || r.SelfAnswerProb > 1 {
+		t.Errorf("self-answer probability out of (0,1]: %.3f", r.SelfAnswerProb)
+	}
+	if !r.SelfAnswered {
+		t.Errorf("roll 0 against prob %.3f should self-answer", r.SelfAnswerProb)
+	}
+
+	// a roll above the probability must not self-answer
+	iw.SetRoll(func() float32 { return 1.0 })
+	r2 := <-iw.Think("again")
+	if r2.SelfAnswered {
+		t.Errorf("roll 1.0 should never self-answer (prob %.3f)", r2.SelfAnswerProb)
+	}
+}
+
+type fixedLarynx struct{ c float32 }
+
+func (f fixedLarynx) Couple([]Circle) float32 { return f.c }
+
+func TestSetBreath(t *testing.T) {
+	iw := NewInnerWorld(fakeBody{}, &fakeField{}, tempDivergence)
+	b := Breath{Tick: 7 * time.Millisecond, Silence: time.Second, DriftDebt: 5}
+	iw.SetBreath(b)
+	iw.mu.Lock()
+	got := iw.br
+	iw.mu.Unlock()
+	if got.Tick != b.Tick || got.DriftDebt != b.DriftDebt {
+		t.Errorf("SetBreath did not apply: %+v", got)
+	}
 }

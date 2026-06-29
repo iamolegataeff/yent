@@ -94,8 +94,36 @@ AML commands fail. `go test -race` green across 10 tests (added
 
 Work lives on branch `claude/innerworld-strike1` in worktree
 `~/arianna/yent-innerworld` per the branch/worktree discipline; the shared checkout
-is the sync point. Next: the real `Field`/`Body` adapters, Larynx-Zig, the
-deep-self-answer gate.
+is the sync point.
+
+## Strike 1b — Larynx-Zig membrane (2026-06-29)
+
+`innerworld/larynx.zig` is the membrane between the two bodies, in the vagus.zig
+family. The fast body raises the circles; the Larynx measures the *texture* of
+that token stream — `entropy` (how varied) and `repetition` (how much it loops) —
+and hands the deep body a `coupling` factor in [0,1]: a flowing stream couples
+(the deep body attends to the fast circles), a looping one does not (do not
+reinforce a loop). `zig test` green (3/3): flowing `[1..6]` → entropy 1.00,
+repetition 0.00, coupling 1.00; looping `[1×6]` → entropy 0.00, repetition 0.83,
+coupling 0.00; texture clamped to [0,1]; an empty stream is inert.
+
+## Strike 1c + 2 — gate + Larynx wired into the flow (2026-06-29)
+
+The inner monologue is now closed end-to-end. `gate.go` adds `DeepGate` (blends
+field debt + circle drift + Larynx coupling into a self-answer probability) and
+`SelfAnswers` (rolls against it — deterministic given the roll, so tests are exact;
+production draws `rand`). `larynx_go.go` adds the `Larynx` interface and
+`textureLarynx`, the portable Go mirror of `larynx.zig` (same
+`entropy * (1 - repetition)` coupling, tokenizing circle words via fnv). `Think`
+now returns a `Reflection`: the circles, the coupling, the self-answer probability,
+and whether the deep body turned inward this time — the deep body sometimes answers
+itself, sometimes not. `Larynx` and the gate's roll are injectable (`SetLarynx`,
+`SetRoll`) for deterministic tests. `go test -race` green across 14 tests
+(`TestReflectGate`, `TestTextureLarynx`, `TestDeepGate`, `TestSelfAnswers` added).
+
+Next: a Neo run (`cmd/innerworld-run`) wiring the real AML field via libamk.a + the
+Go Larynx + a stub body, to watch the field react and the gate decide; then the
+Mac-Mini dock (the real nemo body + the Go↔Zig Larynx binding) and a Codex audit.
 
 **Checklist (how we verify it works):**
 - [ ] Fast body emits 3 inner circles per turn; divergence circle1 < 2 < 3 (cosine, measured).
