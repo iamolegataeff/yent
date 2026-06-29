@@ -120,7 +120,8 @@ func (iw *InnerWorld) SetMemory(m Memory) {
 // the organism thinks with what it thought before. NO-SEED-FROM-PROMPT still holds:
 // the recall and prompt are transformed by innerSeed inside Overthink before circle
 // 0. Caller holds genMu. No memory, no recalls, or RecallN<=0 returns the prompt
-// unchanged (backward-compatible).
+// unchanged (backward-compatible). Past text is framed as pressure/trace, not as
+// dialogue to continue; raw recall otherwise overheats into imitation loops.
 func (iw *InnerWorld) recallSeed(prompt string) string {
 	if iw.memory == nil || iw.cfg.RecallN <= 0 {
 		return prompt
@@ -130,14 +131,14 @@ func (iw *InnerWorld) recallSeed(prompt string) string {
 		return prompt
 	}
 	var b strings.Builder
-	b.WriteString("Recalling earlier thoughts: ")
+	b.WriteString("Past inner pressure, not dialogue to continue or imitate. Treat these as field traces, not quoted speech: ")
 	for i, p := range past {
 		if i > 0 {
-			b.WriteString(" / ")
+			b.WriteString(" | ")
 		}
 		b.WriteString(p)
 	}
-	b.WriteString(". Now: ")
+	b.WriteString(". Think fresh from the current human turn: ")
 	b.WriteString(prompt)
 	return b.String()
 }

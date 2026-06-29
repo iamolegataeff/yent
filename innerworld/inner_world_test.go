@@ -35,6 +35,14 @@ func TestRecallFoldsIn(t *testing.T) {
 	if !strings.Contains(seed, "what is code") {
 		t.Errorf("circle 0 seed should still carry the prompt, got %q", seed)
 	}
+	if !strings.Contains(seed, "not dialogue to continue or imitate") ||
+		!strings.Contains(seed, "field traces") ||
+		!strings.Contains(seed, "Think fresh from the current human turn") {
+		t.Errorf("recall should be framed as bounded pressure, got %q", seed)
+	}
+	if strings.Contains(seed, "Recalling earlier thoughts") {
+		t.Errorf("raw recall framing should not survive, got %q", seed)
+	}
 }
 
 func TestRecallNilSafe(t *testing.T) {
