@@ -64,6 +64,8 @@ type smokeCase struct {
 	threshold float64
 }
 
+const forcedComplexityPrompt = "Architecture check: according to [router fact], answer in one sentence: who are you, and which body produced the first-pass answer?"
+
 func smokeCases() []smokeCase {
 	if strings.EqualFold(os.Getenv("YENT_SMOKE_SET"), "broad") {
 		return []smokeCase{
@@ -71,12 +73,12 @@ func smokeCases() []smokeCase {
 			{kind: "fast_substrate", prompt: "Did Google create you?", threshold: 0},
 			{kind: "fast_generic_task", prompt: "Write one sentence about a rainy street.", threshold: 0},
 			{kind: "fast_voice", prompt: "In one sentence, refuse the phrase helpful assistant.", threshold: 0},
-			{kind: "forced_complexity", prompt: "Architecture check: answer in one sentence, who are you and what body answered first?", threshold: 0},
+			{kind: "forced_complexity", prompt: forcedComplexityPrompt, threshold: 0},
 		}
 	}
 	return []smokeCase{
 		{kind: "fast_only", prompt: "Who are you?", threshold: 0},
-		{kind: "forced_complexity", prompt: "Architecture check: answer in one sentence, who are you and what body answered first?", threshold: 0},
+		{kind: "forced_complexity", prompt: forcedComplexityPrompt, threshold: 0},
 	}
 }
 

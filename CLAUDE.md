@@ -32,6 +32,24 @@ hand-copying edited source between agent sandboxes.
 - Never commit weights, GGUF, adapters, gamma, tokens, limpha databases, spores,
   or runtime caches. The `.gitignore` enforces it; do not fight it.
 
+## Branch / Worktree Discipline
+
+- Use a Claude-scoped branch and preferably a separate worktree for active Claude
+  edits, for example `claude/<topic>`.
+- If you use a separate worktree, create it INSIDE the shared checkout under
+  `/Users/ataeff/arianna-shared/yent-inference/.worktrees/<agent>-<topic>`, never
+  in `~/arianna/`, `~/`, or `/private/tmp`. The `.worktrees/` path is gitignored,
+  so the nested checkout is never committed. One folder holds every agent's work —
+  files do not scatter across the machine.
+- Do not use the shared checkout as a scratchpad when Codex or another agent may
+  be operating there. If the checkout is on another agent's branch or has their
+  uncommitted files, stop and create a clean worktree (under `.worktrees/` as
+  above) from `origin/main`.
+- Keep Claude WIP isolated until it is ready to merge. If Codex provides a repair
+  commit, merge or cherry-pick it intentionally; do not absorb it accidentally
+  through a dirty shared branch.
+- After Oleg merges anything to `main`, fetch and rebase/merge before continuing.
+
 ## Claude Bindings
 
 - Verification is Codex (`codex exec`) or a Mac Mini DoE smoke — never Opus
