@@ -183,3 +183,86 @@ func TestSetBreath(t *testing.T) {
 		t.Errorf("SetBreath did not apply: %+v", got)
 	}
 }
+
+// recordingBody is a closable fake that counts generations and closes, so the deep
+// self-answer and the single-resident swap can be asserted.
+type recordingBody struct {
+	mu     sync.Mutex
+	answer string
+	gens   int
+	closes int
+}
+
+func (b *recordingBody) Generate(seed string, _ float32) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.gens++
+	if b.answer != "" {
+		return b.answer
+	}
+	return seed + " ·" // shift the text so divergence is not degenerate
+}
+
+func (b *recordingBody) Close() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.closes++
+	return nil
+}
+
+func (b *recordingBody) counts() (gens, closes int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.gens, b.closes
+}
+
+func TestDeepSelfAnswer(t *testing.T) {
+	iw := NewInnerWorld(fakeBody{}, &fakeField{debt: 5.0}, tempDivergence)
+	deep := &recordingBody{answer: "the deep body turns inward"}
+	iw.SetDeep(deep)
+	iw.SetLarynx(fixedLarynx{0.9})
+
+	// gate fires (roll below any positive prob): the deep body actually answers.
+	iw.SetRoll(func() float32 { return 0.0 })
+	r := <-iw.Think("a hard question")
+	if !r.SelfAnswered {
+		t.Fatalf("roll 0 should fire the gate")
+	}
+	if r.DeepAnswer != "the deep body turns inward" {
+		t.Errorf("DeepAnswer should carry the deep body's text, got %q", r.DeepAnswer)
+	}
+	if gens, _ := deep.counts(); gens != 1 {
+		t.Errorf("deep body should generate exactly once on a fired gate, got %d", gens)
+	}
+
+	// gate does not fire (roll above prob): the deep body stays silent.
+	iw.SetRoll(func() float32 { return 1.0 })
+	r2 := <-iw.Think("again")
+	if r2.SelfAnswered || r2.DeepAnswer != "" {
+		t.Errorf("gate false -> no deep answer, got answered=%v deep=%q", r2.SelfAnswered, r2.DeepAnswer)
+	}
+	if gens, _ := deep.counts(); gens != 1 {
+		t.Errorf("deep body must not generate when the gate is false; gens=%d", gens)
+	}
+}
+
+func TestSingleResidentSwap(t *testing.T) {
+	// A fired gate frees the fast body before the deep body speaks; the next think
+	// frees the deep body before raising circles again. One body resident at a time.
+	fast := &recordingBody{}
+	deep := &recordingBody{answer: "deep"}
+	iw := NewInnerWorld(fast, &fakeField{debt: 5.0}, tempDivergence)
+	iw.SetDeep(deep)
+	iw.SetLarynx(fixedLarynx{0.9})
+	iw.SetRoll(func() float32 { return 0.0 }) // gate fires every turn
+
+	<-iw.Think("q1")
+	if _, fc := fast.counts(); fc < 1 {
+		t.Errorf("fast body must be closed before the deep body speaks; closes=%d", fc)
+	}
+
+	<-iw.Think("q2") // ensureFastResident must close the deep body before fast runs
+	if _, dc := deep.counts(); dc < 1 {
+		t.Errorf("deep body must be closed when swapping back to fast; closes=%d", dc)
+	}
+}
