@@ -67,9 +67,19 @@ tests without cgo or a model; production injects the real nemo body and a
 (NO-SEED-from-prompt), drift rising per circle, and drives the field with
 `PROPHECY`/`VELOCITY` per circle. `go build` + `go test -run Overthink` + `go vet`
 green (`TestOverthinkCircles`). The circle chain is sequential by nature (each
-ripples from the last); the concurrency is the next increment — run `Overthink` as
-a background goroutine + the autonomic `breathe` loop. Then the real `Field`/`Body`
-adapters, then Larynx-Zig, then the deep-self-answer gate.
+ripples from the last).
+
+**Async + breathe landed (`inner_world.go`, race-clean):** `InnerWorld.Think`
+runs `Overthink` in a goroutine and delivers the circles on a channel, so the
+answer path is never blocked. `InnerWorld.Breathe(ctx)` is the autonomic loop —
+between human turns it ticks, and when a trigger crosses its threshold (`drift`:
+field debt high; `silence`: idle too long), each gated by a cooldown, the organism
+dreams unprompted on its own last thought (`OnDream` receives the circles, inner
+only). `due(now)` is a pure, deterministic trigger function (tested without
+timing); `Breathe` exits on `ctx` cancel. `go test -race` green:
+`TestThinkAsync`, `TestDue`, `TestDream`, `TestBreatheStops`, `TestBreatheFires`,
+`TestOverthinkCircles`. Next: Codex audit (full picture now), then the real
+`Field`/`Body` adapters, Larynx-Zig, and the deep-self-answer gate.
 
 **Checklist (how we verify it works):**
 - [ ] Fast body emits 3 inner circles per turn; divergence circle1 < 2 < 3 (cosine, measured).
