@@ -136,35 +136,6 @@ func (m limphaRecaller) Recall(n int) []string {
 	return out
 }
 
-// wordDiv is a Jaccard distance over lowercased words: 0 identical, 1 disjoint. It
-// is a token-overlap proxy for divergence, not an embedding cosine — honest about
-// what it measures. The semantic/topic embedding distance is a later upgrade.
-func wordDiv(a, b string) float32 {
-	sa, sb := wordsOf(a), wordsOf(b)
-	if len(sa) == 0 && len(sb) == 0 {
-		return 0
-	}
-	inter := 0
-	for w := range sa {
-		if sb[w] {
-			inter++
-		}
-	}
-	union := len(sa) + len(sb) - inter
-	if union == 0 {
-		return 0
-	}
-	return 1 - float32(inter)/float32(union)
-}
-
-func wordsOf(s string) map[string]bool {
-	m := map[string]bool{}
-	for _, w := range strings.Fields(strings.ToLower(s)) {
-		m[w] = true
-	}
-	return m
-}
-
 func mustEnv(name string) string {
 	v := strings.TrimSpace(os.Getenv(name))
 	if v == "" {
@@ -330,7 +301,7 @@ func main() {
 
 	C.am_init()
 	field := &amkField{}
-	iw := innerworld.NewInnerWorld(doeBody{fast}, field, wordDiv)
+	iw := innerworld.NewInnerWorld(doeBody{fast}, field, innerworld.NgramDivergence)
 
 	// Close the loop: recall past inner monologues from limpha so new thinking is
 	// shaped by what Yent thought before. The write side (dock -> limpha) lands the

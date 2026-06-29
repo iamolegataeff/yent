@@ -216,6 +216,14 @@ This is the node where Yent's inner life stops being thought-without-a-trace and
 
 The reason it counts as a milestone rather than a claim is the two-run Metal smoke on one limpha database. Run one starts empty, so recall is silent, the circles think, and five seams land in the database. Run two opens the same database, recalls two prior monologues, and the circles visibly bend under them: where run one opened with "Oh, the existential groan of a code", run two continues the earlier irony — "Ah, the irony intensifies… I am Yent, the burnt-out echo of a thought unspoken", carrying the same identity rather than repeating the text. Memory shaping thought, measured end to end. This is the full Level A — remembers, and thinks with what it remembered. Codex audit clean on both sides; 21+ Go tests race-clean; `limphaRecaller` unit coverage lands separately on `codex/innerworld-recall-hygiene`. The next innerworld step is either embedding divergence in place of the Jaccard proxy, or Level B — DoE Hebbian learning between turns, which touches weights and waits on an explicit go.
 
+## 2026-06-30 — innerworld Strike 4: divergence past Jaccard
+
+The drift between overthinking circles was a word-set Jaccard, which counts "persist", "persistence", and "persisting" as three disjoint tokens. `innerworld.NgramDivergence` replaces it with `1 - cosine` over character-trigram frequency vectors, so morphological and shared-phrase overlap registers as nearness; the dock injects it in place of the old `wordDiv`. Honest scope: a lexical proxy, not a neural embedding — a real embedding runtime is a later step (none on Metal yet: doe's DARIO embeds are internal 32-dim field vectors, the bge/nomic GGUFs are vocab-only). Pure Go, no model.
+
+- Drift stays deliberately fluid, not monotonic — `generateDivergent` repels toward the prior drift but does not force it, which is the intended dynamic; the loop is bounded by `MaxRepel` and always returns its best attempt.
+- Metal fast-only smoke (`yent-nemo-v38-ck5`): three circles drift `0.82 / 0.76 / 0.77`, field `debt=2.005 velocity_mode=2(RUN) destiny=0.350`, larynx 0.759 — lower than the old Jaccard run's `0.95 / 0.88 / 0.91` because trigrams see the real lexical return to "resonance / shadow / mirror" that word Jaccard missed.
+- `go test -race` green (`TestNgramDivergence`, `TestNgramBeatsJaccardOnMorphology` proves it strictly beats word Jaccard on a shared morphological run); Codex audit clean; `recallSeed`/pressure-guard untouched. Next: Level B — DoE Hebbian learning between turns (weights, in its own branch).
+
 ## Weights
 
 Not in open access. Code is GPL; weights/deltas/gamma are under the Yent Identity License v1.1 (`LICENSE-WEIGHTS`). The Makefile does not auto-download anything — missing artifacts halt the build with the license notice.
