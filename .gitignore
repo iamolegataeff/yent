@@ -33,3 +33,5 @@ DoE/doe_field
 DoE/*.o
 DoE/Makefile
 /Makefile
+# agent worktrees live under one roof, never committed (see AGENTS.md)
+/.worktrees/
