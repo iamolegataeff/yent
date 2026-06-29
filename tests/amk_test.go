@@ -82,9 +82,10 @@ func TestAMKVelocityNoMove(t *testing.T) {
 	if s.VelocityMode != yent.VelNoMove {
 		t.Errorf("velocity mode: got %d, expected %d (NOMOVE)", s.VelocityMode, yent.VelNoMove)
 	}
-	// NOMOVE: effective = base * 0.5 = 1.0 * 0.5 = 0.5
-	if s.EffectiveTemp > 0.6 {
-		t.Errorf("NOMOVE effective_temp: got %.3f, expected <= 0.6", s.EffectiveTemp)
+	// Full AML core blends velocity temperature with balanced expert temperature:
+	// ((1.0 * 0.5) + 0.825) / 2 = 0.6625.
+	if math.Abs(float64(s.EffectiveTemp-0.6625)) > 0.02 {
+		t.Errorf("NOMOVE effective_temp: got %.3f, expected ~0.663", s.EffectiveTemp)
 	}
 }
 
@@ -203,9 +204,10 @@ func TestAMKBaseTemp(t *testing.T) {
 	if math.Abs(float64(s.BaseTemperature-1.5)) > 0.01 {
 		t.Errorf("base_temp: got %.3f, expected 1.5", s.BaseTemperature)
 	}
-	// WALK effective = 1.5 * 0.85 = 1.275
-	if math.Abs(float64(s.EffectiveTemp-1.275)) > 0.02 {
-		t.Errorf("effective_temp: got %.3f, expected ~1.275", s.EffectiveTemp)
+	// Full AML core blends WALK velocity temperature with balanced expert temperature:
+	// ((1.5 * 0.85) + 0.825) / 2 = 1.05.
+	if math.Abs(float64(s.EffectiveTemp-1.05)) > 0.02 {
+		t.Errorf("effective_temp: got %.3f, expected ~1.05", s.EffectiveTemp)
 	}
 }
 

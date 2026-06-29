@@ -155,6 +155,7 @@ func TestRouterDeepContextCarriesLimphaSignals(t *testing.T) {
 	}
 	for _, want := range []string{
 		"[deep primer]",
+		"[router fact]: nemo12 produced the first-pass answer; small24 is the escalation/final-pass body.",
 		"[routing reason: low_confidence]",
 		"[prompt complexity]",
 		"[field state]: temp=0.85 destiny=0.35",

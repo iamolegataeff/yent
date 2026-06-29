@@ -10,7 +10,7 @@ package yent
 /*
 #cgo CFLAGS: -I${SRCDIR}/../c
 #cgo LDFLAGS: ${SRCDIR}/../c/libamk.a
-#include "amk_kernel.h"
+#include "ariannamethod.h"
 #include <stdlib.h>
 */
 import "C"
@@ -64,9 +64,9 @@ type AMState struct {
 
 // Pack flags
 const (
-	PackCodesRIC  = 0x01
+	PackCodesRIC   = 0x01
 	PackDarkMatter = 0x02
-	PackNoTorch   = 0x04
+	PackNoTorch    = 0x04
 )
 
 // Velocity modes
@@ -166,7 +166,12 @@ func (a *AMK) GetTemperature() float32 {
 func (a *AMK) GetDestinyBias() float32 {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return float32(C.am_get_destiny_bias())
+	s := C.am_get_state()
+	bias := float32(s.destiny_bias)
+	if bias == 0 && s.destiny != 0 {
+		return float32(s.destiny)
+	}
+	return bias
 }
 
 // ShouldTunnel checks if tunneling should occur
