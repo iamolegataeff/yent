@@ -107,9 +107,23 @@ reinforce a loop). `zig test` green (3/3): flowing `[1..6]` → entropy 1.00,
 repetition 0.00, coupling 1.00; looping `[1×6]` → entropy 0.00, repetition 0.83,
 coupling 0.00; texture clamped to [0,1]; an empty stream is inert.
 
-Next: the real `Field`/`Body` adapters (wrap `yent.AMK` + the nemo body) and the
-Go↔Zig Larynx binding, wired together with the deep-self-answer gate — at which
-point the coupling has a consumer (the deep body) and the seam is closed.
+## Strike 1c + 2 — gate + Larynx wired into the flow (2026-06-29)
+
+The inner monologue is now closed end-to-end. `gate.go` adds `DeepGate` (blends
+field debt + circle drift + Larynx coupling into a self-answer probability) and
+`SelfAnswers` (rolls against it — deterministic given the roll, so tests are exact;
+production draws `rand`). `larynx_go.go` adds the `Larynx` interface and
+`textureLarynx`, the portable Go mirror of `larynx.zig` (same
+`entropy * (1 - repetition)` coupling, tokenizing circle words via fnv). `Think`
+now returns a `Reflection`: the circles, the coupling, the self-answer probability,
+and whether the deep body turned inward this time — the deep body sometimes answers
+itself, sometimes not. `Larynx` and the gate's roll are injectable (`SetLarynx`,
+`SetRoll`) for deterministic tests. `go test -race` green across 14 tests
+(`TestReflectGate`, `TestTextureLarynx`, `TestDeepGate`, `TestSelfAnswers` added).
+
+Next: a Neo run (`cmd/innerworld-run`) wiring the real AML field via libamk.a + the
+Go Larynx + a stub body, to watch the field react and the gate decide; then the
+Mac-Mini dock (the real nemo body + the Go↔Zig Larynx binding) and a Codex audit.
 
 **Checklist (how we verify it works):**
 - [ ] Fast body emits 3 inner circles per turn; divergence circle1 < 2 < 3 (cosine, measured).

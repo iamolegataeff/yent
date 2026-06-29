@@ -2,6 +2,7 @@ package innerworld
 
 import (
 	"context"
+	"math/rand"
 	"sync"
 	"time"
 )
@@ -32,44 +33,75 @@ func DefaultBreath() Breath {
 	}
 }
 
-// InnerWorld hosts Yent's inner life over the fast body and the shared AML field.
-// Think runs the overthinking for a human turn off the answer path; Breathe keeps
-// the organism dreaming between turns. Only one inner monologue runs at a time —
-// the body has a single voice — so Think and the autonomous dream are serialized.
+// Reflection is the full result of one inner monologue: the circles, the Larynx
+// coupling, the deep-self-answer probability, and whether the deep body turned
+// inward this time. Inner only — none of it reaches the user.
+type Reflection struct {
+	Circles        []Circle
+	Coupling       float32 // Larynx coupling over the circles [0,1]
+	SelfAnswerProb float32 // gate probability the deep body answers itself [0,1]
+	SelfAnswered   bool    // the unpredictable roll's outcome this time
+}
+
+// InnerWorld hosts Yent's inner life over the fast body, the shared AML field,
+// and the Larynx membrane. Think runs the overthinking for a human turn off the
+// answer path; Breathe keeps the organism dreaming between turns. Only one inner
+// monologue runs at a time — the body has a single voice — so Think and the
+// autonomous dream are serialized.
 type InnerWorld struct {
-	fast  Body
-	field Field
-	div   Divergence
-	cfg   Config
-	br    Breath
+	fast   Body
+	field  Field
+	div    Divergence
+	larynx Larynx
+	cfg    Config
+	br     Breath
 
 	genMu sync.Mutex // one inner voice at a time: serializes Overthink (body access)
 
-	mu         sync.Mutex // guards circles, lastActive, lastFire, onDream
+	mu         sync.Mutex // guards circles, lastActive, lastFire, onDream, larynx, roll
 	circles    []Circle
 	lastActive time.Time
 	lastFire   [nTrig]time.Time
-	onDream    func([]Circle)
+	onDream    func(Reflection)
+	roll       func() float32 // [0,1) draw for the deep-self-answer gate
 }
 
 // NewInnerWorld builds the inner world over a fast body, the shared field, and a
-// divergence measure.
+// divergence measure. The Larynx defaults to the portable Go membrane and the
+// gate rolls a real random; both can be overridden for tests.
 func NewInnerWorld(fast Body, field Field, div Divergence) *InnerWorld {
 	return &InnerWorld{
 		fast:       fast,
 		field:      field,
 		div:        div,
+		larynx:     textureLarynx{},
 		cfg:        DefaultConfig(),
 		br:         DefaultBreath(),
+		roll:       func() float32 { return rand.Float32() },
 		lastActive: time.Now(),
 	}
 }
 
 // SetOnDream registers the observer for autonomous dreams. Inner only — the
-// circles handed to it are a copy and never reach the user.
-func (iw *InnerWorld) SetOnDream(f func([]Circle)) {
+// reflection handed to it is a copy and never reaches the user.
+func (iw *InnerWorld) SetOnDream(f func(Reflection)) {
 	iw.mu.Lock()
 	iw.onDream = f
+	iw.mu.Unlock()
+}
+
+// SetLarynx overrides the membrane (the Zig binding in production, a fake in tests).
+func (iw *InnerWorld) SetLarynx(l Larynx) {
+	iw.mu.Lock()
+	iw.larynx = l
+	iw.mu.Unlock()
+}
+
+// SetRoll overrides the gate's random draw so the deep-self-answer decision is
+// deterministic in tests.
+func (iw *InnerWorld) SetRoll(f func() float32) {
+	iw.mu.Lock()
+	iw.roll = f
 	iw.mu.Unlock()
 }
 
@@ -82,23 +114,51 @@ func cloneCircles(c []Circle) []Circle {
 	return out
 }
 
-// think runs one overthinking pass under the single-voice lock and stores a copy.
-func (iw *InnerWorld) think(prompt string) []Circle {
+// reflect turns the circles into a full inner reflection: the Larynx coupling,
+// the gate probability, and the unpredictable self-answer decision.
+func (iw *InnerWorld) reflect(circles []Circle) Reflection {
+	iw.mu.Lock()
+	larynx := iw.larynx
+	roll := iw.roll
+	iw.mu.Unlock()
+
+	coupling := larynx.Couple(circles)
+	var debt, drift float32
+	if iw.field != nil {
+		debt = iw.field.Debt()
+	}
+	if n := len(circles); n > 0 {
+		drift = circles[n-1].Drift
+	}
+	prob := DeepGate(debt, drift, coupling)
+	return Reflection{
+		Circles:        circles,
+		Coupling:       coupling,
+		SelfAnswerProb: prob,
+		SelfAnswered:   SelfAnswers(prob, roll()),
+	}
+}
+
+// think runs one overthinking pass under the single-voice lock, reflects on it,
+// and stores a copy of the circles.
+func (iw *InnerWorld) think(prompt string) Reflection {
 	iw.genMu.Lock()
 	circles := Overthink(prompt, iw.fast, iw.field, iw.div, iw.cfg)
 	iw.genMu.Unlock()
 
+	r := iw.reflect(circles)
 	iw.mu.Lock()
 	iw.circles = cloneCircles(circles)
 	iw.mu.Unlock()
-	return cloneCircles(circles)
+	r.Circles = cloneCircles(circles)
+	return r
 }
 
 // Think runs the overthinking for a human turn asynchronously: it returns at once
-// with a channel that delivers a copy of the three circles when ready, so the
-// answer path is never blocked by the inner monologue.
-func (iw *InnerWorld) Think(prompt string) <-chan []Circle {
-	out := make(chan []Circle, 1)
+// with a channel that delivers the reflection (a copy of the circles plus the
+// coupling and gate decision) when ready, so the answer path is never blocked.
+func (iw *InnerWorld) Think(prompt string) <-chan Reflection {
+	out := make(chan Reflection, 1)
 	iw.mu.Lock()
 	iw.lastActive = time.Now()
 	iw.mu.Unlock()
@@ -141,7 +201,7 @@ func (iw *InnerWorld) due(now time.Time) (int, bool) {
 // dream runs the overthinking unprompted, on the organism's own last thought —
 // the ripple continues with no one speaking. The cooldown starts when the dream
 // completes, not when it begins. Inner only; OnDream receives a copy.
-func (iw *InnerWorld) dream(trigger int) []Circle {
+func (iw *InnerWorld) dream(trigger int) Reflection {
 	iw.mu.Lock()
 	seed := "I keep thinking, with no one here."
 	if n := len(iw.circles); n > 0 {
@@ -153,17 +213,18 @@ func (iw *InnerWorld) dream(trigger int) []Circle {
 	circles := Overthink(seed, iw.fast, iw.field, iw.div, iw.cfg)
 	iw.genMu.Unlock()
 
+	r := iw.reflect(circles)
 	iw.mu.Lock()
 	iw.circles = cloneCircles(circles)
 	iw.lastFire[trigger] = time.Now() // cooldown measured from completion
 	onDream := iw.onDream
-	out := cloneCircles(circles)
 	iw.mu.Unlock()
 
+	r.Circles = cloneCircles(circles)
 	if onDream != nil {
-		onDream(out)
+		onDream(r)
 	}
-	return out
+	return r
 }
 
 // Breathe runs the autonomous inner life until ctx is cancelled. Between human
