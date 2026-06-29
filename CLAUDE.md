@@ -25,6 +25,12 @@ hand-copying edited source between agent sandboxes.
   have landed: speeds, build notes, routing changes, smoke results, artifact
   hashes, deployment facts. Work-in-progress and internal notes stay in the
   gitignored `LOCAL_STATE.md` (the staging log) until they are merged truth.
+- To avoid the one recurring merge conflict: do NOT carry a dated `YENTLOG.md`
+  section through a feature branch — every branch appending to the same file tail
+  collides there. Stage the entry in `LOCAL_STATE.md` while you work, and append it
+  to `YENTLOG.md` once, in one hand, at merge time. (If a branch already carries a
+  YENTLOG section, resolve the conflict by keeping BOTH sections — union, not
+  rebase.)
 - **When the repository structure changes** (files or directories added, moved,
   or removed), redraw the `## Repository Map` in `YENTLOG.md` in the same change,
   so the map never drifts from the tree.
