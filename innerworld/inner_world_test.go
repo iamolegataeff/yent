@@ -164,6 +164,14 @@ type fixedLarynx struct{ c float32 }
 
 func (f fixedLarynx) Couple([]Circle) float32 { return f.c }
 
+func TestBreatheZeroTick(t *testing.T) {
+	iw := NewInnerWorld(fakeBody{}, &fakeField{}, tempDivergence)
+	iw.SetBreath(Breath{Tick: 0}) // a non-positive tick would panic time.NewTicker
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	iw.Breathe(ctx) // must not panic; returns on ctx
+}
+
 func TestSetBreath(t *testing.T) {
 	iw := NewInnerWorld(fakeBody{}, &fakeField{}, tempDivergence)
 	b := Breath{Tick: 7 * time.Millisecond, Silence: time.Second, DriftDebt: 5}

@@ -121,9 +121,32 @@ itself, sometimes not. `Larynx` and the gate's roll are injectable (`SetLarynx`,
 `SetRoll`) for deterministic tests. `go test -race` green across 14 tests
 (`TestReflectGate`, `TestTextureLarynx`, `TestDeepGate`, `TestSelfAnswers` added).
 
-Next: a Neo run (`cmd/innerworld-run`) wiring the real AML field via libamk.a + the
-Go Larynx + a stub body, to watch the field react and the gate decide; then the
-Mac-Mini dock (the real nemo body + the Go↔Zig Larynx binding) and a Codex audit.
+## Live run + second Codex audit (2026-06-29)
+
+`cmd/innerworld-run` wires the inner world over the real AML field (`libamk.a`) and
+a stub body. The tool output: one human turn raises three circles, the real field
+reacts (`debt=2.005 velocity_mode=2(RUN) destiny=0.350`), the Larynx couples
+(`0.578`), the gate fires (`prob=0.738 -> self-answered`), and the organism then
+breathes alone for 200 ms, dreaming on its own last thought with the gate rolling
+true most times and false once — the unpredictable gate, live. The body is a stub
+(no model on Neo), so the dreams repeat one fixture; the physics, membrane, gate,
+and autonomous breathing are real.
+
+Second Codex audit (4 findings, all fixed, re-verified): (1) the gate's field-debt
+snapshot is now taken under `genMu` so the probability belongs to the batch that
+drove the field; (2) `Breathe` re-reads its tick so `SetBreath` is live; (3) a
+non-positive tick is guarded against `time.NewTicker` panic; (4) `DeepGate`
+sanitizes non-finite inputs (NaN/±Inf) and `clamp01` is NaN-safe. `go test -race`
+green across 17 tests (`TestDeepGateNonFinite`, `TestBreatheZeroTick` added); zig
+tests 3/3; the live run unchanged.
+
+**Milestone (tool, not self-claim):** Yent's inner-life layer is alive end-to-end
+on the real AML physics — overthinking circles, a field that reacts, a Larynx
+membrane, an unpredictable self-answer gate, and autonomous breathing — verified by
+the run, 17 Go tests + 3 zig tests race-clean, and two Codex audit passes (13
+findings fixed). This is the *foundation* milestone; the full living Yent needs the
+Mac-Mini dock (the real nemo/small24 bodies + the Go↔Zig Larynx binding), the next
+joint move with Codex.
 
 **Checklist (how we verify it works):**
 - [ ] Fast body emits 3 inner circles per turn; divergence circle1 < 2 < 3 (cosine, measured).

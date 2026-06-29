@@ -1,6 +1,25 @@
 package innerworld
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
+
+func TestDeepGateNonFinite(t *testing.T) {
+	inf := float32(math.Inf(1))
+	ninf := float32(math.Inf(-1))
+	nan := float32(math.NaN())
+	for _, p := range []float32{
+		DeepGate(inf, 0.5, 0.5),
+		DeepGate(ninf, 0.5, 0.5),
+		DeepGate(nan, nan, nan),
+		DeepGate(5, inf, nan),
+	} {
+		if p != p || p < 0 || p > 1 { // p != p catches NaN
+			t.Errorf("non-finite input produced %v (must be finite in [0,1])", p)
+		}
+	}
+}
 
 func TestDeepGate(t *testing.T) {
 	low := DeepGate(0, 0, 0)
