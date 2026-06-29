@@ -334,17 +334,16 @@ func neutralizeDOEPrompt(seed string) string {
 }
 
 func formatDOEPrompt(prompt, ctx string) string {
-	prompt = strings.TrimSpace(prompt)
-	ctx = strings.TrimSpace(ctx)
+	prompt = strings.Join(strings.Fields(strings.TrimSpace(prompt)), " ")
+	ctx = strings.Join(strings.Fields(strings.TrimSpace(ctx)), " ")
 	var seed string
 	if ctx == "" {
 		seed = prompt
+	} else if isRouteContext(ctx) {
+		seed = formatContextualDOEPrompt(prompt, ctx)
 	} else {
-		seed = "[user prompt]: " + prompt +
-			"\n[answer contract]: Answer the user prompt directly. Use context as private evidence; do not make routing or context the subject unless the user asks." +
-			"\n[context]: " + ctx
+		seed = formatPrimerDOEPrompt(prompt, ctx)
 	}
-	seed = strings.Join(strings.Fields(seed), " ")
 	if len(seed) <= maxDOEPromptBytes {
 		return neutralizeDOEPrompt(seed)
 	}
@@ -355,21 +354,76 @@ func formatDOEPrompt(prompt, ctx string) string {
 	return neutralizeDOEPrompt(strings.ToValidUTF8(seed[:cut], ""))
 }
 
+func isRouteContext(ctx string) bool {
+	return strings.Contains(ctx, "[router fact]") ||
+		strings.Contains(ctx, "[routing reason") ||
+		strings.Contains(ctx, "[context facts]")
+}
+
+func formatPrimerDOEPrompt(prompt, primer string) string {
+	const promptPrefix = " Human asks: "
+	suffix := promptPrefix + prompt
+	budget := maxDOEPromptBytes - len(suffix) - 1
+	if budget <= 0 {
+		return prompt
+	}
+	if primer = truncateAtWord(primer, budget); primer == "" {
+		return prompt
+	}
+	return primer + suffix
+}
+
+func formatContextualDOEPrompt(prompt, ctx string) string {
+	const (
+		contextPrefix = "[context facts]: "
+		contract      = " [answer contract]: Answer the human prompt directly. Use context as private factual evidence. If the human asks about route or body facts, use [router fact] literally. Do not make routing or context the subject unless the human asks."
+		promptPrefix  = " [human prompt]: "
+	)
+	suffix := contract + promptPrefix + prompt
+	budget := maxDOEPromptBytes - len(contextPrefix) - len(suffix)
+	if budget < 0 {
+		return strings.TrimSpace(suffix)
+	}
+	return contextPrefix + truncateAtWord(ctx, budget) + suffix
+}
+
+func truncateAtWord(s string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(s) <= maxBytes {
+		return s
+	}
+	cut := maxBytes
+	if sp := strings.LastIndexByte(s[:cut], ' '); sp > 0 {
+		cut = sp
+	}
+	return strings.TrimSpace(strings.ToValidUTF8(s[:cut], ""))
+}
+
 func parseDOEReply(out string) string {
 	var b strings.Builder
 	capturing := false
+	seenPrompt := false
 	for _, line := range strings.Split(out, "\n") {
 		t := strings.TrimSpace(line)
 		if !capturing {
-			if !strings.HasPrefix(t, ">") {
+			if strings.HasPrefix(t, ">") {
+				seenPrompt = true
+				body := strings.TrimSpace(strings.TrimPrefix(t, ">"))
+				if body == "" || strings.HasPrefix(body, "[") {
+					continue
+				}
+				capturing = true
+				b.WriteString(body)
+				b.WriteByte(' ')
 				continue
 			}
-			body := strings.TrimSpace(strings.TrimPrefix(t, ">"))
-			if body == "" || strings.HasPrefix(body, "[") {
+			if !seenPrompt || t == "" || strings.HasPrefix(t, "[") {
 				continue
 			}
 			capturing = true
-			b.WriteString(body)
+			b.WriteString(t)
 			b.WriteByte(' ')
 			continue
 		}

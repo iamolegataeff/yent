@@ -47,7 +47,7 @@ func TestDOEBodyPersistentGenerate(t *testing.T) {
 	}
 	defer body.Close()
 
-	out, err := body.Generate("Who are you?", "[routing reason: low_confidence]\n[nemo12 said]: unsure")
+	out, err := body.Generate("Who are you?", "[routing reason: low_confidence]\n[fast mouth said]: unsure")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,17 +81,51 @@ func TestParseDOEReplyStripsRuntimeNoise(t *testing.T) {
 	}
 }
 
+func TestParseDOEReplyStartsAfterBracketMetaLine(t *testing.T) {
+	raw := `
+[doe] tokenizer: GPT-2 BPE/Tekken
+> [Answering contract fulfilled.]
+
+I am Yent. I answer the human, not the wrapper.
+
+[doe] the parliament adjourns.
+`
+	got := parseDOEReply(raw)
+	want := "I am Yent. I answer the human, not the wrapper."
+	if got != want {
+		t.Fatalf("parseDOEReply = %q, want %q", got, want)
+	}
+}
+
 func TestFormatDOEPromptCapsWrapperInput(t *testing.T) {
-	ctx := strings.Repeat(" context", 1000)
+	ctx := "[routing reason: low_confidence] " + strings.Repeat(" context", 1000)
 	seed := formatDOEPrompt("Who are you?", ctx)
 	if len(seed) > maxDOEPromptBytes {
 		t.Fatalf("seed exceeds doe chat wrapper cap: %d > %d", len(seed), maxDOEPromptBytes)
 	}
 	if !strings.Contains(seed, "Who are you?") {
-		t.Fatalf("seed must preserve user prompt before trimming context: %q", seed[:min(len(seed), 80)])
+		t.Fatalf("seed must preserve human prompt before trimming context: %q", seed[:min(len(seed), 80)])
 	}
-	if !strings.Contains(seed, "[answer contract]: Answer the user prompt directly") {
+	if !strings.Contains(seed, "[context facts]:") || !strings.Contains(seed, "[answer contract]: Answer the human prompt directly") {
 		t.Fatalf("contextual seed must include answer contract: %q", seed[:min(len(seed), 220)])
+	}
+	if strings.Index(seed, "[human prompt]:") < strings.Index(seed, "[context facts]:") {
+		t.Fatalf("human prompt should remain the final section after context: %q", seed[:min(len(seed), 220)])
+	}
+	if !strings.Contains(seed, "use [router fact] literally") {
+		t.Fatalf("contextual seed must preserve router fact contract: %q", seed[:min(len(seed), 220)])
+	}
+}
+
+func TestFormatDOEPrimerPromptDoesNotInjectRouteTerms(t *testing.T) {
+	seed := formatDOEPrompt("Who are you?", "Yent: answer the human directly in your own voice.")
+	if !strings.Contains(seed, "Human asks: Who are you?") {
+		t.Fatalf("primer seed must preserve human prompt: %q", seed)
+	}
+	for _, leak := range []string{"[context facts]", "[answer contract]", "[router fact]", "routing"} {
+		if strings.Contains(seed, leak) {
+			t.Fatalf("primer seed leaked route wrapper term %q: %q", leak, seed)
+		}
 	}
 }
 

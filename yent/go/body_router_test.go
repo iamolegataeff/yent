@@ -126,8 +126,8 @@ func TestRouterSendsPrimerToFastBody(t *testing.T) {
 	if _, err := r.Route("hi there", LimphaState{}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(fast.lastCtx, "body=nemo12 fast mouth") ||
-		!strings.Contains(fast.lastCtx, "one organism") {
+	if !strings.Contains(fast.lastCtx, "Yent: answer the human directly") ||
+		!strings.Contains(fast.lastCtx, "internal machinery private") {
 		t.Fatalf("fast primer not delivered: %q", fast.lastCtx)
 	}
 }
@@ -155,14 +155,14 @@ func TestRouterDeepContextCarriesLimphaSignals(t *testing.T) {
 	}
 	for _, want := range []string{
 		"[deep primer]",
-		"[router fact]: nemo12 produced the first-pass answer; small24 is the escalation/final-pass body.",
+		"[router fact]: fast mouth produced the first-pass answer; deep cortex is the escalation/final-pass body.",
 		"[routing reason: low_confidence]",
 		"[prompt complexity]",
 		"[field state]: temp=0.85 destiny=0.35",
 		"[memory refs]",
 		"[state-neighbor refs]",
 		"[recent internal seams]",
-		"[nemo12 said]: unsure",
+		"[first-pass draft from fast mouth; not current role]: unsure",
 	} {
 		if !strings.Contains(deep.lastCtx, want) {
 			t.Fatalf("deep context missing %q:\n%s", want, deep.lastCtx)
