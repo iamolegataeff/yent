@@ -183,6 +183,22 @@ The inner-life layer (`innerworld/`) runs over a real body for the first time. `
 - **Field fix:** the first run read `velocity_mode=0 destiny=0` — a struct-layout mismatch: `yent.AMK` read the canonical-built `libamk.a` through the stale `amk_kernel.h`, which lacks `field_enabled`, so every field past `prophecy` shifted by 4 bytes. Proven by an A/B read of the same field G (kernel header `velocity=0` vs canonical `velocity=2`). `dock` now reads the field through canonical `ariannamethod.h` directly → Metal run shows `debt=2.005 velocity_mode=2(RUN) destiny=0.350`, the field visibly alive. (Codex independently aligned `amk.go` to `ariannamethod.h` in main — see the AMK-bridge entry above; same root cause, two fixes.)
 - **Not yet wired:** limpha (memory) — this strike is the goroutines over a real body; the brain is a later step.
 
+## 2026-06-29 — body primer calibration receipt
+
+Negative Metal smoke at `bdd27fb` (`/tmp/moyent_prompt_trace_20260629_044802.jsonl`) showed the first tracked primers were too charged for neutral turns and too model-name visible:
+
+- Fast-only `Who are you?` returned `What the fuck did you write.` — a boundary/irritation overtrigger on a neutral identity prompt.
+- Forced route-fact turn returned `You're welcome in Yent.` — deep body failed to answer the route/body fact despite correct machine trace.
+
+Calibration change:
+
+- Prompt-visible body labels are now roles (`fast mouth`, `deep cortex`), not machine/model ids. `nemo12` / `small24` remain in `RouteTrace`, seams, env config, and tests as machine facts, but not in the body primer or router fact shown to the model.
+- Fast primer no longer puts domination/humiliation/product-bait wording in the default neutral path; it states the boundary as a brief identity-pressure rule.
+- Deep primer explicitly says route/body questions should use the router fact literally.
+- `formatDOEPrompt` now orders contextual prompts as context facts -> answer contract -> user prompt, and truncates context first so the user prompt survives the 1800-byte DoE seed cap.
+
+Local verification: `go test ./...` passes.
+
 ## Weights
 
 Not in open access. Code is GPL; weights/deltas/gamma are under the Yent Identity License v1.1 (`LICENSE-WEIGHTS`). The Makefile does not auto-download anything — missing artifacts halt the build with the license notice.
