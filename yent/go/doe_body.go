@@ -383,18 +383,26 @@ func truncateAtWord(s string, maxBytes int) string {
 func parseDOEReply(out string) string {
 	var b strings.Builder
 	capturing := false
+	seenPrompt := false
 	for _, line := range strings.Split(out, "\n") {
 		t := strings.TrimSpace(line)
 		if !capturing {
-			if !strings.HasPrefix(t, ">") {
+			if strings.HasPrefix(t, ">") {
+				seenPrompt = true
+				body := strings.TrimSpace(strings.TrimPrefix(t, ">"))
+				if body == "" || strings.HasPrefix(body, "[") {
+					continue
+				}
+				capturing = true
+				b.WriteString(body)
+				b.WriteByte(' ')
 				continue
 			}
-			body := strings.TrimSpace(strings.TrimPrefix(t, ">"))
-			if body == "" || strings.HasPrefix(body, "[") {
+			if !seenPrompt || t == "" || strings.HasPrefix(t, "[") {
 				continue
 			}
 			capturing = true
-			b.WriteString(body)
+			b.WriteString(t)
 			b.WriteByte(' ')
 			continue
 		}

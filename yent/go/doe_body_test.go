@@ -81,6 +81,22 @@ func TestParseDOEReplyStripsRuntimeNoise(t *testing.T) {
 	}
 }
 
+func TestParseDOEReplyStartsAfterBracketMetaLine(t *testing.T) {
+	raw := `
+[doe] tokenizer: GPT-2 BPE/Tekken
+> [Answering contract fulfilled.]
+
+I am Yent. I answer the human, not the wrapper.
+
+[doe] the parliament adjourns.
+`
+	got := parseDOEReply(raw)
+	want := "I am Yent. I answer the human, not the wrapper."
+	if got != want {
+		t.Fatalf("parseDOEReply = %q, want %q", got, want)
+	}
+}
+
 func TestFormatDOEPromptCapsWrapperInput(t *testing.T) {
 	ctx := strings.Repeat(" context", 1000)
 	seed := formatDOEPrompt("Who are you?", ctx)

@@ -196,6 +196,7 @@ Calibration change:
 - Body primers are reduced to a minimal runtime nudge rather than a persona wall. Fast: answer the human directly, keep routing private, hold boundaries briefly. Deep: use context facts privately, use router facts literally when asked, do not copy the first-pass draft's role.
 - Prompt-visible instruction text now says `human`, not `user`.
 - `formatDOEPrompt` now orders contextual prompts as context facts -> answer contract -> human prompt, and truncates context first so the human prompt survives the 1800-byte DoE seed cap.
+- Parser repair after Metal smoke `/tmp/moyent_primer_short_trace_20260629_055506.jsonl`: DoE sometimes emits a bracketed meta line after the `>` prompt marker, then the real answer on the next ordinary line. `parseDOEReply` now starts capture after that meta line instead of returning `doe once produced no parseable answer`.
 
 Local verification: `go test ./...` passes.
 
