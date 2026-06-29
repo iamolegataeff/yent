@@ -18,7 +18,9 @@ yent/
 │   └── stb_image.h               # image loading
 ├── cmd/                          # executable entry points
 │   ├── moyent-body-gate/         # body selection gate
-│   └── moyent-live-smoke/        # smoke test runner
+│   ├── moyent-live-smoke/        # smoke test runner
+│   ├── ri-compile/               # compile private RI markdown into bounded records
+│   └── ri-consume/               # filter compiled RI records for runtime/test consumers
 ├── yent/                         # core Go runtime
 │   ├── c/                        # C kernel bindings
 │   │   ├── ariannamethod.c/.h    # vendored AML core (== ariannamethod.ai); libamk.a build source
@@ -70,12 +72,23 @@ yent/
 - Memory: `yent/go/limpha.go`, `yent/go/limpha_async.go`
 - Prompts: `prompts/nemo12_fast_v1.txt`, `prompts/small24_deep_v1.txt`
 - Inference: `DoE/doe.c`, `yent/go/amk.go`
+- RI tools: `cmd/ri-compile/main.go`, `cmd/ri-consume/main.go`
 - Theory: `research/ai_is_not_a_tool.md`, `research/dario_paper_v2.md`, `research/recursive_resonance_preprint.md`
 - Entry: `cmd/moyent-body-gate/main.go`, `cmd/moyent-live-smoke/main.go`
 
-**Not tracked:** GGUF weights, adapters, gamma, limpha databases, tokens, local runtime caches (see `.gitignore`).
+**Not tracked:** GGUF weights, adapters, gamma, limpha databases, tokens, local runtime caches, private RI corpus (`/ri/`) (see `.gitignore`).
 
 ---
+
+## 2026-06-30 — RI compile/consume tools
+
+Added public-safe RI tooling while keeping the living RI corpus private.
+
+- `cmd/ri-compile` reads a private RI markdown root and emits compact records as JSON or line protocol. It extracts nodes, source receipts, pressure phrases, quote evidence, and conflict status without turning RI markdown into a prompt wall.
+- `cmd/ri-consume` reads the compiled line protocol and emits bounded slices for future runtime/test consumers. `runtime` mode selects pressure phrases, `test=true` quotes, and `status=open` conflicts only; non-test quotes and resolved conflicts stay out of the runtime packet.
+- `.gitignore` now excludes `/ri/`, so local/private RI nodes, source receipts, quotes, compiled outputs, and operator notes are not committed accidentally.
+
+Validation: `go test ./cmd/ri-compile ./cmd/ri-consume` and `go test ./...` pass locally.
 
 ## 2026-06 — 24B body on Apple Metal via `doe`
 
