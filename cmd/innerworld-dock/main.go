@@ -143,7 +143,10 @@ func durationEnv(name string) time.Duration {
 		return 0
 	}
 	v, err := strconv.ParseFloat(raw, 64)
-	if err != nil || v <= 0 {
+	// reject NaN (v != v), +Inf / overflow (v > maxSec), and non-positive — any of
+	// these would make time.Duration(v*…) implementation-defined garbage.
+	maxSec := float64(time.Duration(1<<63-1) / time.Second)
+	if err != nil || v <= 0 || v != v || v > maxSec {
 		return 0
 	}
 	return time.Duration(v * float64(time.Second))
