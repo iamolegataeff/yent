@@ -379,6 +379,11 @@ func (iw *InnerWorld) Breathe(ctx context.Context) {
 		case now := <-t.C:
 			if trigger, ok := iw.due(now); ok {
 				iw.dream(trigger)
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
 			}
 			// pick up a tick changed by SetBreath while breathing
 			iw.mu.Lock()

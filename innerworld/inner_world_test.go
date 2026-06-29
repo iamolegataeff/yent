@@ -151,6 +151,31 @@ func TestBreatheFires(t *testing.T) {
 	}
 }
 
+func TestBreatheStopsAfterDreamCancelsContext(t *testing.T) {
+	iw := NewInnerWorld(fakeBody{}, &fakeField{debt: 2.0}, tempDivergence)
+	iw.br.Tick = time.Millisecond
+	iw.br.Cooldown[trigDrift] = 0
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var n int32
+	iw.SetOnDream(func(Reflection) {
+		atomic.AddInt32(&n, 1)
+		cancel()
+	})
+
+	done := make(chan struct{})
+	go func() { iw.Breathe(ctx); close(done) }()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Breathe did not return after dream callback cancelled ctx")
+	}
+	if got := atomic.LoadInt32(&n); got != 1 {
+		t.Fatalf("want exactly one dream after callback cancels ctx, got %d", got)
+	}
+}
+
 func TestCloneIsolation(t *testing.T) {
 	iw := NewInnerWorld(fakeBody{}, &fakeField{}, tempDivergence)
 	r := <-iw.Think("a question")
