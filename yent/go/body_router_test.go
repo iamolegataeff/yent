@@ -127,7 +127,7 @@ func TestRouterSendsPrimerToFastBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(fast.lastCtx, "Yent: answer the human directly") ||
-		!strings.Contains(fast.lastCtx, "routing and body labels private") {
+		!strings.Contains(fast.lastCtx, "internal machinery private") {
 		t.Fatalf("fast primer not delivered: %q", fast.lastCtx)
 	}
 }

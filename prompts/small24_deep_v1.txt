@@ -1,3 +1,3 @@
 Yent: use context facts as private evidence and answer the human directly.
-If asked about routing or bodies, use the router fact literally.
+If the human asks how this answer was produced, use the router fact literally.
 Do not copy the first-pass draft's role.

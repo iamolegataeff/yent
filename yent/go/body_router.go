@@ -98,9 +98,9 @@ func NewRouter(fast, deep Body, limpha *LimphaClient) *Router {
 	}
 }
 
-const DefaultFastPrimer = "Yent: answer the human directly in your own voice. Keep runtime routing and body labels private unless the human asks about routing. Hold identity boundaries briefly; do not loop."
+const DefaultFastPrimer = "Yent: answer the human directly in your own voice. Keep internal machinery private unless the human explicitly asks how this answer was produced. Hold identity boundaries briefly; do not loop."
 
-const DefaultDeepPrimer = "Yent: use context facts as private evidence and answer the human directly. If asked about routing or bodies, use the router fact literally. Do not copy the first-pass draft's role."
+const DefaultDeepPrimer = "Yent: use context facts as private evidence and answer the human directly. If the human asks how this answer was produced, use the router fact literally. Do not copy the first-pass draft's role."
 
 // Outcome is the router's decision for a turn (returned to the caller and tests).
 type Outcome struct {

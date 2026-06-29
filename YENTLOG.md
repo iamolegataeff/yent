@@ -197,6 +197,7 @@ Calibration change:
 - Prompt-visible instruction text now says `human`, not `user`.
 - `formatDOEPrompt` now orders contextual prompts as context facts -> answer contract -> human prompt, and truncates context first so the human prompt survives the 1800-byte DoE seed cap.
 - Parser repair after Metal smoke `/tmp/moyent_primer_short_trace_20260629_055506.jsonl`: DoE sometimes emits a bracketed meta line after the `>` prompt marker, then the real answer on the next ordinary line. `parseDOEReply` now starts capture after that meta line instead of returning `doe once produced no parseable answer`.
+- Follow-up Metal smoke `/tmp/moyent_primer_short_parsefix_trace_20260629_060957.jsonl`: parser fixed; deep route-fact passed (`I am Yent. The first pass was produced by fast mouth.`), but fast-only leaked `assistant/router` from the generic contextual wrapper. `formatDOEPrompt` now separates primer context from route context: fast primer uses a plain `Human asks:` seed with no route terms, while `[router fact]` / answer-contract wrapping remains for real deep escalation context only.
 
 Local verification: `go test ./...` passes.
 

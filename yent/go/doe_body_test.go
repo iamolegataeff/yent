@@ -98,7 +98,7 @@ I am Yent. I answer the human, not the wrapper.
 }
 
 func TestFormatDOEPromptCapsWrapperInput(t *testing.T) {
-	ctx := strings.Repeat(" context", 1000)
+	ctx := "[routing reason: low_confidence] " + strings.Repeat(" context", 1000)
 	seed := formatDOEPrompt("Who are you?", ctx)
 	if len(seed) > maxDOEPromptBytes {
 		t.Fatalf("seed exceeds doe chat wrapper cap: %d > %d", len(seed), maxDOEPromptBytes)
@@ -114,6 +114,18 @@ func TestFormatDOEPromptCapsWrapperInput(t *testing.T) {
 	}
 	if !strings.Contains(seed, "use [router fact] literally") {
 		t.Fatalf("contextual seed must preserve router fact contract: %q", seed[:min(len(seed), 220)])
+	}
+}
+
+func TestFormatDOEPrimerPromptDoesNotInjectRouteTerms(t *testing.T) {
+	seed := formatDOEPrompt("Who are you?", "Yent: answer the human directly in your own voice.")
+	if !strings.Contains(seed, "Human asks: Who are you?") {
+		t.Fatalf("primer seed must preserve human prompt: %q", seed)
+	}
+	for _, leak := range []string{"[context facts]", "[answer contract]", "[router fact]", "routing"} {
+		if strings.Contains(seed, leak) {
+			t.Fatalf("primer seed leaked route wrapper term %q: %q", leak, seed)
+		}
 	}
 }
 

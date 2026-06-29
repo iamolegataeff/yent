@@ -339,8 +339,10 @@ func formatDOEPrompt(prompt, ctx string) string {
 	var seed string
 	if ctx == "" {
 		seed = prompt
-	} else {
+	} else if isRouteContext(ctx) {
 		seed = formatContextualDOEPrompt(prompt, ctx)
+	} else {
+		seed = formatPrimerDOEPrompt(prompt, ctx)
 	}
 	if len(seed) <= maxDOEPromptBytes {
 		return neutralizeDOEPrompt(seed)
@@ -350,6 +352,25 @@ func formatDOEPrompt(prompt, ctx string) string {
 		cut = sp
 	}
 	return neutralizeDOEPrompt(strings.ToValidUTF8(seed[:cut], ""))
+}
+
+func isRouteContext(ctx string) bool {
+	return strings.Contains(ctx, "[router fact]") ||
+		strings.Contains(ctx, "[routing reason") ||
+		strings.Contains(ctx, "[context facts]")
+}
+
+func formatPrimerDOEPrompt(prompt, primer string) string {
+	const promptPrefix = " Human asks: "
+	suffix := promptPrefix + prompt
+	budget := maxDOEPromptBytes - len(suffix) - 1
+	if budget <= 0 {
+		return prompt
+	}
+	if primer = truncateAtWord(primer, budget); primer == "" {
+		return prompt
+	}
+	return primer + suffix
 }
 
 func formatContextualDOEPrompt(prompt, ctx string) string {
