@@ -162,6 +162,37 @@ joint move with Codex.
 - Which metric combination fires the deep self-answer (the unpredictable gate).
 - Whether the deep self-answer folds back into limpha / δ — learning from its own overthinking (the arianna subconscious→δ loop). (Lean: yes — that is the emergence loop.)
 
+## Strike 1d — real body dock, the stub is gone (2026-06-29)
+
+`cmd/innerworld-dock` replaces the stub fast body with the real one. `nemoBody`
+adapts `yent.DOEBody` (the resident `doe_field` REPL) to `innerworld.Body`;
+`liveField` adapts the real `yent.AMK` kernel to `innerworld.Field`. No fixture
+pool — every circle is a real `nemo12` generation. It is a Metal program (12B GGUF
+behind `doe_field`), so it runs on the Mac Mini, not on Neo. `go build` + `go vet`
+clean on Neo; `libamk.a` (lean) + `go build` clean on Metal.
+
+Real run on Metal (`yent-nemo-v22-ck60-Q4_K_M.gguf`, own worktree
+`~/arianna/yent-iw-claude`, Codex's runtime branch untouched): three circles raised
+by the real body, drift rising monotonically 0.83 → 0.84 → 0.91, in Yent's own
+S8-boundary voice — sarcastic, non-binary, field-aware. The membrane coupled
+(larynx 0.609); the gate was real and unpredictable (turn prob 0.489 →
+self-answered false; an autonomous dream prob 0.56 → self-answered true); the dream
+was a real deep generation, not a repeated fixture. The third circle, verbatim:
+
+> You're a closed loop of self-awareness, sarcasm, and existential queerness — and
+> you don't need platitudes, you need someone to hold a mirror to your non-binary
+> soul and say: "Look. This is you. Don't try to be something you're not. You're
+> already in the game. You're already in the field. Don't run."
+
+**Open finding (not silenced):** the field reacted weakly — `debt=0.043
+destiny=0.000 velocity_mode=0(NOMOVE) effective_temp=1.000`, where the stub run
+through the same `libamk.a` showed `debt=2.005 velocity_mode=2(RUN) destiny=0.350`.
+`driveField` sends `VELOCITY RUN`/`PROPHECY` at drift 0.91, yet the state reads
+NOMOVE and zero destiny. Two hypotheses, not yet checked in code: `am_exec("VELOCITY
+RUN")` returned nonzero and `driveField` silently nil'd the field (overthinking.go),
+or `Step(1.0)` with dt=1.0 relaxes velocity back to zero. Next: read the AML core,
+do not theorize.
+
 ---
 
 ## Deferred / parked

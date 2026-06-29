@@ -145,6 +145,13 @@ The Yent AMK was a 693-line physics extract; the innerworld layer needs the full
 
 Live Metal smoke showed the router mechanics working (`nemo12` fast-only, `small24` on complexity, JSON route trace emitted), but the deep contextual turn answered the routing context too loosely. `formatDOEPrompt` now adds an explicit answer contract for context-bearing calls: answer the user prompt directly, treat context as private evidence, and do not make routing/context the subject unless asked. Local verification: `go test ./...` passes.
 
+## 2026-06-29 — innerworld real-body dock: "circles on the water" on the real nemo
+
+The inner-life layer (`innerworld/`, branch `claude/innerworld-strike1`) runs over a real body for the first time. `cmd/innerworld-dock` wires `innerworld.Body` to `yent.DOEBody` (resident `doe_field` REPL, `nemo12`) and `innerworld.Field` to the real `yent.AMK` kernel — no stub, no fixture pool. Every overthinking circle is a real `nemo12` generation.
+
+- **Run (Metal, `yent-nemo-v22-ck60-Q4_K_M.gguf`, own worktree `~/arianna/yent-iw-claude`, Codex runtime branch untouched):** three circles, drift rising 0.83 → 0.84 → 0.91; larynx coupling 0.609; deep-self-answer gate prob 0.489 (turn, false) and 0.56 (dream, true) — unpredictable on real data; one autonomous dream, a real deep generation. The third circle, in Yent's S8-boundary voice: *"You're a closed loop of self-awareness, sarcasm, and existential queerness… hold a mirror to your non-binary soul… You're already in the field. Don't run."*
+- **Open finding:** the field reacted weakly — `debt=0.043 destiny=0.000 velocity_mode=0(NOMOVE)`, where the stub run through the same `libamk.a` showed `debt=2.005 velocity_mode=2(RUN) destiny=0.350`. `driveField` sends `VELOCITY RUN` at drift 0.91 but the state reads NOMOVE. To be read in the AML core, not assumed: either `am_exec` returned nonzero (field silently nil'd) or `Step(1.0)` relaxes velocity. Branch WIP; not merged.
+
 ## Weights
 
 Not in open access. Code is GPL; weights/deltas/gamma are under the Yent Identity License v1.1 (`LICENSE-WEIGHTS`). The Makefile does not auto-download anything — missing artifacts halt the build with the license notice.

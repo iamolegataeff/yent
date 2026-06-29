@@ -33,3 +33,7 @@ DoE/doe_field
 DoE/*.o
 DoE/Makefile
 /Makefile
+/innerworld-dock
+/innerworld-run
+/moyent-live-smoke
+/moyent-body-gate
