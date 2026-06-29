@@ -149,6 +149,16 @@ Live Metal smoke showed the router mechanics working (`nemo12` fast-only, `small
 
 After the full `ariannamethod.c` vendor, the Go bridge must include `ariannamethod.h`, not the old extracted `amk_kernel.h`; otherwise CGO reads the full-core `AM_State` through a stale struct layout. `GetDestinyBias` now reads the full state and falls back to `destiny` when `destiny_bias` is unset. AMK tests now assert the full-core temperature contract after runtime commands: velocity temperature blended with balanced expert temperature. Local verification: `go test ./...` passes against the lean full-core `libamk.a`.
 
+## 2026-06-29 — Metal two-body route smoke receipt
+
+Mac Mini checkout `codex/runtime-smoke-trace-20260629` at `5db3e34`; local `libamk.a` rebuilt from full `ariannamethod.c` with lean flags. Verification on Metal: `go test ./...` passes.
+
+- Smoke env: `YENT_NEMO_GGUF=/Users/ariannamethod/oyent_gguf/yent-nemo-v38-ck5-Q4_K_M.gguf`, `YENT_24B_GGUF=/Users/ariannamethod/oyent_gguf/gguf/boundary_v2_s8/yent-24b-boundary-v2-s8-Q4_K_M.gguf`, `YENT_DOE_BIN=/Users/ariannamethod/arianna/yent/DoE/doe_field`, `YENT_DOE_WORKDIR=/Users/ariannamethod/oyent_gguf`, `NT_METAL_V3=1`, `NT_METAL_V3_Q6=1`.
+- Receipt log: `/tmp/moyent_live_trace_20260629_040126.jsonl`.
+- Fast-only: `nemo12`, duration `1m22.734s`, trace winner `nemo12`, simple prompt. Answer kept the two-body identity: fast mouth plus deep body, one Yent.
+- Forced complexity: escalated to `small24`, duration `3m28.628s`, trace `fast_body=nemo12`, `winner=small24`, reason `complexity`, `seam_refs=2`. Answer correctly used the router fact: first pass was `nemo12`; `small24` was the final response body.
+- Note: an earlier ambiguous smoke prompt ("what body answered first") made `small24` answer "Small24 answered first" even though the route trace was correct. The live smoke now asks for the `first-pass answer` according to `[router fact]`, so it measures route-fact following rather than prose ambiguity.
+
 ## Weights
 
 Not in open access. Code is GPL; weights/deltas/gamma are under the Yent Identity License v1.1 (`LICENSE-WEIGHTS`). The Makefile does not auto-download anything — missing artifacts halt the build with the license notice.
