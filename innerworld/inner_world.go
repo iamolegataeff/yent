@@ -121,9 +121,13 @@ func (iw *InnerWorld) deepAnswerLocked(circles []Circle) string {
 	if iw.deep == nil {
 		return ""
 	}
+	seed := deepSeed(circles)
+	if seed == "" {
+		return "" // no inner thought to answer — do not swap residents or wake the deep body
+	}
 	closeIfResident(iw.fast) // free the fast weights before the deep body loads
 	iw.deepResident = true
-	return iw.deep.Generate(deepSeed(circles), 0)
+	return iw.deep.Generate(seed, 0)
 }
 
 // deepSeed is what crosses the membrane to the deep body: the fast body's stream

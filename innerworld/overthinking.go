@@ -8,7 +8,10 @@
 // AML kernel; tests wire fakes. No cgo lives here.
 package innerworld
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Body is one inference voice. Strike 1 uses the fast mouth (nemo12). Real on
 // Metal; a fake in tests.
@@ -83,6 +86,13 @@ func Overthink(prompt string, fast Body, field Field, div Divergence, cfg Config
 	for i := 0; i < cfg.N; i++ {
 		baseTemp := cfg.TempBase + cfg.TempRamp*float32(i)
 		text, drift, temp := generateDivergent(fast, seed, prev, div, baseTemp, prevDrift, cfg)
+
+		// a body that returns nothing (timeout/error) stops the ripple — do not
+		// append empty circles, do not drive the field with garbage, do not seed the
+		// next circle from "". The chain ends with whatever real thoughts came before.
+		if strings.TrimSpace(text) == "" {
+			break
+		}
 
 		circles = append(circles, Circle{Index: i, Seed: seed, Text: text, Drift: drift, Temp: temp})
 		if !driveField(field, drift, i) {
