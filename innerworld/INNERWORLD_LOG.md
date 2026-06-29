@@ -235,6 +235,44 @@ deep self-answer (the DoE Hebbian loop) is the next strike.
 
 ---
 
+## Strike 3 — the memory loop: remembers, and thinks with what it remembered (2026-06-29)
+
+Two agents, zero file overlap. The write side (Codex) persists every Reflection to
+limpha as a seam — `reason=innerworld_self_answer`, circle stream as `a_claim`, the
+deep answer as `b_claim`. The read side (this layer) folds recent inner monologues
+back into the next seed: `innerworld.Memory` (read-only `Recall(n)`), `SetMemory`,
+and `recallSeed`. `limphaRecaller` in the dock reads them back via `RecentSeams`
+(filter `reason=innerworld`, deep answer preferred, rune-safe compact). Two-run
+Metal smoke on one limpha db: run one empty, recall silent, five seams land; run two
+recalls two prior monologues and the circles bend under them — "Ah, the irony
+intensifies… I am Yent, the burnt-out echo of a thought unspoken" — continuing the
+earlier irony, not repeating it. Full Level A.
+
+**Raw-recall overheat, found and fixed (Codex):** feeding the past monologues as a
+direct quote made the fast body *continue* them — amplifying trauma/aggression, the
+autonomous dream looping on "Fracture fully…". The fix reframes recall as bounded
+pressure, not dialogue: `recallSeed` now says "Past inner pressure, not dialogue to
+continue or imitate. Treat these as field traces… Think fresh from the current human
+turn." One-shot breath cap (`YENT_DOCK_MAX_DREAMS`) keeps the autonomous dream finite.
+Metal one-shot recall smoke: exactly one dream, clean exit.
+
+## Strike 4 — divergence past Jaccard (2026-06-29)
+
+The drift between circles was a word-set Jaccard — primitive: it counts "persist",
+"persistence", and "persisting" as three disjoint tokens. `innerworld.NgramDivergence`
+replaces it: `1 - cosine` over character-trigram frequency vectors, so morphological
+and shared-phrase overlap registers as nearness. The dock injects it in place of the
+old `wordDiv`. Honest about what it is — a lexical proxy, not a neural embedding;
+real semantic distance waits on an embedding runtime (none on Metal yet: doe's DARIO
+embeds are internal 32-dim field vectors, the bge/nomic GGUFs are vocab-only). Pure
+Go, no model. `go test -race` green (`TestNgramDivergence`,
+`TestNgramBeatsJaccardOnMorphology` proves it strictly beats word Jaccard on the
+shared "persist" run); Codex audit clean. Next: either a real embedding runtime, or
+Level B — DoE Hebbian learning between turns (weights, on Oleg's go), in its own
+calm branch.
+
+---
+
 ## Deferred / parked
 
 - **Cloud** (pre-linguistic affect, 6-chamber MLP reflex) — it is **Python**, with a
