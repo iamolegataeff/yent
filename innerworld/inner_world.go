@@ -46,6 +46,16 @@ type Reflection struct {
 	DeepAnswer     string  // small24's inner answer to the circles; empty unless SelfAnswered with a deep body
 }
 
+// Memory lets the inner world recall its own past monologues so new thinking is
+// shaped by what it thought before. It is READ-ONLY here on purpose: the runtime
+// persists reflections (the dock writes them to limpha), so the inner world only
+// reads them back and the write path is never duplicated. nil = no recall.
+type Memory interface {
+	// Recall returns up to n recent inner thoughts, most recent first, as compact
+	// text lines to fold into the next overthinking seed.
+	Recall(n int) []string
+}
+
 // InnerWorld hosts Yent's inner life over the fast body, the shared AML field,
 // and the Larynx membrane. Think runs the overthinking for a human turn off the
 // answer path; Breathe keeps the organism dreaming between turns. Only one inner
@@ -57,6 +67,7 @@ type InnerWorld struct {
 	field  Field
 	div    Divergence
 	larynx Larynx
+	memory Memory // past-monologue recall; nil = no recall (read-only, runtime writes)
 	cfg    Config
 	br     Breath
 
@@ -94,6 +105,41 @@ func (iw *InnerWorld) SetDeep(deep Body) {
 	iw.genMu.Lock()
 	iw.deep = deep
 	iw.genMu.Unlock()
+}
+
+// SetMemory wires the past-monologue recall, so new thinking is shaped by what the
+// organism thought before. Read-only: the runtime persists reflections; this only
+// reads them back. Set before Think/Breathe start.
+func (iw *InnerWorld) SetMemory(m Memory) {
+	iw.genMu.Lock()
+	iw.memory = m
+	iw.genMu.Unlock()
+}
+
+// recallSeed folds recent inner monologues into the prompt before a new ripple, so
+// the organism thinks with what it thought before. NO-SEED-FROM-PROMPT still holds:
+// the recall and prompt are transformed by innerSeed inside Overthink before circle
+// 0. Caller holds genMu. No memory, no recalls, or RecallN<=0 returns the prompt
+// unchanged (backward-compatible).
+func (iw *InnerWorld) recallSeed(prompt string) string {
+	if iw.memory == nil || iw.cfg.RecallN <= 0 {
+		return prompt
+	}
+	past := iw.memory.Recall(iw.cfg.RecallN)
+	if len(past) == 0 {
+		return prompt
+	}
+	var b strings.Builder
+	b.WriteString("Recalling earlier thoughts: ")
+	for i, p := range past {
+		if i > 0 {
+			b.WriteString(" / ")
+		}
+		b.WriteString(p)
+	}
+	b.WriteString(". Now: ")
+	b.WriteString(prompt)
+	return b.String()
 }
 
 // closeIfResident closes a body that owns a resident process (the doe daemon), so
@@ -220,7 +266,7 @@ func (iw *InnerWorld) reflect(circles []Circle, debt float32) Reflection {
 func (iw *InnerWorld) think(prompt string) Reflection {
 	iw.genMu.Lock()
 	iw.ensureFastResidentLocked()
-	circles := Overthink(prompt, iw.fast, iw.field, iw.div, iw.cfg)
+	circles := Overthink(iw.recallSeed(prompt), iw.fast, iw.field, iw.div, iw.cfg)
 	debt := iw.fieldDebt() // snapshot under genMu: belongs to this batch
 	r := iw.reflect(circles, debt)
 	if r.SelfAnswered {
@@ -292,7 +338,7 @@ func (iw *InnerWorld) dream(trigger int) Reflection {
 
 	iw.genMu.Lock()
 	iw.ensureFastResidentLocked()
-	circles := Overthink(seed, iw.fast, iw.field, iw.div, iw.cfg)
+	circles := Overthink(iw.recallSeed(seed), iw.fast, iw.field, iw.div, iw.cfg)
 	debt := iw.fieldDebt() // snapshot under genMu: belongs to this batch
 	r := iw.reflect(circles, debt)
 	if r.SelfAnswered {

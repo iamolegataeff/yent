@@ -2,11 +2,52 @@ package innerworld
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// fakeMemory returns canned past monologues for the recall path.
+type fakeMemory struct{ past []string }
+
+func (m fakeMemory) Recall(n int) []string {
+	if n < len(m.past) {
+		return m.past[:n]
+	}
+	return m.past
+}
+
+func TestRecallFoldsIn(t *testing.T) {
+	// circle 0's seed must carry the recalled thoughts AND the prompt — the organism
+	// thinks with what it thought before, NO-SEED-FROM-PROMPT still intact.
+	iw := NewInnerWorld(fakeBody{}, &fakeField{}, tempDivergence)
+	iw.SetMemory(fakeMemory{past: []string{"the void is patient", "form before name"}})
+	r := <-iw.Think("what is code")
+	if len(r.Circles) == 0 {
+		t.Fatal("no circles")
+	}
+	seed := r.Circles[0].Seed
+	if !strings.Contains(seed, "the void is patient") {
+		t.Errorf("circle 0 seed should carry the recalled thought, got %q", seed)
+	}
+	if !strings.Contains(seed, "what is code") {
+		t.Errorf("circle 0 seed should still carry the prompt, got %q", seed)
+	}
+}
+
+func TestRecallNilSafe(t *testing.T) {
+	// no memory -> seed is just the prompt's inner transform, unchanged behavior.
+	iw := NewInnerWorld(fakeBody{}, &fakeField{}, tempDivergence)
+	r := <-iw.Think("plain prompt")
+	if len(r.Circles) == 0 {
+		t.Fatal("no circles")
+	}
+	if strings.Contains(r.Circles[0].Seed, "Recalling") {
+		t.Errorf("no memory must not inject recall, got %q", r.Circles[0].Seed)
+	}
+}
 
 func TestThinkAsync(t *testing.T) {
 	iw := NewInnerWorld(fakeBody{}, &fakeField{}, tempDivergence)
