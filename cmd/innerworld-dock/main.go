@@ -96,6 +96,46 @@ func (d doeBody) Generate(seed string, _ float32) string {
 
 func (d doeBody) Close() error { return d.b.Close() }
 
+// limphaRecaller is the read side of the memory loop: it recalls Yent's own past
+// inner monologues from limpha — the seams the dock persisted (Codex's write side) —
+// so new overthinking is shaped by what it thought before. Only inner reflections
+// are recalled (reason contains "innerworld"), never router turns; the deep inner
+// answer (b_claim) is preferred over the circle stream (a_claim).
+type limphaRecaller struct{ lc *yent.LimphaClient }
+
+func (m limphaRecaller) Recall(n int) []string {
+	if m.lc == nil || n <= 0 {
+		return nil
+	}
+	seams, err := m.lc.RecentSeams(n * 3) // over-fetch, then filter to inner seams
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, n)
+	for _, s := range seams {
+		if reason, _ := s["reason"].(string); !strings.Contains(reason, "innerworld") {
+			continue
+		}
+		thought := ""
+		if b, ok := s["b_claim"].(string); ok && strings.TrimSpace(b) != "" {
+			thought = b // the deep inner answer — the furthest thought of that monologue
+		} else if a, ok := s["a_claim"].(string); ok {
+			thought = a // fall back to the circle stream
+		}
+		thought = strings.Join(strings.Fields(thought), " ") // compact whitespace
+		if r := []rune(thought); len(r) > 240 {
+			thought = string(r[:240]) // rune-safe cap so the seed stays compact
+		}
+		if thought != "" {
+			out = append(out, thought)
+		}
+		if len(out) >= n {
+			break
+		}
+	}
+	return out
+}
+
 // wordDiv is a Jaccard distance over lowercased words: 0 identical, 1 disjoint. It
 // is a token-overlap proxy for divergence, not an embedding cosine — honest about
 // what it measures. The semantic/topic embedding distance is a later upgrade.
@@ -291,6 +331,22 @@ func main() {
 	C.am_init()
 	field := &amkField{}
 	iw := innerworld.NewInnerWorld(doeBody{fast}, field, wordDiv)
+
+	// Close the loop: recall past inner monologues from limpha so new thinking is
+	// shaped by what Yent thought before. The write side (dock -> limpha) lands the
+	// seams; this reads them back into the seed.
+	if limpha != nil {
+		recaller := limphaRecaller{limpha}
+		iw.SetMemory(recaller)
+		if past := recaller.Recall(3); len(past) > 0 {
+			fmt.Printf("=== recall wired: %d past inner monologue(s) fold into this turn ===\n", len(past))
+			for i, p := range past {
+				fmt.Printf("  recalled %d | %s\n", i, p)
+			}
+		} else {
+			fmt.Println("=== recall wired: no past inner monologues yet (first run) ===")
+		}
+	}
 
 	deepWired := false
 	if deepModel != "" {

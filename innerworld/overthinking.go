@@ -52,11 +52,13 @@ type Config struct {
 	TempRamp  float32 // temperature added per circle — each circle hotter, so it drifts further
 	RepelStep float32 // extra temperature per repel retry when a circle did not drift further
 	MaxRepel  int     // max repel retries to enforce monotonic drift
+	RecallN   int     // how many past inner monologues to fold into the seed (0 = none)
 }
 
-// DefaultConfig is the Strike-1 default: three circles, warming as they ripple out.
+// DefaultConfig is the Strike-1 default: three circles, warming as they ripple out,
+// recalling up to three past inner monologues.
 func DefaultConfig() Config {
-	return Config{N: 3, TempBase: 0.7, TempRamp: 0.2, RepelStep: 0.15, MaxRepel: 3}
+	return Config{N: 3, TempBase: 0.7, TempRamp: 0.2, RepelStep: 0.15, MaxRepel: 3, RecallN: 3}
 }
 
 // innerSeed turns the user prompt into an internal seed. This is
