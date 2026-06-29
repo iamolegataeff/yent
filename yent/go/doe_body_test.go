@@ -88,13 +88,13 @@ func TestFormatDOEPromptCapsWrapperInput(t *testing.T) {
 		t.Fatalf("seed exceeds doe chat wrapper cap: %d > %d", len(seed), maxDOEPromptBytes)
 	}
 	if !strings.Contains(seed, "Who are you?") {
-		t.Fatalf("seed must preserve user prompt before trimming context: %q", seed[:min(len(seed), 80)])
+		t.Fatalf("seed must preserve human prompt before trimming context: %q", seed[:min(len(seed), 80)])
 	}
-	if !strings.Contains(seed, "[context facts]:") || !strings.Contains(seed, "[answer contract]: Answer the user prompt directly") {
+	if !strings.Contains(seed, "[context facts]:") || !strings.Contains(seed, "[answer contract]: Answer the human prompt directly") {
 		t.Fatalf("contextual seed must include answer contract: %q", seed[:min(len(seed), 220)])
 	}
-	if strings.Index(seed, "[user prompt]:") < strings.Index(seed, "[context facts]:") {
-		t.Fatalf("user prompt should remain the final section after context: %q", seed[:min(len(seed), 220)])
+	if strings.Index(seed, "[human prompt]:") < strings.Index(seed, "[context facts]:") {
+		t.Fatalf("human prompt should remain the final section after context: %q", seed[:min(len(seed), 220)])
 	}
 	if !strings.Contains(seed, "use [router fact] literally") {
 		t.Fatalf("contextual seed must preserve router fact contract: %q", seed[:min(len(seed), 220)])

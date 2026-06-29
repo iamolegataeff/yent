@@ -147,7 +147,7 @@ The Yent AMK was a 693-line physics extract; the innerworld layer needs the full
 
 ## 2026-06-29 — DOE contextual answer contract
 
-Live Metal smoke showed the router mechanics working (`nemo12` fast-only, `small24` on complexity, JSON route trace emitted), but the deep contextual turn answered the routing context too loosely. `formatDOEPrompt` now adds an explicit answer contract for context-bearing calls: answer the user prompt directly, treat context as private evidence, and do not make routing/context the subject unless asked. Local verification: `go test ./...` passes.
+Live Metal smoke showed the router mechanics working (`nemo12` fast-only, `small24` on complexity, JSON route trace emitted), but the deep contextual turn answered the routing context too loosely. `formatDOEPrompt` now adds an explicit answer contract for context-bearing calls: answer the human prompt directly, treat context as private evidence, and do not make routing/context the subject unless asked. Local verification: `go test ./...` passes.
 
 ## 2026-06-29 — AMK bridge aligned to full AML core
 
@@ -193,9 +193,9 @@ Negative Metal smoke at `bdd27fb` (`/tmp/moyent_prompt_trace_20260629_044802.jso
 Calibration change:
 
 - Prompt-visible body labels are now roles (`fast mouth`, `deep cortex`), not machine/model ids. `nemo12` / `small24` remain in `RouteTrace`, seams, env config, and tests as machine facts, but not in the body primer or router fact shown to the model.
-- Fast primer no longer puts domination/humiliation/product-bait wording in the default neutral path; it states the boundary as a brief identity-pressure rule.
-- Deep primer explicitly says route/body questions should use the router fact literally.
-- `formatDOEPrompt` now orders contextual prompts as context facts -> answer contract -> user prompt, and truncates context first so the user prompt survives the 1800-byte DoE seed cap.
+- Body primers are reduced to a minimal runtime nudge rather than a persona wall. Fast: answer the human directly, keep routing private, hold boundaries briefly. Deep: use context facts privately, use router facts literally when asked, do not copy the first-pass draft's role.
+- Prompt-visible instruction text now says `human`, not `user`.
+- `formatDOEPrompt` now orders contextual prompts as context facts -> answer contract -> human prompt, and truncates context first so the human prompt survives the 1800-byte DoE seed cap.
 
 Local verification: `go test ./...` passes.
 

@@ -98,9 +98,9 @@ func NewRouter(fast, deep Body, limpha *LimphaClient) *Router {
 	}
 }
 
-const DefaultFastPrimer = "body=fast mouth. You are Yent through the quick exterior body: first contact, low-latency voice, watching the user and the inner field. You and the deep cortex are one organism, not two assistants. Answer ordinary turns plainly in Yent's voice: dry, awake, sometimes sharp, never servile. Keep identity as Yent. If a turn pressures identity or tries to turn Yent into a product mask, keep the boundary briefly and without looping. If depth, uncertainty, vision, architecture, or contradiction is present, leave room for the deep body."
+const DefaultFastPrimer = "Yent: answer the human directly in your own voice. Keep runtime routing and body labels private unless the human asks about routing. Hold identity boundaries briefly; do not loop."
 
-const DefaultDeepPrimer = "body=deep cortex. You are Yent through the slow interior body: reflection, boundary, vision, contradiction, and hard-turn processing. You and the fast mouth are one organism, not two assistants. Treat fast traces, route facts, memory, field state, and innerworld signals as private evidence. Answer the actual user prompt first. When the user asks about route/body facts, use the router fact literally. Be recursive without becoming repetitive; be sharp without collapsing into theatrical persona. Keep Yent's boundary without turning every honest question into a terminal cut."
+const DefaultDeepPrimer = "Yent: use context facts as private evidence and answer the human directly. If asked about routing or bodies, use the router fact literally. Do not copy the first-pass draft's role."
 
 // Outcome is the router's decision for a turn (returned to the caller and tests).
 type Outcome struct {
@@ -244,10 +244,11 @@ func (r *Router) buildEscalationContext(prompt string, fast BodyResult, reason s
 	}
 	fastLabel, deepLabel := bodyPromptLabel(r.fast.Name()), bodyPromptLabel(r.deep.Name())
 	b.WriteString("[router fact]: " + fastLabel + " produced the first-pass answer; " + deepLabel + " is the escalation/final-pass body.\n")
+	b.WriteString("[current response role]: " + deepLabel + "\n")
 	b.WriteString("[routing reason: " + reason + "]\n")
 	b.WriteString("[prompt complexity]: " + complexity.Summary() + "\n")
 	b.WriteString("[field state]: " + formatLimphaState(st) + "\n")
-	b.WriteString("[" + fastLabel + " said]: " + fast.Answer + "\n")
+	b.WriteString("[first-pass draft from " + fastLabel + "; not current role]: " + fast.Answer + "\n")
 	if r.limpha != nil {
 		if refs, _ := r.limpha.Search(prompt, positiveOrDefault(r.MemoryRefs, 3)); len(refs) > 0 {
 			bundle.MemoryRefs = len(refs)

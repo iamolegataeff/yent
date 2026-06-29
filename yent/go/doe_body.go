@@ -355,8 +355,8 @@ func formatDOEPrompt(prompt, ctx string) string {
 func formatContextualDOEPrompt(prompt, ctx string) string {
 	const (
 		contextPrefix = "[context facts]: "
-		contract      = " [answer contract]: Answer the user prompt directly. Use context as private factual evidence. If the user asks about route or body facts, use [router fact] literally. Do not make routing or context the subject unless the user asks."
-		promptPrefix  = " [user prompt]: "
+		contract      = " [answer contract]: Answer the human prompt directly. Use context as private factual evidence. If the human asks about route or body facts, use [router fact] literally. Do not make routing or context the subject unless the human asks."
+		promptPrefix  = " [human prompt]: "
 	)
 	suffix := contract + promptPrefix + prompt
 	budget := maxDOEPromptBytes - len(contextPrefix) - len(suffix)
