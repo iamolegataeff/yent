@@ -27,9 +27,10 @@
 package main
 
 /*
-#cgo CFLAGS: -I${SRCDIR}/../../yent/c
+#cgo CFLAGS: -I${SRCDIR}/../../yent/c -I${SRCDIR}/../../sartre
 #cgo LDFLAGS: ${SRCDIR}/../../yent/c/libamk.a
 #include "ariannamethod.h"
+#include "perception.h"
 #include <stdlib.h>
 */
 import "C"
@@ -44,6 +45,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/ariannamethod/yent/innerworld"
 	"github.com/ariannamethod/yent/innerworld/aml"
@@ -189,6 +191,39 @@ func newBody(name, bin, model, workdir string, args []string) *yent.DOEBody {
 // cooc graph is built over the SAME token ids the voice speaks in (shared vocabulary).
 // On failure the inner world still runs — the native body's Ingest/BiasWords no-op
 // without a tokenizer rather than crash the dock.
+// sartreSense is the live-field reflex half of SARTRE that perception.h anticipated
+// but left to the integration seam: it reads the same YENT_SARTRE_EVENTS the limpha
+// path ingests, runs the C perception (sartre_perceive_from_events ->
+// sartre_perceive_to_aml), and hands the inner world the environment's AML posture
+// (VELOCITY/PROPHECY). A quiet tree (no changes) feels nothing — ok=false — so the
+// reflex only fires on real motion, never forcing the field to NOMOVE each turn. This
+// is the fast present-time twin of the slow limpha recall pressure: same perception,
+// two routes into the organism.
+type sartreSense struct{ eventsPath string }
+
+func (s sartreSense) Pressure() (string, bool) {
+	if s.eventsPath == "" {
+		return "", false
+	}
+	raw, err := os.ReadFile(s.eventsPath)
+	if err != nil || len(raw) == 0 {
+		return "", false
+	}
+	cjson := C.CString(string(raw))
+	defer C.free(unsafe.Pointer(cjson))
+	var p C.SartrePerception
+	C.sartre_perceive_from_events(cjson, &p)
+	if int(p.changed) <= 0 {
+		return "", false // a still environment is no reflex
+	}
+	var buf [256]C.char
+	n := C.sartre_perceive_to_aml(&p, &buf[0], 256)
+	if n <= 0 {
+		return "", false
+	}
+	return C.GoStringN(&buf[0], n), true
+}
+
 func buildDockTokenizer(nemoGGUF string) aml.Tokenizer {
 	gf, err := yent.LoadGGUF(nemoGGUF)
 	if err != nil {
@@ -393,6 +428,14 @@ func main() {
 	iw.SetScarThreshold(scarThresholdEnv())
 	iw.AddConsolidator(&innerworld.FlowConsolidator{Flow: flowBody})
 	iw.SetSleepTrigger(func(innerworld.Field) bool { return flowBody.AutumnEnergy() > 0.6 })
+
+	// SARTRE sense: the environment (utility events) is a live field reflex — it shifts
+	// the field's posture (VELOCITY/PROPHECY) before each ripple, the fast present-time
+	// twin of the slow limpha recall pressure. Same YENT_SARTRE_EVENTS as the limpha path.
+	if ev := strings.TrimSpace(os.Getenv("YENT_SARTRE_EVENTS")); ev != "" {
+		iw.SetSense(sartreSense{eventsPath: ev})
+		fmt.Println("=== SARTRE sense wired: environment perception is a live field reflex (before the circles) ===")
+	}
 
 	var memories []innerworld.Memory
 	ingestSartreFromEnv(limpha, limphaStateFromCanonical())

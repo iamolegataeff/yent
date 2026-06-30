@@ -71,6 +71,7 @@ type InnerWorld struct {
 	cooc   *CoocGraph  // inner co-occurrence memory (Go form); nil = circles do not seed/feel a cooc field
 	scar   *ScarMemory // sea of rejected thoughts (Go form); nil = no scarring
 	flow   Flow        // native AML body (form A): when set, it IS the single cooc+scar+field physics
+	sense  Sense       // environment perception (SARTRE): present-world reflex onto the field; nil = no environment
 	cfg    Config
 	br     Breath
 
@@ -286,7 +287,8 @@ func (iw *InnerWorld) think(prompt string) Reflection {
 	iw.genMu.Lock()
 	iw.ensureFastResidentLocked()
 	traces := iw.memoryTracesLocked()
-	iw.applyMemoryPressureLocked(traces)
+	iw.applyMemoryPressureLocked(traces) // the past as slow field pressure
+	iw.applySenseLocked()                // the present world as fast field reflex (SARTRE)
 	circles := Overthink(iw.recallSeedWithTraces(iw.coocBias(iw.scarSurface(prompt)), traces), iw.fast, iw.field, iw.div, iw.cfg)
 	debt := iw.fieldDebt()       // snapshot under genMu: belongs to this batch
 	iw.observeLocked(circles)    // circles seed the cooc field (circles->field)
@@ -362,7 +364,8 @@ func (iw *InnerWorld) dream(trigger int) Reflection {
 	iw.genMu.Lock()
 	iw.ensureFastResidentLocked()
 	traces := iw.memoryTracesLocked()
-	iw.applyMemoryPressureLocked(traces)
+	iw.applyMemoryPressureLocked(traces) // the past as slow field pressure
+	iw.applySenseLocked()                // the present world as fast field reflex (SARTRE)
 	circles := Overthink(iw.recallSeedWithTraces(iw.coocBias(iw.scarSurface(seed)), traces), iw.fast, iw.field, iw.div, iw.cfg)
 	debt := iw.fieldDebt()       // snapshot under genMu: belongs to this batch
 	iw.observeLocked(circles)    // dreams seed the cooc field too (circles->field)
