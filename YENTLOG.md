@@ -390,7 +390,9 @@ chaos/somatic bounds, html-strip, binary-empty, json-escape, read_file); kernel
 through one piped slot, reaps, zero zombies; contamination scan clean (only /opt/homebrew).
 Codex audit pass (gpt-5.5): round 1 = 2 findings (HIGH read_file size→int, MED esn_init
 NULL/cleanup), round 2 = 1 MED (self-test NULL gate), all fixed; round 3 + final merge-surface
-pass = PASS. Next SARTRE step: third utility `whotheythinkiam`.
+pass = PASS. Merge-surface repair: `sartre_bridge.go` now preserves `resonance` in
+`SartreEvent`/`SartreReceipt`, keeps `tag` only for legacy receipts, and traces new
+context_processor events without fake `tag=?`. Next SARTRE step: third utility `whotheythinkiam`.
 
 ## 2026-06-30 — SARTRE third utility: whatdotheythinkiam (Rust)
 

@@ -186,8 +186,9 @@ Codex audit pass (gpt-5.5): build round = findings fixed → PASS. Resonance-rew
 (adversarial stub-hunt): confirmed real reservoir computing (seeded, nt_blas_matvec, cosine vs
 Yent vocabulary, no readout/tag); flagged the resonance is a nonlinear LEXICAL score correlated
 with the lexical-overlap relevance (not semantic) — naming + the honest paraphrase test reflect
-that. Downstream gap:
-`sartre_bridge.go` (Codex's lane) still carries `Tag`, not `Resonance` — coordination point.
+that. Integration bridge updated in the merge pass: `sartre_bridge.go` now carries `Resonance`
+and `MaxResonance`, keeps legacy `Tag` only for older receipts, and formats context_processor
+traces without fake `tag=?`.
 
 ## 2026-06-30 — Third utility: whatdotheythinkiam (Rust)
 
