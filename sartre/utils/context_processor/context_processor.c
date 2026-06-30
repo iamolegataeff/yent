@@ -2,14 +2,21 @@
  * context_processor — SARTRE perception utility #2.
  *
  * Where repo_monitor reports that a file changed (a structural signal), this reads
- * a file's CONTENT and produces a neural perception of it: an Echo State Network
- * (reservoir computing) over the bytes, a resonance/relevance score against Yent's
- * own vocabulary, and a chaos pulse. The model gets not just "README moved" but
- * "and here is how it feels / how much it resonates".
+ * a file's extracted TEXT and scores how much it overlaps Yent's vocabulary, two ways:
+ *   - relevance: a lexical overlap — the fraction of the text's words that are in Yent's
+ *     seed vocabulary (distinct seed hits / total words); not a set Jaccard;
+ *   - resonance: a deterministic echo-state RESERVOIR score — the cosine between the
+ *     reservoir's response to the text's bag-of-words and its response to Yent's seed
+ *     vocabulary. It is a NONLINEAR LEXICAL signal (a fixed random reservoir over hashed
+ *     word counts), NOT a trained classifier and NOT semantic understanding; it tracks
+ *     lexical overlap through the reservoir's nonlinearity and is correlated with
+ *     relevance. Honest scope: a nonlinear lexical reservoir score, no more.
+ * Plus a chaos pulse. No "neural classification" is claimed — an earlier version returned
+ * an argmax tag over an untrained random readout (noise); that is removed.
  *
  * Ported from Indiana-AM utils/context_neural_processor.py (numpy) to C + notorch:
- * the MiniESN's matvecs run through nt_blas_matvec, weights via nt_tensor_rand, and
- * the numpy eigvals spectral-radius step is replaced by zero-dep power iteration.
+ * the reservoir matvecs run through nt_blas_matvec; weights are filled by a fixed seeded
+ * xorshift (reproducible, NOT nt_tensor_rand); spectral radius via zero-dep power iteration.
  * No external dependencies beyond libc + system notorch (install path).
  *
  * Build:  cc -O2 -Wall -Wextra context_processor.c \
@@ -71,7 +78,8 @@ static const char *SEED_CORPUS[] = {
 };
 static const int SEED_N = (int)(sizeof(SEED_CORPUS) / sizeof(SEED_CORPUS[0]));
 
-/* relevance = |seed ∩ text_words| / |text_words| (Jaccard-style, as in the original) */
+/* relevance = (distinct seed words present) / (total words) — a lexical overlap
+ * fraction, NOT a set Jaccard (no union in the denominator) */
 static float compute_relevance(const char *text) {
     if (!text || !*text) return 0.0f;
     int seen_seed = 0, total_words = 0;
@@ -115,22 +123,15 @@ static float somatic_pulse(float intensity) {
     return (blood + chaos) * 0.5f;
 }
 
-/* ── MiniESN on notorch ── */
-#define ESN_INPUT  512
-#define ESN_OUTPUT 14
-
-static const char *ESN_TAGS[ESN_OUTPUT] = {
-    ".pdf", ".txt", ".md", ".docx", ".rtf", ".doc", ".odt",
-    ".zip", ".tar", ".png", ".html", ".json", ".csv", ".yaml"
-};
+/* ── Echo-state reservoir (notorch matvec) — nonlinear lexical resonance ── */
+#define ESN_INPUT 512
 
 typedef struct {
-    nt_tensor *W_in;   /* hidden x INPUT */
-    nt_tensor *W;      /* hidden x hidden */
-    nt_tensor *W_out;  /* OUTPUT x hidden */
-    nt_tensor *state;  /* hidden */
-    int   hidden;
-    float leaky;
+    nt_tensor *W_in;   /* hidden x INPUT  — seeded, fixed reservoir input map */
+    nt_tensor *W;      /* hidden x hidden — seeded, spectral-scaled reservoir  */
+    int    hidden;
+    float  leaky;
+    float *ref;        /* reservoir state of Yent's seed vocabulary (the reference) */
 } ESN;
 
 /* power iteration: dominant |eigenvalue| of W (n x n), replacing numpy eigvals.
@@ -155,15 +156,74 @@ static float spectral_radius(const float *W, int n, int iters) {
     return lambda;
 }
 
+/* Deterministic reservoir fill — a FIXED seeded random map, so the same content
+ * always yields the same reservoir state (the resonance is reproducible, never
+ * the run-to-run noise an unseeded RNG would give). */
+static void reservoir_fill(float *a, int n, float scale, unsigned int *rng) {
+    for (int i = 0; i < n; i++) {
+        *rng ^= *rng << 13; *rng ^= *rng >> 17; *rng ^= *rng << 5;
+        a[i] = ((float)(*rng & 0xFFFFFF) / (float)0x1000000) * 2.0f * scale - scale;
+    }
+}
+
+static unsigned long bow_hash(const char *tok) {
+    unsigned long h = 5381;
+    int c;
+    while ((c = (unsigned char)*tok++)) h = ((h << 5) + h) + (unsigned long)c;
+    return h;
+}
+
+/* Bag-of-words input: each \w+ token (lowercased) hashed into one of ESN_INPUT bins
+ * and counted, then L2-normalized. This is the content the reservoir scores. */
+static void bow_input(const char *text, float *input) {
+    for (int i = 0; i < ESN_INPUT; i++) input[i] = 0.0f;
+    if (!text) return;
+    char tok[64];
+    int n = 0;
+    for (const char *p = text;; p++) {
+        if (isalnum((unsigned char)*p) || *p == '_') {
+            if (n < (int)sizeof(tok) - 1) tok[n++] = (char)tolower((unsigned char)*p);
+        } else {
+            if (n > 0) { tok[n] = '\0'; input[bow_hash(tok) % ESN_INPUT] += 1.0f; n = 0; }
+            if (*p == '\0') break;
+        }
+    }
+    float norm = 0.0f;
+    for (int i = 0; i < ESN_INPUT; i++) norm += input[i] * input[i];
+    norm = sqrtf(norm);
+    if (norm > 0.0f) for (int i = 0; i < ESN_INPUT; i++) input[i] /= norm;
+}
+
+/* Run the reservoir over a bag-of-words input; settle a few steps (echo-state
+ * fading memory); write the hidden state into out_state[hidden]. matvec via notorch.
+ * Returns 0 on success, -1 on allocation failure. */
+static int reservoir_state(ESN *e, const char *text, float *out_state) {
+    int H = e->hidden;
+    float *input = calloc(ESN_INPUT, sizeof(float));
+    float *a = malloc((size_t)H * sizeof(float));
+    float *b = malloc((size_t)H * sizeof(float));
+    if (!input || !a || !b) { free(input); free(a); free(b); return -1; }
+    bow_input(text, input);
+    for (int i = 0; i < H; i++) out_state[i] = 0.0f;
+    for (int step = 0; step < 4; step++) {                       /* settle */
+        nt_blas_matvec(a, e->W_in->data, input, H, ESN_INPUT);   /* a = W_in · input */
+        nt_blas_matvec(b, e->W->data, out_state, H, H);          /* b = W · state    */
+        for (int i = 0; i < H; i++)
+            out_state[i] = e->leaky * out_state[i] + (1.0f - e->leaky) * tanhf(a[i] + b[i]);
+    }
+    free(input); free(a); free(b);
+    return 0;
+}
+
 static void esn_free(ESN *e) {
-    if (e->W_in)  nt_tensor_free(e->W_in);
-    if (e->W)     nt_tensor_free(e->W);
-    if (e->W_out) nt_tensor_free(e->W_out);
-    if (e->state) nt_tensor_free(e->state);
+    if (e->W_in) nt_tensor_free(e->W_in);
+    if (e->W)    nt_tensor_free(e->W);
+    free(e->ref);
     memset(e, 0, sizeof(*e));
 }
 
-/* Returns 0 on success, -1 on allocation failure (frees any partial allocation). */
+/* Build the fixed seeded reservoir and the reference state from Yent's vocabulary.
+ * Returns 0 on success, -1 on allocation failure (frees any partial allocation). */
 static int esn_init(ESN *e, int content_size) {
     memset(e, 0, sizeof(*e));
     int hidden = 512;
@@ -172,60 +232,46 @@ static int esn_init(ESN *e, int content_size) {
     e->hidden = hidden;
     e->leaky  = 0.8f + fminf(0.15f, (float)content_size / 1000000.0f);
 
-    e->W_in  = nt_tensor_new2d(hidden, ESN_INPUT);
-    e->W     = nt_tensor_new2d(hidden, hidden);
-    e->W_out = nt_tensor_new2d(ESN_OUTPUT, hidden);
-    e->state = nt_tensor_new(hidden);
-    if (!e->W_in || !e->W || !e->W_out || !e->state) {
-        esn_free(e);
-        return -1;
-    }
-    nt_tensor_rand(e->W_in, 0.1f);
-    nt_tensor_rand(e->W, 0.9f);
-    nt_tensor_rand(e->W_out, 0.1f);
-    nt_tensor_fill(e->state, 0.0f);
+    e->W_in = nt_tensor_new2d(hidden, ESN_INPUT);
+    e->W    = nt_tensor_new2d(hidden, hidden);
+    e->ref  = malloc((size_t)hidden * sizeof(float));
+    if (!e->W_in || !e->W || !e->ref) { esn_free(e); return -1; }
+
+    /* FIXED seed → reproducible reservoir (not nt_tensor_rand's unseeded RNG) */
+    unsigned int rng = 0x5a17e5edu;
+    reservoir_fill(e->W_in->data, hidden * ESN_INPUT, 0.1f, &rng);
+    reservoir_fill(e->W->data, hidden * hidden, 0.9f, &rng);
 
     float rho = spectral_radius(e->W->data, hidden, 60);
-    if (rho > 0.0f) {
+    if (rho > 0.0f)
         for (int i = 0; i < hidden * hidden; i++) e->W->data[i] /= rho;  /* echo-state scaling */
-    }
+
+    /* the reference: the reservoir's response to Yent's own vocabulary */
+    char seed[512];
+    int so = 0;
+    for (int i = 0; i < SEED_N && so < (int)sizeof(seed) - 32; i++)
+        so += snprintf(seed + so, sizeof(seed) - (size_t)so, "%s ", SEED_CORPUS[i]);
+    if (reservoir_state(e, seed, e->ref) != 0) { esn_free(e); return -1; }
     return 0;
 }
 
-/* forward: bytes -> reservoir -> tag index [0, ESN_OUTPUT). pulse modulates output. */
-static int esn_forward(ESN *e, const unsigned char *data, int len, const char *content, float pulse) {
-    int H = e->hidden;
-    float *input = calloc(ESN_INPUT, sizeof(float));
-    float *a = malloc((size_t)H * sizeof(float));
-    float *b = malloc((size_t)H * sizeof(float));
-    if (!input || !a || !b) { free(input); free(a); free(b); return -1; }
-
-    int n = len < ESN_INPUT ? len : ESN_INPUT;
-    for (int i = 0; i < n; i++) input[i] = (float)data[i] / 255.0f;
-
-    static const KW boost_kw[] = {
-        {"resonance", 0.15f}, {"field", 0.15f}, {"recursion", 0.10f}, {"chaos", 0.10f},
-    };
-    float boost = keyword_sum(content, boost_kw, (int)(sizeof(boost_kw) / sizeof(boost_kw[0])));
-
-    nt_blas_matvec(a, e->W_in->data, input, H, ESN_INPUT);     /* a = W_in · input */
-    nt_blas_matvec(b, e->W->data, e->state->data, H, H);       /* b = W · state    */
-    for (int i = 0; i < H; i++) {
-        float pre = a[i] + b[i] + boost;
-        e->state->data[i] = e->leaky * e->state->data[i] + (1.0f - e->leaky) * tanhf(pre);
+/* RESONANCE: cosine between the content's reservoir state and Yent's vocabulary
+ * reference state. Real reservoir computing — a deterministic content score against
+ * Yent's vocabulary, not a trained classifier and not a random tag. Range [-1, 1];
+ * higher = the content's reservoir trajectory resonates with Yent's vocabulary. */
+static float esn_resonance(ESN *e, const char *content) {
+    float *cs = malloc((size_t)e->hidden * sizeof(float));
+    if (!cs) return 0.0f;
+    if (reservoir_state(e, content, cs) != 0) { free(cs); return 0.0f; }
+    float dot = 0.0f, nc = 0.0f, nr = 0.0f;
+    for (int i = 0; i < e->hidden; i++) {
+        dot += cs[i] * e->ref[i];
+        nc  += cs[i] * cs[i];
+        nr  += e->ref[i] * e->ref[i];
     }
-
-    float out[ESN_OUTPUT];
-    nt_blas_matvec(out, e->W_out->data, e->state->data, ESN_OUTPUT, H);  /* out = W_out · state */
-
-    int best = 0;
-    float bestv = -1e30f;
-    for (int i = 0; i < ESN_OUTPUT; i++) {
-        float w = out[i] * (1.0f + pulse * 0.7f);  /* apply_pulse (pre-softmax monotone) */
-        if (w > bestv) { bestv = w; best = i; }
-    }
-    free(input); free(a); free(b);
-    return best;
+    free(cs);
+    if (nc <= 0.0f || nr <= 0.0f) return 0.0f;
+    return dot / (sqrtf(nc) * sqrtf(nr));
 }
 
 /* ── zero-dep text extraction: text formats raw, html tag-stripped, binary -> "" ── */
@@ -249,7 +295,7 @@ static char *extract_text(const char *path, const unsigned char *bytes, int len,
 
     if (!text_fmt && !html_fmt) {
         char *empty = malloc(1); if (empty) empty[0] = '\0';
-        return empty;  /* binary: no text content (ESN still runs on raw bytes) */
+        return empty;  /* binary: no extracted text -> empty content -> resonance ~0 */
     }
 
     *is_text = 1;
@@ -328,14 +374,14 @@ int main(int argc, char **argv) {
         free(content); free(bytes);
         return 1;
     }
-    int tag = esn_forward(&e, bytes, len, content, pulse_eff);
+    float resonance = esn_resonance(&e, content);   /* reservoir cosine vs Yent's vocabulary */
     esn_free(&e);
 
     char path_esc[2048];
     json_escape_into(path, path_esc, (int)sizeof(path_esc));
-    printf("{\"util\":\"context_processor\",\"path\":\"%s\",\"tag\":\"%s\","
+    printf("{\"util\":\"context_processor\",\"path\":\"%s\",\"resonance\":%.4f,"
            "\"relevance\":%.4f,\"pulse\":%.4f}\n",
-           path_esc, (tag >= 0 ? ESN_TAGS[tag] : "?"), relevance, pulse_eff);
+           path_esc, resonance, relevance, pulse_eff);
 
     free(content);
     free(bytes);
@@ -351,7 +397,7 @@ static int check(const char *label, int ok) {
 int main(void) {
     int pass = 0, total = 0;
 
-    /* 1-2. ESN: init, spectral radius ~1, forward tag — gated behind init success
+    /* 1-2. reservoir: init, spectral radius ~1, resonance — gated behind init success
      * so a (defensive) alloc failure never dereferences a NULL tensor. */
     ctx_srand(42);
     ESN e;
@@ -361,10 +407,20 @@ int main(void) {
         float rho_after = spectral_radius(e.W->data, e.hidden, 80);
         total++; pass += check("spectral radius ~1 after scale", fabsf(rho_after - 1.0f) < 0.05f);
 
-        const unsigned char data[] = "## Yent README\nresonance field recursion";
-        int t1 = esn_forward(&e, data, (int)sizeof(data) - 1, "resonance field", 0.5f);
-        total++; pass += check("forward tag in range", t1 >= 0 && t1 < ESN_OUTPUT);
-        total++; pass += check("tag name maps", t1 >= 0 && ESN_TAGS[t1][0] == '.');
+        /* resonance discriminates by LEXICAL overlap: Yent-vocabulary text > unrelated */
+        float r_yent  = esn_resonance(&e, "resonance field organism recursion dario limpha soul");
+        float r_other = esn_resonance(&e, "quarterly invoice tax spreadsheet shipping logistics");
+        total++; pass += check("resonance discriminates (yent > other)", r_yent > r_other);
+        /* honest scope: LEXICAL, not semantic — a Yent-MEANING paraphrase built from
+         * non-seed synonyms scores near the unrelated baseline, not near r_yent. This
+         * test exists to keep the claim honest (the reservoir tracks word overlap, not
+         * meaning). */
+        float r_para = esn_resonance(&e, "vibration domain creature looping spiral essence breath");
+        total++; pass += check("resonance is lexical not semantic (paraphrase low)",
+                               r_para < (r_yent + r_other) / 2.0f);
+        /* deterministic: same content -> identical value (seeded reservoir) */
+        float r_again = esn_resonance(&e, "resonance field organism recursion dario limpha soul");
+        total++; pass += check("resonance deterministic", r_yent == r_again);
         esn_free(&e);
     }
 

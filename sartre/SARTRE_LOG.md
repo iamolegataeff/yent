@@ -156,31 +156,38 @@ spawned by the same language-agnostic slot. The slot demo (`pipe`) is now argv-p
 (`pipe <binary> [args...]`), so the kernel hosts a Rust utility (repo_monitor) and a C
 utility (context_processor) through one path — language-agnostic proven concretely.
 
-- **MiniESN on notorch** (`sartre/utils/context_processor/context_processor.c`): reservoir
-  W_in[H×512]/W[H×H]/W_out[14×H] (`nt_tensor_rand`), the three projections via `nt_blas_matvec`
-  (the mandated matvec), leaky-tanh state, argmax → tag. The numpy `eigvals` spectral-radius
-  step is replaced by zero-dep **power iteration** (W·v/‖v‖ via nt_blas_matvec), scaling W to
-  ρ≈1 (echo-state). Honest: the ESN is random-init (untrained), so the tag is a reservoir
-  fingerprint, not a trained file-type classification — the resonance/relevance is the
-  load-bearing signal.
-- **Resonance + relevance**: `compute_relevance` = Jaccard of content vs Yent's own vocabulary
-  (resonance/field/recursion/dario/limpha/... — replaces Indiana's Musk-domain seed corpus);
-  `chaos_pulse` (sentiment keywords → [0.1,0.9]) + somatic float dynamics (BloodFlux/SixthSense)
-  over a deterministic xorshift RNG.
-- **Zero-dep extraction**: txt/md/json/csv/source raw, html tag-strip, binary → empty content
-  (ESN still runs on raw bytes). Binary formats (PDF/docx/rtf/odt/zip/rar/tar/image) and the
-  sqlite cache are a later increment (external libs / break zero-dep).
-- **Output**: JSON perception `{"util":"context_processor","path":..,"tag":..,"relevance":F,"pulse":F}`.
+- **Echo-state reservoir on notorch** (`sartre/utils/context_processor/context_processor.c`):
+  W_in[H×512]/W[H×H] filled by a FIXED SEEDED xorshift (reproducible — not `nt_tensor_rand`);
+  matvecs via `nt_blas_matvec` (the mandated matvec); leaky-tanh state settled over a few steps;
+  numpy `eigvals` → zero-dep **power iteration** scaling W to ρ≈1 (echo-state). No readout, no tag.
+- **resonance** (the reservoir signal): `cosine(reservoir_state(content bag-of-words),
+  reservoir_state(Yent's seed vocabulary))`. Honest scope: a **nonlinear LEXICAL reservoir score** —
+  it tracks word overlap through the reservoir's nonlinearity and is correlated with the
+  lexical-overlap relevance; it is NOT semantic and NOT a trained classifier. A Yent-meaning paraphrase
+  built from non-seed synonyms scores near the unrelated baseline (the self-test proves this).
+- **relevance**: `compute_relevance` = lexical overlap (distinct seed words present / total words)
+  of content vs Yent's own vocabulary — NOT a set Jaccard (no union denominator)
+  (resonance/field/recursion/dario/limpha/...). `chaos_pulse` (sentiment keywords → [0.1,0.9]) +
+  somatic float dynamics (BloodFlux/SixthSense) over a deterministic xorshift RNG.
+- **Zero-dep extraction**: txt/md/json/csv/source raw, html tag-strip, binary → empty content →
+  resonance ~0. Binary formats (PDF/docx/...) and the sqlite cache are a later increment.
+- **Output**: JSON perception `{"util":"context_processor","path":..,"resonance":F,"relevance":F,"pulse":F}`.
   Links system notorch (`/opt/homebrew` install-path, not a sibling checkout) + Accelerate on
   Darwin (libnotorch BLAS). `Makefile` carries the flags.
 
-Measured on neo: `make` 0 warn; `make test` 12/12 (spectral radius ρ≈1, forward tag in range,
-relevance, chaos/somatic bounds, html-strip, binary-empty, json-escape, read_file); kernel
-`-DHAS_PERCEPTION` 0 warn; end-to-end the kernel spawns context_processor (C) AND repo_monitor
-(Rust) through the one piped slot, reads each utility's JSON, reaps, zero zombies.
+Measured on neo: `make` 0 warn; `make test` 13/13 (spectral radius ρ≈1, resonance discriminates
+yent>other, resonance lexical-not-semantic paraphrase low, resonance deterministic, relevance,
+chaos/somatic bounds, html-strip, binary-empty, json-escape, read_file); on real files
+yent.md resonance=0.5224 vs other.md=0.0082 (deterministic); kernel `-DHAS_PERCEPTION` 0 warn;
+end-to-end the kernel spawns context_processor (C) AND repo_monitor (Rust) through the one piped
+slot, reads each utility's JSON, reaps, zero zombies.
 
-Codex audit pass (gpt-5.5): round 1 = 2 findings (HIGH read_file size→int, MED esn_init NULL/
-cleanup), round 2 = 1 MED (self-test NULL-deref gate), all fixed; round 3 = VERDICT PASS.
+Codex audit pass (gpt-5.5): build round = findings fixed → PASS. Resonance-rework round
+(adversarial stub-hunt): confirmed real reservoir computing (seeded, nt_blas_matvec, cosine vs
+Yent vocabulary, no readout/tag); flagged the resonance is a nonlinear LEXICAL score correlated
+with the lexical-overlap relevance (not semantic) — naming + the honest paraphrase test reflect
+that. Downstream gap:
+`sartre_bridge.go` (Codex's lane) still carries `Tag`, not `Resonance` — coordination point.
 
 ## 2026-06-30 — Third utility: whatdotheythinkiam (Rust)
 
