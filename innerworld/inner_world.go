@@ -76,6 +76,7 @@ type InnerWorld struct {
 	br     Breath
 
 	scarThreshold float32 // prophecy-debt above which a thought is scarred (rejected by the field)
+	feelEnabled   bool    // High brain: when on, the circles' emotional valence drives the affect axis
 
 	genMu        sync.Mutex // one inner voice at a time: serializes Overthink + deep self-answer (body access)
 	deepResident bool       // guarded by genMu: the deep body is the currently-resident one (single-resident swap)
@@ -293,6 +294,7 @@ func (iw *InnerWorld) think(prompt string) Reflection {
 	debt := iw.fieldDebt()       // snapshot under genMu: belongs to this batch
 	iw.observeLocked(circles)    // circles seed the cooc field (circles->field)
 	iw.scarLocked(circles, debt) // a thought that broke prophecy becomes a scar
+	iw.highFeelLocked(circles)   // the circles' feeling drives the affect axis (High brain)
 	r := iw.reflect(circles, debt)
 	if r.SelfAnswered {
 		r.DeepAnswer = iw.deepAnswerLocked(circles) // deep body speaks, under the single voice
@@ -370,6 +372,7 @@ func (iw *InnerWorld) dream(trigger int) Reflection {
 	debt := iw.fieldDebt()       // snapshot under genMu: belongs to this batch
 	iw.observeLocked(circles)    // dreams seed the cooc field too (circles->field)
 	iw.scarLocked(circles, debt) // a dissonant dream scars too
+	iw.highFeelLocked(circles)   // even alone, a dream colours the mood (High brain)
 	r := iw.reflect(circles, debt)
 	if r.SelfAnswered {
 		r.DeepAnswer = iw.deepAnswerLocked(circles) // even alone, the deep body may answer the dream
