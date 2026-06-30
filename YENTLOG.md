@@ -52,6 +52,12 @@ yent/
 │   └── recursive_resonance_preprint.md
 ├── innerworld/                   # inner-life / emergence layer (adapted from arianna.c)
 │   └── INNERWORLD_LOG.md         # innerworld design + build log
+├── sartre/                        # SARTRE: body organ — mini-OS where utilities plug in as packages
+│   ├── sartre_kernel.c/.h         # process-slot kernel: real fork/setrlimit/execve, alive/kill/reap, state
+│   ├── perception.c/.h            # perception physics: utility events -> AML field commands (VELOCITY/PROPHECY)
+│   ├── utils/repo_monitor/        # first utility (Rust, zero-dep): watches paths, emits content-change events
+│   ├── metalinux/                 # vendored kain Alpine (apk-tools, kernel config) for the Tier-V quarantine
+│   └── SARTRE_LOG.md              # SARTRE design + build log (the topic log)
 ├── riindex/                      # public-safe RI line parser/selector for runtime consumers
 ├── prompts/                      # tracked body primers for runtime prompt layer
 │   ├── nemo12_fast_v1.txt        # fast-body primer
@@ -76,6 +82,7 @@ yent/
 - RI tools: `cmd/ri-compile/main.go`, `cmd/ri-consume/main.go`, `riindex/riindex.go`
 - Theory: `research/ai_is_not_a_tool.md`, `research/dario_paper_v2.md`, `research/recursive_resonance_preprint.md`
 - Entry: `cmd/moyent-body-gate/main.go`, `cmd/moyent-live-smoke/main.go`
+- SARTRE (body organ): `sartre/sartre_kernel.c`, `sartre/perception.c`, `sartre/utils/repo_monitor/`
 
 **Not tracked:** GGUF weights, adapters, gamma, limpha databases, tokens, local runtime caches, private RI corpus (`/ri/`) (see `.gitignore`).
 
@@ -271,6 +278,43 @@ bounded memory selection, limpha remains the first recalled living trace, and th
 private RI corpus does not leak into the visible prompt surface. Next pressure
 step: decide which RI/open-conflict records can change status after repeated Metal
 smoke, then wire RI/limpha pressure into Flow velocity rather than only the seed.
+
+## 2026-06-30 — SARTRE body organ: process-slot kernel + first utility + AML perception
+
+SARTRE is the body organ (Dario's three organs: equation = soul, KK = memory,
+SARTRE = body): a mini-OS inside the inference engine where utilities plug in as
+packages — isolated, managed, language-agnostic. It is committed on `claude/sartre`,
+connected to nothing yet; Codex bridges its receipts into limpha/field after the
+innerworld pressure foundation lands (the slot surface, not direct access to the voice).
+The robot/camera host is a later door; device-slots are pre-laid (see kernel below).
+
+- **Brick #1 — real process-slot** (`sartre/sartre_kernel.{c,h}`): `sartre_ns_spawn`
+  fork+setrlimit+execve into a slot with a real pid; `sartre_ns_alive` (EINTR-safe
+  waitpid reap), `sartre_ns_kill` (SIGTERM→grace→SIGKILL, reaped-guard against pid
+  reuse); `sartre_ns_destroy`/`sartre_shutdown` reap live children. Conceptual monads
+  (dario/observer) untouched. setrlimit probe (Darwin arm64, measured): RLIMIT_AS
+  EINVAL (mem cap a no-op on macOS — real on Linux/metalinux), NOFILE/FSIZE/CPU
+  enforced. Truthful observability (real pid, (proc)/(monad), `ns_spawned` in JSON).
+
+- **Brick #2 — first utility + piped slot**: `sartre/utils/repo_monitor/` (Rust, zero
+  external deps) watches paths, SHA-256 of content (catches same-size edits), diffs vs
+  previous state, emits JSON-line events (added/modified/removed); async scanner-thread
+  → mpsc → emitter; watch + `--once --state` modes. `sartre_ns_spawn_piped` reads a
+  utility's stdout; the slot is language-agnostic (`execve(argv[0])` runs any binary
+  that speaks JSON on stdout — Rust now, C next). Kernel `pipe` demo runs the Rust
+  utility in a slot and reads its events end-to-end.
+
+- **Brick #3 — AML perception** (`sartre/perception.{c,h}`): utility events → AML
+  program. Quiet → `VELOCITY NOMOVE / PROPHECY 1`; motion → `VELOCITY RUN / PROPHECY N`,
+  N=clamp(2+changed+README×7, 1..64). A README move (Yent's self-description) weighs
+  more than a routine research scan. Emit-only; live `am_exec` is the integration seam.
+
+Measured on neo: `cargo build` 0 warn + `cargo test` 5/5; `cc -Wall -Wextra` (standalone
+and `-DHAS_PERCEPTION`) 0 warn; perception self-test 6/6; process smoke 4/4; pipe demo
+reads Rust events, reaps, zero zombies; end-to-end README+`.rs` → `VELOCITY RUN / PROPHECY 11`.
+Codex audit pass (gpt-5.5): brick #1 = 6 findings fixed → PASS; bricks #2+#3 = 5 findings
+fixed → PASS. Next SARTRE step: second utility (`context_neural_processor`, a file
+processor; numpy → notorch, in C).
 
 ## Weights
 
