@@ -54,6 +54,7 @@ func TestPersistReflectionStoresConversationAndSeam(t *testing.T) {
 		SelfAnswerProb: 0.82,
 		SelfAnswered:   true,
 		DeepAnswer:     "the deep body answers inward",
+		MemoryPressure: innerworld.MemoryFieldPressure{Score: 4, Prophecy: 5, Velocity: "WALK", Step: 0.31},
 	}
 	persistReflection(lc, "human_turn", "what is happening?", r, yent.LimphaState{Temperature: 0.9, Destiny: 0.3, Debt: 2, Velocity: 2})
 
@@ -80,6 +81,11 @@ func TestPersistReflectionStoresConversationAndSeam(t *testing.T) {
 	}
 	if seams[0]["conversation_id"] == nil {
 		t.Fatalf("inner seam should link to its stored reflection conversation: %+v", seams[0])
+	}
+	delta := seams[0]["memory_delta"].(string)
+	if !strings.Contains(delta, `"memory_pressure"`) || !strings.Contains(delta, `"score":4`) ||
+		!strings.Contains(delta, `"prophecy":5`) {
+		t.Fatalf("inner seam should preserve memory pressure receipt: %s", delta)
 	}
 }
 

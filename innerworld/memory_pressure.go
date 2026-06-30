@@ -10,10 +10,10 @@ import (
 // circles rise, while the recalled text still reaches the model only through the
 // bounded "field traces" seed.
 type MemoryFieldPressure struct {
-	Score    int
-	Prophecy int
-	Velocity string
-	Step     float32
+	Score    int     `json:"score"`
+	Prophecy int     `json:"prophecy"`
+	Velocity string  `json:"velocity"`
+	Step     float32 `json:"step"`
 }
 
 // PressureMemory is an optional Memory extension for sources that can expose
@@ -141,19 +141,20 @@ func (iw *InnerWorld) recallSeedWithTraces(prompt string, past []string) string 
 // applyMemoryPressureLocked applies recalled pressure to the field before the next
 // circles are generated. Caller holds genMu; the Field implementation owns its
 // internal locking. Failure is fail-soft: a broken field should not stop thought.
-func (iw *InnerWorld) applyMemoryPressureLocked(traces []string) {
+func (iw *InnerWorld) applyMemoryPressureLocked(traces []string) (MemoryFieldPressure, bool) {
 	if iw.field == nil {
-		return
+		return MemoryFieldPressure{}, false
 	}
 	p, ok := pressureForMemory(iw.memory, traces, iw.cfg.RecallN)
 	if !ok {
-		return
+		return MemoryFieldPressure{}, false
 	}
 	if err := iw.field.Exec(fmt.Sprintf("PROPHECY %d", p.Prophecy)); err != nil {
-		return
+		return MemoryFieldPressure{}, false
 	}
 	if err := iw.field.Exec("VELOCITY " + p.Velocity); err != nil {
-		return
+		return MemoryFieldPressure{}, false
 	}
 	iw.field.Step(p.Step)
+	return p, true
 }
