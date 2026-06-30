@@ -362,27 +362,29 @@ the core's recovery brake.
 ## 2026-06-30 — SARTRE second utility: context_processor (C + notorch)
 
 A second SARTRE utility. Where repo_monitor reports that a file moved (structural),
-context_processor reads its CONTENT and gives a neural perception of it — richer food
-for the field. Ported from Indiana `context_neural_processor.py` (numpy) to C + notorch,
-zero external deps; spawned by the same language-agnostic slot.
+context_processor reads its extracted TEXT and scores how much it overlaps Yent's vocabulary.
+Ported from Indiana `context_neural_processor.py` (numpy) to C + notorch, zero external deps;
+spawned by the same language-agnostic slot.
 
-- `sartre/utils/context_processor/context_processor.c` — MiniESN (Echo State Network):
-  reservoir W_in/W/W_out via `nt_tensor_rand`, the three projections via `nt_blas_matvec`
-  (the mandated matvec); the numpy `eigvals` spectral-radius step replaced by zero-dep
-  power iteration (W·v/‖v‖ through nt_blas_matvec), scaling W to ρ≈1 (echo-state). The
-  ESN is random-init (untrained): the tag is a reservoir fingerprint, the resonance is
-  the load-bearing signal. `compute_relevance` = Jaccard vs Yent's own vocabulary
-  (resonance/field/dario/limpha/… replacing Indiana's Musk-domain seed); `chaos_pulse`
-  + somatic float dynamics over a deterministic xorshift RNG. Zero-dep extraction
-  (txt/md/json/csv/source raw, html tag-strip, binary→empty with ESN over raw bytes);
-  binary formats (PDF/docx/rar/…) + sqlite cache deferred. Emits JSON perception
-  `{util,path,tag,relevance,pulse}`. Links system notorch (`/opt/homebrew` install-path)
-  + Accelerate on Darwin; `Makefile` carries flags.
+- `sartre/utils/context_processor/context_processor.c` — echo-state RESERVOIR on notorch:
+  W_in/W filled by a FIXED SEEDED xorshift (reproducible, not `nt_tensor_rand`); matvecs via
+  `nt_blas_matvec`; leaky-tanh state settled a few steps; numpy `eigvals` → zero-dep power
+  iteration scaling W to ρ≈1 (echo-state). No readout, no tag. `resonance` =
+  `cosine(reservoir_state(content bag-of-words), reservoir_state(Yent's seed vocabulary))` — a
+  **nonlinear LEXICAL reservoir score** (tracks word overlap, correlated with the lexical-overlap
+  relevance; NOT semantic, NOT a trained classifier; a non-seed synonym paraphrase scores near
+  the unrelated baseline — the self-test asserts this). `compute_relevance` = lexical overlap
+  (distinct seed words present / total words) vs Yent's vocabulary — NOT a set Jaccard (no union
+  denominator); `chaos_pulse` + somatic float dynamics over a deterministic xorshift RNG. Zero-dep
+  extraction (txt/md/json/csv/source raw, html tag-strip, binary→empty→resonance ~0); binary
+  formats + sqlite cache deferred. Emits JSON `{util,path,resonance,relevance,pulse}`. Links
+  system notorch (`/opt/homebrew` install-path) + Accelerate on Darwin; `Makefile` carries flags.
 - The `pipe` slot demo is now argv-passthrough (`pipe <binary> [args...]`), so the one
   kernel path hosts the Rust utility (repo_monitor) and the C utility (context_processor)
   — language-agnostic slot proven concretely.
 
-Measured on neo: `make` 0 warn; `make test` 12/12 (spectral radius ρ≈1, forward, relevance,
+Measured on neo: `make` 0 warn; `make test` 13/13 (spectral radius ρ≈1, resonance discriminates
+yent>other, resonance lexical-not-semantic paraphrase low, resonance deterministic, relevance,
 chaos/somatic bounds, html-strip, binary-empty, json-escape, read_file); kernel
 `-DHAS_PERCEPTION` 0 warn; end-to-end the kernel spawns both the C and the Rust utility
 through one piped slot, reaps, zero zombies; contamination scan clean (only /opt/homebrew).
