@@ -400,6 +400,66 @@ consolidators, then `flow.aml` resident body + Metal smoke.
 
 ---
 
+## Third body `flow` / F1a — the native AML body over real libamk.a (2026-06-30)
+
+F0 was the pure-Go `Flow` seam; F1a is the production body behind it. `innerworld/aml`
+(package `aml`, cgo over `libamk.a`) adds `aml.Body`, a drop-in `innerworld.Flow` whose
+organs are the AML field's own — not a Go re-implementation. The mapping, each over a
+real `am_*` call (grounded first-hand in `yent/c/ariannamethod.{c,h}`, not recall):
+
+- `Ingest(text)` → tokenize (injected `Tokenizer`, production = the voices' own BPE) →
+  `am_ingest_tokens`, which folds distance-weighted cooc edges `1/|i-j|`, windowed ±5
+  (`ariannamethod.c:6988`). The IN stream — circles and deep answers grow the field's
+  own memory richer than the dataset (haze-emergence).
+- `ConsolidateCooc()` → `am_cooc_consolidate_autumn` — the seasonal harvest, but
+  PHYSICS-GATED: it fires only in deep autumn (`season==AUTUMN && autumn_energy>0.6`,
+  `:7082`). Returns edges pruned, or 0 off-season. Consolidation follows the field's
+  coherence into autumn, not the clock.
+- `Scar(text,gravity)` → the `SCAR` operator (`:3834`) deposits a rejected thought into
+  gravitational memory; `gravity<=0`/empty ignored (matching goFlow); quote/backslash
+  stripped so the one-line script parses, capped at the field's 63-char slot.
+- `ConsolidateScar()` → honestly inert, returns 0, documented in full: this AML build
+  has NO discrete scar-prune. Deposited scars accumulate, and `dark_gravity`
+  consolidates them CONTINUOUSLY in `am_step`'s autumn physics
+  (`dark_gravity += autumn_energy*0.002*dt`, `:8063`), riding the field step the
+  orchestrator drives. goFlow models per-scar decay (leo klaus-scar) because it has no
+  field to step; the native body defers to the field's dark-matter physics. Not a stub
+  hiding work — a real mechanism difference, named.
+- `ApplyPressure(logits)` → `am_apply_field_to_logits` (`:7132`): gamma + Hebbian
+  H-term + destiny + suffering + attention + laws tilt the vector in place. The OUT
+  influence, the body shaping the next token a voice emits.
+- `AutumnEnergy()` → `autumn_energy` (`:233`), the real season Kairos reads for
+  critical mass (goFlow can only synthesize one from debt).
+
+Plus telemetry for observers/smoke: `CoocStats`/`DarkGravity`/`Scars`/`Season`. `Init`
+is the explicit once-at-start `am_init` (hard reset), kept off `New` so a host that
+already drives `am_init` (the dock) is never reset under it. One process = one global
+AML field; every `am_*` is one shared physics, so the body IS the field plus organs.
+
+The field is pure C / CPU — `libamk.a` builds and runs on Neo (lean
+`-DAM_BLOOD_DISABLED -DAM_ASYNC_DISABLED`), so F1a is verified OFF the Mac mini. Only
+the doe model voices need Metal; the native Flow does not.
+
+**Verified on Neo (`go test ./innerworld/aml`, `cmd/flow-smoke`, real libamk.a):**
+`go vet` + tests green (ingest grows cooc; scar deposits and ignores empty/non-positive
+gravity and parses quoted text; the harvest is gated off-season and forgets the weak
+long tail in autumn; dark gravity grows in autumn; ApplyPressure is empty-safe). The
+pure-Go `innerworld` package stays cgo-free and races clean (`go test -race ./innerworld`).
+flow-smoke output: ingest `cooc mean=0.6554`; off-season harvest `pruned=0` (gated,
+season=0); autumn `energy=0.613 pruned=42  cooc mean 0.6554->0.8117  dark_gravity
+0.5000->0.5133`; pressure `tilted 256/256 logits`. Honest finding, run-to-ground not
+silenced: the first smoke moved 0/16 logits — the Hebbian H-term only reaches
+`logits[dst]` for cooc dst id `< len` (`am_apply_hebbian_to_logits`), and the 16-float
+vector did not span the cooc id space; sizing the vector to the id space showed the real
+tilt (not a field bug, a smoke-vector bug, fixed).
+
+Next: F1b — point Kairos at a `Flow` (a `FlowConsolidator` replacing the separate
+cooc/scar consolidators; Ingest the circles/deep answers; ApplyPressure on the voices),
+then `flow.aml` resident body + persist `flow.soma`, then the Metal smoke with the real
+nemo/small24 voices over the native body. Round-final Codex audit + Metal pending.
+
+---
+
 ## Deferred / parked
 
 - **Cloud** (pre-linguistic affect, 6-chamber MLP reflex) — it is **Python**, with a
