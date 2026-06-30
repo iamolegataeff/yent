@@ -259,17 +259,33 @@ static pid_t sartre_waitpid(pid_t pid, int *status, int flags) {
  * on macOS. A hard memory cap is the metalinux/Tier-V job. A utility must really
  * run before it can feed the field. */
 int sartre_ns_spawn_piped(const char *name, char *const argv[], float mem_limit_mb, int *out_read_fd) {
-    if (sys.ns_count >= SARTRE_MAX_NS) return -1;
     if (!name || !argv || !argv[0]) return -1;
+
+    /* slot: reuse a dead (reaped) spawned slot before growing, so a long-lived
+     * supervisor does not exhaust SARTRE_MAX_NS across spawn/kill cycles */
+    int id = -1, grew = 0;
+    for (int i = 0; i < sys.ns_count; i++)
+        if (sys.namespaces[i].spawned && !sys.namespaces[i].active) { id = i; break; }
+    if (id < 0) {
+        if (sys.ns_count >= SARTRE_MAX_NS) return -1;
+        id = sys.ns_count++;
+        grew = 1;
+    }
+
+    /* precompute the fd ceiling in the PARENT — sysconf is not async-signal-safe,
+     * so the post-fork child must not call it; it only close()s (which is safe). */
+    long maxfd = sysconf(_SC_OPEN_MAX);
+    if (maxfd < 0 || maxfd > 4096) maxfd = 4096;
 
     int pipefd[2];
     if (out_read_fd) {
-        if (pipe(pipefd) != 0) return -1;   /* read end = pipefd[0], write end = pipefd[1] */
+        if (pipe(pipefd) != 0) { if (grew) sys.ns_count--; return -1; }
     }
 
     pid_t pid = fork();
     if (pid < 0) {
         if (out_read_fd) { close(pipefd[0]); close(pipefd[1]); }
+        if (grew) sys.ns_count--;           /* roll back the grown slot on failure */
         return -1;
     }
 
@@ -280,6 +296,11 @@ int sartre_ns_spawn_piped(const char *name, char *const argv[], float mem_limit_
             if (dup2(pipefd[1], STDOUT_FILENO) < 0) _exit(126);  /* broken stdout: fail loud */
             if (pipefd[1] != STDOUT_FILENO) close(pipefd[1]);
         }
+        /* close any other inherited fds so a utility never receives the host's
+         * DB / model / socket descriptors (0/1/2 stay; the rest are not ours to keep).
+         * maxfd was computed in the parent — only close() runs here (async-signal-safe). */
+        for (int fd = 3; fd < (int)maxfd; fd++) close(fd);
+
         if (mem_limit_mb > 0.0f && mem_limit_mb <= 1048576.0f) {   /* guard float->rlim_t overflow */
             rlim_t bytes = (rlim_t)(mem_limit_mb * 1024.0f * 1024.0f);
             struct rlimit rl = { bytes, bytes };
@@ -289,13 +310,13 @@ int sartre_ns_spawn_piped(const char *name, char *const argv[], float mem_limit_
         _exit(127);                          /* exec failed */
     }
 
-    /* parent: record the real child in a slot */
+    /* parent: record the real child in the slot */
     if (out_read_fd) {
         close(pipefd[1]);                   /* parent only reads */
         *out_read_fd = pipefd[0];
     }
 
-    int id = sys.ns_count++;
+    memset(&sys.namespaces[id], 0, sizeof(SartreNamespace));  /* clear any reused stale data */
     strncpy(sys.namespaces[id].name, name, 63);
     sys.namespaces[id].name[63]     = '\0';
     sys.namespaces[id].pid          = (int)pid;
@@ -554,17 +575,25 @@ static int json_get_float(const char *json, const char *key, float *out) {
     char pat[64];
     int pn = snprintf(pat, sizeof pat, "\"%s\"", key);
     if (pn <= 0 || pn >= (int)sizeof pat) return 0;
-    const char *p = strstr(json, pat);
-    if (!p) return 0;
-    p += pn;                                  /* require "key" <ws>? : <number> */
-    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
-    if (*p != ':') return 0;                  /* a key inside a value won't be -> rejected */
-    p++;
-    char *end = NULL;
-    double v = strtod(p, &end);
-    if (end == p || !isfinite(v)) return 0;
-    *out = (float)v;
-    return 1;
+    const char *p = json;
+    while ((p = strstr(p, pat)) != NULL) {
+        /* the key must START a top-level member: the char before "key" is { , or
+         * whitespace. This rejects the key appearing inside a quoted value string
+         * (e.g. {"note":"\"debt\":9"} must not set debt). */
+        char prev = (p == json) ? '{' : p[-1];
+        const char *q = p + pn;               /* then optional whitespace, then ':' */
+        if (prev == '{' || prev == ',' || prev == ' ' || prev == '\t' ||
+            prev == '\n' || prev == '\r') {
+            while (*q == ' ' || *q == '\t' || *q == '\n' || *q == '\r') q++;
+            if (*q == ':') {
+                char *end = NULL;
+                double v = strtod(q + 1, &end);
+                if (end != q + 1 && isfinite(v)) { *out = (float)v; return 1; }
+            }
+        }
+        p += pn;                              /* keep scanning for a boundary-correct match */
+    }
+    return 0;
 }
 
 /* Reciprocal seam: the field/innerworld pushes its inner weather into the hub.

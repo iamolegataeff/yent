@@ -256,6 +256,36 @@ coherence=0.8; key-as-value not fooled; malformed no crash; smoke 4/4 + percepti
 zombies. Codex audit pass (gpt-5.5): round 1 = 4 findings (HIGH mach-port leak, MED Linux mem
 guard, MED json colon-strictness, LOW double-init), all fixed; round 2 = PASS.
 
+## 2026-06-30 — Holistic cross-cutting audit: 5 bugs fixed
+
+After the whole SARTRE body landed in main (kernel + 3 utilities + perception + metrics hub),
+a consolidated adversarial Codex pass over all of it (the per-increment passes had each PASSed)
+found 5 real cross-cutting bugs the incremental audits missed. All fixed:
+
+- **HIGH — slot exhaustion**: `sartre_ns_spawn_piped` grew `ns_count` permanently; `_kill` only
+  set `active=0`. A long-lived supervisor would exhaust `SARTRE_MAX_NS` after 8 spawn/kill cycles.
+  Fix: reuse a dead (spawned && !active) slot before growing, grow-rollback on pipe/fork failure,
+  memset the reused slot. Verified: 12 spawn/kill cycles (>8) all succeed.
+- **HIGH — fd inheritance**: spawned utilities inherited the host's other fds across `execve`
+  (only the stdout pipe was handled). Fix: the child closes fds 3..maxfd after dup2; `maxfd` is
+  computed in the PARENT (sysconf is not async-signal-safe — the follow-up Codex catch). Verified:
+  a parent marker fd (25) is absent from the child's `/dev/fd`.
+- **MED — repo_monitor broken-pipe**: it still used `println!` (could panic when the slot reader
+  closes). Fix: mirror whatdotheythinkiam — locked stdout + `writeln!` + clean exit on write error.
+- **MED — whatdotheythinkiam schema drift**: it emitted `source`/`change`, which neither
+  `perception.c` nor `sartre_bridge.go` (both consume `kind`/`path`) understood — the signal was
+  dropped downstream. Fix: emit `path`/`kind` (the contract); `reduced`/`recognized` kept as extras
+  (the bridge can parse them later — a coordination point for Codex).
+- **LOW — json_get_float string boundary**: `strstr` could match a key inside a quoted value
+  (`{"note":"\"debt\":9"}`). Fix: require the key at a top-level member boundary ({ , or whitespace)
+  then `:`. Verified: debt-in-value → ignored; real `{"debt":2.0}` → applied.
+
+Codex audit pass (gpt-5.5): holistic round = 5 findings, all fixed; re-audit caught 1 follow-up
+(sysconf in the post-fork child — moved to the parent), then VERDICT PASS. Build 0 warn (both
+kernel modes), smoke 4/4, perception 6/6, repo_monitor 5/5, whatdotheythinkiam 6/6, churn + fd
+harness green. (Infra note: codex's node was broken by a homebrew llhttp 9.3→9.4 upgrade; fixed
+locally by symlinking the old `libllhttp.9.3` into the 9.4.2 keg — machine-local, not in git.)
+
 ## Merge / integration policy (Oleg 2026-06-30)
 - NOT merging `claude/sartre` to main yet, and NOT pulling main into it for now. SARTRE
   is committed (`050751a`) and isolated on its branch. It is connected to NOTHING.
