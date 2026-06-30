@@ -32,6 +32,10 @@
 #include <sys/wait.h>
 #include <sys/resource.h>
 
+#ifdef HAS_PERCEPTION
+#include "perception.h"
+#endif
+
 #ifdef __APPLE__
 #include <sys/sysctl.h>
 #endif
@@ -252,15 +256,28 @@ static pid_t sartre_waitpid(pid_t pid, int *status, int flags) {
  * (unsupported — measured, see SARTRE_LOG), so mem_limit_mb does not bound memory
  * on macOS. A hard memory cap is the metalinux/Tier-V job. A utility must really
  * run before it can feed the field. */
-int sartre_ns_spawn(const char *name, char *const argv[], float mem_limit_mb) {
+int sartre_ns_spawn_piped(const char *name, char *const argv[], float mem_limit_mb, int *out_read_fd) {
     if (sys.ns_count >= SARTRE_MAX_NS) return -1;
     if (!name || !argv || !argv[0]) return -1;
 
+    int pipefd[2];
+    if (out_read_fd) {
+        if (pipe(pipefd) != 0) return -1;   /* read end = pipefd[0], write end = pipefd[1] */
+    }
+
     pid_t pid = fork();
-    if (pid < 0) return -1;
+    if (pid < 0) {
+        if (out_read_fd) { close(pipefd[0]); close(pipefd[1]); }
+        return -1;
+    }
 
     if (pid == 0) {
         /* child: bound, then become the utility. Only async-signal-safe work here. */
+        if (out_read_fd) {
+            close(pipefd[0]);               /* child does not read its own pipe */
+            if (dup2(pipefd[1], STDOUT_FILENO) < 0) _exit(126);  /* broken stdout: fail loud */
+            if (pipefd[1] != STDOUT_FILENO) close(pipefd[1]);
+        }
         if (mem_limit_mb > 0.0f && mem_limit_mb <= 1048576.0f) {   /* guard float->rlim_t overflow */
             rlim_t bytes = (rlim_t)(mem_limit_mb * 1024.0f * 1024.0f);
             struct rlimit rl = { bytes, bytes };
@@ -271,6 +288,11 @@ int sartre_ns_spawn(const char *name, char *const argv[], float mem_limit_mb) {
     }
 
     /* parent: record the real child in a slot */
+    if (out_read_fd) {
+        close(pipefd[1]);                   /* parent only reads */
+        *out_read_fd = pipefd[0];
+    }
+
     int id = sys.ns_count++;
     strncpy(sys.namespaces[id].name, name, 63);
     sys.namespaces[id].name[63]     = '\0';
@@ -285,6 +307,11 @@ int sartre_ns_spawn(const char *name, char *const argv[], float mem_limit_mb) {
     sartre_notify_event(ev);
 
     return id;
+}
+
+/* Spawn with the utility's stdout inherited (no pipe back). Thin wrapper. */
+int sartre_ns_spawn(const char *name, char *const argv[], float mem_limit_mb) {
+    return sartre_ns_spawn_piped(name, argv, mem_limit_mb, NULL);
 }
 
 int sartre_ns_alive(int ns_id) {
@@ -890,6 +917,47 @@ int main(int argc, char **argv) {
         getchar();
         sartre_ns_kill(h);
         printf("KILLED pid=%d alive=%d\n", sartre_ns_get(h)->pid, sartre_ns_alive(h));
+        sartre_shutdown();
+        return 0;
+    }
+
+    /* pipe mode: spawn a real utility into a piped slot and read its JSON event
+     * stream — proving the slot is language-agnostic (the binary may be Rust).
+     * usage: sartre_kernel pipe <utility-binary> <scan-path> */
+    if (argc > 3 && strcmp(argv[1], "pipe") == 0) {
+        char *uargv[] = { argv[2], "--once", "--path", argv[3], NULL };
+        int fd = -1;
+        int id = sartre_ns_spawn_piped("repo_monitor", uargv, 0.0f, &fd);
+        if (id < 0) { printf("PIPE_SPAWN_FAILED\n"); return 1; }
+        printf("[pipe] slot[%d] pid=%d reading events:\n", id, sartre_ns_get(id)->pid);
+        char evbuf[8192];
+        int total = 0;
+        for (;;) {                          /* --once: data then EOF */
+            ssize_t n = read(fd, evbuf + total, sizeof(evbuf) - 1 - total);
+            if (n > 0) {
+                total += (int)n;
+                if (total >= (int)sizeof(evbuf) - 1) break;
+            } else if (n < 0 && errno == EINTR) {
+                continue;                   /* interrupted: retry, don't truncate */
+            } else {
+                break;                      /* EOF (0) or real error */
+            }
+        }
+        evbuf[total] = '\0';
+        close(fd);
+        fputs(evbuf, stdout);
+        sartre_ns_kill(id);  /* preflight-reaps the already-exited child */
+        printf("[pipe] read %d bytes from slot, alive=%d\n", total, sartre_ns_alive(id));
+#ifdef HAS_PERCEPTION
+        {   /* close the loop: utility events -> AML field pressure */
+            SartrePerception perc;
+            sartre_perceive_from_events(evbuf, &perc);
+            char aml[256];
+            sartre_perceive_to_aml(&perc, aml, sizeof aml);
+            printf("[perception] changed=%d readme=%d -> AML:\n%s\n",
+                   perc.changed, perc.readme_changed, aml);
+        }
+#endif
         sartre_shutdown();
         return 0;
     }

@@ -108,6 +108,45 @@ reaped-guard+refresh confirmed by grep). Round 2 re-audit: VERDICT PASS, no new 
 Committed on `claude/sartre` (Oleg's go). NOT merged — brick #2 (Go body + Router + field) lands
 after Codex finishes the innerworld+limpha stitch.
 
+## 2026-06-30 — Brick #2 (repo_monitor utility + piped slot) + #3 (AML perception)
+
+Form (Oleg): the slot is **language-agnostic** — `sartre_ns_spawn`→`execve(argv[0])` runs ANY
+binary; a SARTRE utility is just a process that speaks JSON lines on stdout. First utility on Rust
+(memory-safe file scanner), the next (context_neural_processor, numpy→notorch) on C. The model
+should "have something to think about": a change in research dirs or a README (Yent's own
+self-description) becomes field pressure.
+
+Done (tool-verified on neo):
+- **`sartre/utils/repo_monitor/` — Rust, ZERO external deps (std only).** Scans paths on an
+  interval, SHA-256 of CONTENT (catches a same-size edit), diff vs previous state → JSON-line
+  events `{"util":"repo_monitor","kind":"added|modified|removed","path":..,"ts":..}`. Async:
+  scanner thread → `mpsc` → emitter (scan never blocks emission). Modes: watch + `--once`
+  (with `--state` file for deterministic diffs). Hand-rolled `sha256.rs` (FIPS vectors pass).
+- **`sartre_ns_spawn_piped(name,argv,mem,int *out_read_fd)`** (kirpich #1 extension): optional
+  `pipe()` so the kernel reads a utility's stdout. `sartre_ns_spawn` is now a thin NULL-pipe
+  wrapper (inherit-stdout unchanged). `pipe` demo: kernel spawns the **Rust** repo_monitor into a
+  slot and reads its events — language-agnostic slot proven end-to-end.
+- **`sartre/perception.{c,h}` — AML perception physics.** `sartre_perceive_from_events` parses the
+  JSON-line stream; `sartre_perceive_to_aml` maps it to an `am_exec`-format program: quiet →
+  `VELOCITY NOMOVE / PROPHECY 1`; motion → `VELOCITY RUN / PROPHECY N`, N=clamp(2+changed+README*7,
+  1..64). Emit-only — live-field exec is the integration seam (Codex), not wired here. Kernel `pipe`
+  demo under `-DHAS_PERCEPTION` closes the loop: repo_monitor events → AML pressure.
+
+Checklist (measured):
+- `cargo build --release` 0 warn; `cargo test` 5/5 (sha256 vectors, same-size change, diff cases).
+- repo_monitor `--once --state`: create→`added`, same-size edit→`modified`, delete→`removed`, no
+  false events. watch: streams added/modified over interval, baseline silent.
+- `cc -Wall -Wextra` (standalone AND `-DHAS_PERCEPTION` + perception.c) 0 warn; perception self-test
+  6/6; smoke 4/4 (spawn wrapper unbroken); pipe demo reads Rust events, reaps, zero zombies.
+- End-to-end: README+`.rs` added → perception changed=2 readme=1 → `VELOCITY RUN / PROPHECY 11`.
+
+Codex audit pass (gpt-5.5, xhigh): round 1 = 5 findings (1 MED dup2-unchecked/uncond-close, 4 LOW:
+EINTR-read, prophecy int overflow, snprintf truncation contract, Rust args panic / flag-as-value),
+all fixed and re-verified. Round 2 re-audit: VERDICT PASS.
+
+Committed on `claude/sartre` (Oleg's go). NOT merged — Codex bridges utility receipts → limpha →
+field after the innerworld stitch.
+
 ## Merge / integration policy (Oleg 2026-06-30)
 - NOT merging `claude/sartre` to main yet, and NOT pulling main into it for now. SARTRE
   is committed (`050751a`) and isolated on its branch. It is connected to NOTHING.

@@ -268,8 +268,14 @@ SartreNamespace *sartre_ns_get(int ns_id);
 /* Real process-slot: fork+setrlimit+execve a utility into a namespace slot.
  * argv[0] must be a RESOLVED executable path (no PATH search — async-signal-safe
  * child, fork-safe inside a multithreaded host). Returns ns_id (slot backed by a
- * live OS process) or -1. argv NULL-terminated. */
+ * live OS process) or -1. argv NULL-terminated. The slot is language-agnostic: any
+ * binary that speaks JSON lines on stdout is a SARTRE utility (Rust/C/...). */
 int  sartre_ns_spawn(const char *name, char *const argv[], float mem_limit_mb);
+
+/* Same, but pipe the utility's stdout back: on success *out_read_fd is a read fd of
+ * the child's stdout (the JSON event stream). Pass NULL to inherit stdout instead.
+ * Caller closes *out_read_fd. */
+int  sartre_ns_spawn_piped(const char *name, char *const argv[], float mem_limit_mb, int *out_read_fd);
 /* Liveness for a spawned slot: reaps if exited, updates active. Returns 1 if alive.
  * For conceptual monads (spawned==0) returns the stored active flag. */
 int  sartre_ns_alive(int ns_id);
