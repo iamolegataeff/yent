@@ -508,6 +508,36 @@ pending.
 
 ---
 
+## Third body `flow` / F1b-dock — the native body wired into the Metal dock (2026-06-30)
+
+`cmd/innerworld-dock` now runs the inner world over the native `aml.Body` as the one
+physics, retiring the inline `amkField`. `aml.Init()` replaces `C.am_init()`; the body is
+built with the fast voice's BPE (`buildDockTokenizer` loads nemo's GGUF metadata so the
+native cooc shares the voice's token ids), passed as BOTH the field and the Flow
+(`NewInnerWorld(.., flowBody, ..)` + `SetFlow(flowBody)`), with `SetScarThreshold`
+(`YENT_SCAR_THRESHOLD`, default 0.5), one `FlowConsolidator` in the sleep slot, and an
+autumn `SleepTrigger` (`AutumnEnergy() > 0.6` — critical mass). The dock keeps its cgo
+block only for `am_get_state()` telemetry (the same global state the body drives). A
+`SetOnSleep` observer prints each consolidation stage with cooc stats; `YENT_DOCK_FORCE_
+AUTUMN=1` drives the field into deep autumn so the sleep harvest is provable in one run
+(mirrors `YENT_DOCK_FORCE_GATE`).
+
+**Build-verified on Neo:** `go vet ./...` clean, `go build ./...` clean (the rewired dock
+compiles; `sync`/`unsafe` dropped with `amkField`), full test sweep green. The Metal smoke
+with the real nemo/small24 voices (circles ingesting into the native cooc, scarring, the
+sleep harvest firing under `FORCE_AUTUMN`) is the remaining tool-confirmation — it needs
+the Mac mini (`ssh ariannamethod@100.77.243.67`, `doe_field` + GGUF in `~/oyent_gguf`) and
+should be coordinated so it does not collide with Codex's runtime work there. Run:
+`YENT_DOE_BIN=… YENT_NEMO_GGUF=… YENT_24B_GGUF=… YENT_LIMPHA_DB=… YENT_DOCK_FORCE_GATE=1
+YENT_DOCK_FORCE_AUTUMN=1 YENT_DOCK_MAX_DREAMS=1 go run ./cmd/innerworld-dock`.
+
+That closes F1 (native AML Flow body, wired): F1a body + F1b-core unification + F1b-dock
+wiring. Next: the Metal smoke (milestone tool-run), then F1c — `flow.aml` resident script
+(am_exec the .aml on init, persist `flow.soma`) + Kairos's `.aml` velocity-rhythm. Codex
+then sews this inner world to limpha/RI. Round-final Codex audit pending.
+
+---
+
 ## Deferred / parked
 
 - **Cloud** (pre-linguistic affect, 6-chamber MLP reflex) — it is **Python**, with a

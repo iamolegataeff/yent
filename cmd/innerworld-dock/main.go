@@ -40,40 +40,21 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
-	"unsafe"
 
 	"github.com/ariannamethod/yent/innerworld"
+	"github.com/ariannamethod/yent/innerworld/aml"
 	yent "github.com/ariannamethod/yent/yent/go"
 )
 
-// amkField drives the real AML field through the canonical kernel. Concurrency-safe,
-// as the Field contract requires. Reads go through the canonical AM_State layout.
-type amkField struct{ mu sync.Mutex }
-
-func (f *amkField) Exec(script string) error {
-	cs := C.CString(script)
-	defer C.free(unsafe.Pointer(cs))
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if C.am_exec(cs) != 0 {
-		return fmt.Errorf("am_exec failed: %q", script)
-	}
-	return nil
-}
-func (f *amkField) Step(dt float32) { f.mu.Lock(); defer f.mu.Unlock(); C.am_step(C.float(dt)) }
-func (f *amkField) Debt() float32 {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return float32(C.am_get_state().debt)
-}
-func (f *amkField) Destiny() float32 {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return float32(C.am_get_state().destiny)
-}
+// The AML field is now the native third body (innerworld/aml.Body) — one AML physics
+// holding the field, the cooc graph, and the scar sea (form A). It replaces the dock's
+// old inline amkField: the body provides Exec/Step/Debt/Destiny (the innerworld.Field
+// bridge) AND the cooc/scar Flow, all over the same global libamk kernel. The dock
+// still reads C.am_get_state() directly for telemetry (limphaStateFromCanonical, the
+// field print) — the same global state the body drives, read through the canonical
+// AM_State layout libamk.a is built from.
 
 // doeBody adapts a real doe-backed body (nemo12 fast or small24 deep) to
 // innerworld.Body. The inner world asks for a thought at a temperature; the real
@@ -175,6 +156,20 @@ func positiveIntEnv(name string) int {
 	return v
 }
 
+// scarThresholdEnv reads the prophecy-debt above which a thought scars (default 0.5):
+// a thought scars only when it broke prophecy-destiny coherence past this bar.
+func scarThresholdEnv() float32 {
+	raw := strings.TrimSpace(os.Getenv("YENT_SCAR_THRESHOLD"))
+	if raw == "" {
+		return 0.5
+	}
+	v, err := strconv.ParseFloat(raw, 32)
+	if err != nil || v < 0 {
+		return 0.5
+	}
+	return float32(v)
+}
+
 func newBody(name, bin, model, workdir string, args []string) *yent.DOEBody {
 	b, err := yent.NewDOEBody(yent.DOEBodyConfig{
 		Name: name, BinPath: bin, ModelPath: model, WorkDir: workdir, Args: args,
@@ -186,6 +181,21 @@ func newBody(name, bin, model, workdir string, args []string) *yent.DOEBody {
 		os.Exit(1)
 	}
 	return b
+}
+
+// buildDockTokenizer loads the fast voice's BPE from its GGUF metadata so the native
+// cooc graph is built over the SAME token ids the voice speaks in (shared vocabulary).
+// On failure the inner world still runs — the native body's Ingest/BiasWords no-op
+// without a tokenizer rather than crash the dock.
+func buildDockTokenizer(nemoGGUF string) aml.Tokenizer {
+	gf, err := yent.LoadGGUF(nemoGGUF)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[dock] tokenizer: GGUF load failed (%v); native cooc Ingest/BiasWords disabled\n", err)
+		return nil
+	}
+	tok := yent.NewTokenizer(&gf.Meta)
+	fmt.Printf("=== native cooc tokenizer: nemo BPE (vocab=%d) ===\n", tok.VocabSize)
+	return tok
 }
 
 func openLimphaFromEnv() *yent.LimphaClient {
@@ -299,9 +309,17 @@ func main() {
 		defer limpha.Close()
 	}
 
-	C.am_init()
-	field := &amkField{}
-	iw := innerworld.NewInnerWorld(doeBody{fast}, field, innerworld.NgramDivergence)
+	aml.Init()
+	// The native AML body is the one physics: the field AND the cooc/scar Flow. Circles
+	// ingest into the field's own cooc, high-debt thoughts scar natively, the seed is
+	// pulled by the field's cooc and resurfaced scars, and one FlowConsolidator harvests
+	// in sleep when the field reaches deep autumn (critical mass).
+	flowBody := aml.New(buildDockTokenizer(fastModel))
+	iw := innerworld.NewInnerWorld(doeBody{fast}, flowBody, innerworld.NgramDivergence)
+	iw.SetFlow(flowBody)
+	iw.SetScarThreshold(scarThresholdEnv())
+	iw.AddConsolidator(&innerworld.FlowConsolidator{Flow: flowBody})
+	iw.SetSleepTrigger(func(innerworld.Field) bool { return flowBody.AutumnEnergy() > 0.6 })
 
 	// Close the loop: recall past inner monologues from limpha so new thinking is
 	// shaped by what Yent thought before. The write side (dock -> limpha) lands the
@@ -393,6 +411,28 @@ func main() {
 		Silence:   1 * time.Second,
 		DriftDebt: 0.0, // any debt counts, so the drift dreamer is lively for the demo
 	})
+
+	// When the field reaches deep autumn the organism sleeps and the FlowConsolidator
+	// runs the field's own cooc harvest. Show each stage and the cooc graph before/after.
+	iw.SetOnSleep(func(stage string) {
+		mean, max := flowBody.CoocStats()
+		fmt.Printf("  [sleep] consolidating %q | cooc mean=%.4f max=%.4f dark_gravity=%.4f scars=%d\n",
+			stage, mean, max, flowBody.DarkGravity(), flowBody.Scars())
+	})
+
+	// Smoke aid: force the field into deep autumn so the sleep harvest is provable in
+	// one run (the field reaches autumn naturally only over many steps). Mirrors
+	// YENT_DOCK_FORCE_GATE; default is the real seasonal physics.
+	if os.Getenv("YENT_DOCK_FORCE_AUTUMN") == "1" {
+		_ = flowBody.Exec("SEASON AUTUMN")
+		_ = flowBody.Exec("SEASON_INTENSITY 1.0")
+		for i := 0; i < 300 && flowBody.AutumnEnergy() <= 0.6; i++ {
+			flowBody.Step(1.0)
+		}
+		fmt.Printf("    (YENT_DOCK_FORCE_AUTUMN=1: field driven to autumn energy=%.3f — sleep will consolidate)\n",
+			flowBody.AutumnEnergy())
+	}
+
 	iw.Breathe(ctx)
 	if limpha != nil {
 		if stats, err := limpha.Stats(); err == nil {
