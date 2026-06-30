@@ -189,14 +189,15 @@ func (iw *InnerWorld) SetCooc(g *CoocGraph) {
 // unchanged. NO-SEED-FROM-PROMPT holds: the result is still transformed by innerSeed
 // inside Overthink.
 func (iw *InnerWorld) coocBias(prompt string) string {
-	if iw.cooc == nil {
-		return prompt
+	var pull []string
+	switch {
+	case iw.flow != nil:
+		pull = iw.flow.BiasWords(prompt, 3) // native cooc: the field's own token graph
+	case iw.cooc != nil:
+		if words := coocWords(prompt); len(words) > 0 {
+			pull = iw.cooc.Bias(words[len(words)-1], 3)
+		}
 	}
-	words := coocWords(prompt)
-	if len(words) == 0 {
-		return prompt
-	}
-	pull := iw.cooc.Bias(words[len(words)-1], 3)
 	if len(pull) == 0 {
 		return prompt
 	}
@@ -208,6 +209,12 @@ func (iw *InnerWorld) coocBias(prompt string) string {
 // Caller holds genMu (the graph has its own lock; this only keeps the order with the
 // single voice consistent).
 func (iw *InnerWorld) observeLocked(circles []Circle) {
+	if iw.flow != nil {
+		for _, c := range circles {
+			iw.flow.Ingest(c.Text) // native cooc: am_ingest_tokens grows the field's graph
+		}
+		return
+	}
 	if iw.cooc == nil {
 		return
 	}

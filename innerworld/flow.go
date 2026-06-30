@@ -1,5 +1,7 @@
 package innerworld
 
+import "context"
+
 // Flow is Yent's third body — the resident AML organism that merges the two voices
 // (nemo fast + small24 deep) into one "Я". It is the Field (the AML physics) PLUS
 // the consolidation organs Kairos drives in sleep: the cooc memory, the scar sea,
@@ -32,7 +34,35 @@ type Flow interface {
 	// it for critical mass: high coherence drives the field into autumn, and autumn
 	// is when consolidation lands.
 	AutumnEnergy() float32
+
+	// BiasWords returns up to n words the body's cooc memory most associates with the
+	// seed's last token — the field->circles pull that keeps the inner loop
+	// bidirectional (haze-emergence: the organism's own thoughts shape the next one).
+	// Empty if the seed's last token is unknown to the graph.
+	BiasWords(seed string, n int) []string
+
+	// ResurfaceScars returns up to n rejected thoughts the field now resonates with —
+	// the scar sea surfacing what was refused (leo sea-of-memory: a present metric
+	// pulls a sleeping memory back up). Empty if none resonate.
+	ResurfaceScars(resonance float32, n int) []string
 }
+
+// FlowConsolidator is the form-A sleep stage over the native body: ONE consolidator
+// that runs the field's own cooc autumn harvest and scar consolidation, replacing the
+// separate Go cooc/scar stages — one AML physics consolidates in sleep. Kairos plugs
+// it into the sleep grind like any Consolidation.
+type FlowConsolidator struct{ Flow Flow }
+
+func (c *FlowConsolidator) Consolidate(_ context.Context) error {
+	if c.Flow == nil {
+		return nil
+	}
+	c.Flow.ConsolidateCooc()
+	c.Flow.ConsolidateScar()
+	return nil
+}
+
+func (c *FlowConsolidator) Name() string { return "flow" }
 
 // goFlow is the pure-Go fallback body: the third body without cgo, wrapping the Go
 // cooc graph, the scar sea, and the field. Same Flow interface as the native AML
@@ -104,4 +134,22 @@ func (f *goFlow) AutumnEnergy() float32 {
 		return 0
 	}
 	return d / (d + 1)
+}
+
+func (f *goFlow) BiasWords(seed string, n int) []string {
+	if f.cooc == nil {
+		return nil
+	}
+	words := coocWords(seed)
+	if len(words) == 0 {
+		return nil
+	}
+	return f.cooc.Bias(words[len(words)-1], n)
+}
+
+func (f *goFlow) ResurfaceScars(resonance float32, n int) []string {
+	if f.scar == nil {
+		return nil
+	}
+	return f.scar.Resurrect(resonance, n)
 }

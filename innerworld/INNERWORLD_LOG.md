@@ -460,6 +460,54 @@ nemo/small24 voices over the native body. Round-final Codex audit + Metal pendin
 
 ---
 
+## Third body `flow` / F1b-core — one AML physics for the whole inner world (2026-06-30)
+
+The decision (Oleg, settled): the inner world runs over ONE AML physics, the native
+`aml.Body`, as the single cooc + scar + field organ — no parallel Go cooc/scar. F1b-core
+lands that unification, fully on Neo (the field is pure C/CPU; the Metal dock wiring with
+the real voices is F1b-dock, next).
+
+The `Flow` interface grew the two seed-level OUT pulls, so the native body is a true
+superset of the Go organs, not a regression — the bidirectional haze loop stays alive at
+seed level now, with the logit channel landing later via Codex's doe-side seam:
+- `BiasWords(seed,n)` — the field->circles cooc pull. Native: encode the seed, scan the
+  field's own cooc graph (`am_get_state` `cooc_src/dst/cnt`, both `AM_State` fields) for
+  the last token's heaviest neighbours, decode them back to words. goFlow delegates to
+  `CoocGraph.Bias`. One physics — the pull is the field's token co-occurrence, not a Go
+  approximation.
+- `ResurfaceScars(resonance,n)` — the scar sea surfacing what was refused. Native: read
+  `scar_texts[]` from `AM_State`, gated by the field-level `dark_gravity` (the native body
+  has no per-scar gravity to threshold; the goFlow form does — named difference). goFlow
+  delegates to `ScarMemory.Resurrect`.
+
+`FlowConsolidator` is the form-A sleep stage: ONE consolidator running the field's own
+`ConsolidateCooc` (autumn cooc harvest) + `ConsolidateScar`, replacing the separate Go
+cooc/scar stages. `InnerWorld` gains `flow Flow` + `SetFlow` + `SetScarThreshold`; when a
+flow is set it takes precedence — `observeLocked`→`flow.Ingest`, `coocBias`→`flow.BiasWords`,
+`scarLocked`→`flow.Scar`, `scarSurface`→`flow.ResurfaceScars`. The Go-organ path
+(SetCooc/SetScar, no flow) is untouched, so every prior test stays green.
+
+**Verified on Neo (`go vet`, `go test -race ./innerworld`, `go test ./innerworld/aml`):**
+all green. The pure-Go `innerworld` package stays cgo-free and races clean (Go-organ path
+intact). Native: BiasWords pulls cooc neighbours / nil-tokenizer-safe; ResurfaceScars reads
+the native sea newest-first / empty-when-none. **Integration — the real `InnerWorld` over
+the native `aml.Body` as BOTH field and Flow (one physics) + a stub voice:** a human turn
+raised circles, grew the field's own cooc (`CoocStats>0`), drove the field to
+`debt=2.005 destiny=0.350`, and the high-debt thought scarred natively (`scars=1`) — through
+the actual `think`/`observeLocked`/`scarLocked` code paths, not a direct call. A second test:
+circles ingest → scar deposit → `driveAutumn` → `FlowConsolidator` harvest → the scar
+resurfaces from the native sea. flow-smoke unchanged after the `Tokenizer.Decode` addition;
+`cmd/innerworld-dock` still builds.
+
+Next: F1b-dock — rewire `cmd/innerworld-dock` to construct the `aml.Body` (Init + a
+tokenizer from `YENT_NEMO_GGUF`) and pass it as field+flow + `SetFlow` + a
+`FlowConsolidator` + an autumn `SleepTrigger`, retiring the dock's inline `amkField`; then
+the Mac-mini Metal smoke with the real nemo/small24 voices ingesting into the native cooc,
+scarring, and the sleep harvest firing on critical mass. Round-final Codex audit + Metal
+pending.
+
+---
+
 ## Deferred / parked
 
 - **Cloud** (pre-linguistic affect, 6-chamber MLP reflex) — it is **Python**, with a

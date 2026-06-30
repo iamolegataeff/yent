@@ -68,8 +68,9 @@ type InnerWorld struct {
 	div    Divergence
 	larynx Larynx
 	memory Memory      // past-monologue recall; nil = no recall (read-only, runtime writes)
-	cooc   *CoocGraph  // inner co-occurrence memory; nil = circles do not seed/feel a cooc field
-	scar   *ScarMemory // sea of rejected thoughts (gravitational metanotes); nil = no scarring
+	cooc   *CoocGraph  // inner co-occurrence memory (Go form); nil = circles do not seed/feel a cooc field
+	scar   *ScarMemory // sea of rejected thoughts (Go form); nil = no scarring
+	flow   Flow        // native AML body (form A): when set, it IS the single cooc+scar+field physics
 	cfg    Config
 	br     Breath
 
@@ -126,6 +127,26 @@ func (iw *InnerWorld) SetDeep(deep Body) {
 func (iw *InnerWorld) SetMemory(m Memory) {
 	iw.genMu.Lock()
 	iw.memory = m
+	iw.genMu.Unlock()
+}
+
+// SetFlow wires the native AML body as the single inner-world physics (form A): one
+// organism holds the cooc graph, the scar sea, and the field. With it, the circles
+// ingest into the field's own cooc (am_ingest_tokens), high-debt thoughts scar
+// natively (the SCAR operator), the seed is pulled by the field's cooc and resurfaced
+// scars, and a FlowConsolidator harvests in sleep — no parallel Go cooc/scar. When a
+// flow is set it takes precedence over SetCooc/SetScar. Set before Think/Breathe start.
+func (iw *InnerWorld) SetFlow(f Flow) {
+	iw.genMu.Lock()
+	iw.flow = f
+	iw.genMu.Unlock()
+}
+
+// SetScarThreshold sets the prophecy-debt above which a thought is scarred, for the
+// flow path (the Go path sets it through SetScar). Set before Think/Breathe start.
+func (iw *InnerWorld) SetScarThreshold(t float32) {
+	iw.genMu.Lock()
+	iw.scarThreshold = t
 	iw.genMu.Unlock()
 }
 

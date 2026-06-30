@@ -45,6 +45,14 @@ func (wordHashTok) Encode(text string, _ bool) []int {
 	return ids
 }
 
+func (wordHashTok) Decode(ids []int) string {
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		parts = append(parts, fmt.Sprintf("t%d", id))
+	}
+	return strings.Join(parts, " ")
+}
+
 func buildTokenizer() aml.Tokenizer {
 	path := strings.TrimSpace(os.Getenv("YENT_NEMO_GGUF"))
 	if path == "" {

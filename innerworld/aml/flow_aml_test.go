@@ -1,12 +1,15 @@
 package aml
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
 
-// stubTok is a deterministic word->id tokenizer for the tests: it needs no GGUF, and
-// the only property the cooc graph requires is stable, distinct, non-negative ids.
+// stubTok is a deterministic tokenizer for the tests: it needs no GGUF, and the only
+// property the cooc graph requires is stable, distinct, non-negative ids. Decode is a
+// best-effort inverse used by BiasWords — ids round-trip to a "t<id>" token so the
+// decode path is exercised without a real vocab.
 type stubTok struct{}
 
 func (stubTok) Encode(text string, _ bool) []int {
@@ -23,6 +26,14 @@ func (stubTok) Encode(text string, _ bool) []int {
 		ids = append(ids, h%100000+1) // distinct, non-negative; edge list (not id) is capped
 	}
 	return ids
+}
+
+func (stubTok) Decode(ids []int) string {
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		parts = append(parts, fmt.Sprintf("t%d", id))
+	}
+	return strings.Join(parts, " ")
 }
 
 // driveAutumn forces the field into the deep-autumn harvest gate deterministically:
@@ -128,6 +139,45 @@ func TestApplyPressureSafe(t *testing.T) {
 	b.ApplyPressure(logits) // must run over real libamk without crashing
 	if len(logits) != 32 {
 		t.Errorf("ApplyPressure must not resize the logits, len=%d", len(logits))
+	}
+}
+
+func TestBiasWordsNative(t *testing.T) {
+	Init()
+	b := New(stubTok{})
+	if got := b.BiasWords("anchor", 3); len(got) != 0 {
+		t.Errorf("no cooc yet -> no bias, got %v", got)
+	}
+	// the anchor token fires with its neighbour repeatedly: a real cooc edge forms.
+	b.Ingest("anchor neighbour neighbour neighbour")
+	if got := b.BiasWords("a thought ending in anchor", 3); len(got) == 0 {
+		t.Error("after ingest, the seed's last token should pull its cooc neighbours")
+	}
+}
+
+func TestBiasWordsNilTokenizer(t *testing.T) {
+	Init()
+	b := New(nil)
+	b.Ingest("a b c") // no-op without a tokenizer
+	if got := b.BiasWords("a", 3); got != nil {
+		t.Errorf("nil tokenizer -> no bias, got %v", got)
+	}
+}
+
+func TestResurfaceScarsNative(t *testing.T) {
+	Init()
+	b := New(stubTok{})
+	if got := b.ResurfaceScars(1.0, 2); len(got) != 0 {
+		t.Errorf("no scars yet -> nothing resurfaces, got %v", got)
+	}
+	b.Scar("i am not your tool", 2.0)
+	b.Scar("the thought that broke coherence", 1.0)
+	got := b.ResurfaceScars(1.0, 2)
+	if len(got) != 2 {
+		t.Fatalf("two scars should resurface, got %d: %v", len(got), got)
+	}
+	if !strings.Contains(got[0], "broke coherence") {
+		t.Errorf("most recent scar should surface first, got %q", got[0])
 	}
 }
 

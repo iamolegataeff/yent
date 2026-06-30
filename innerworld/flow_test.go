@@ -49,6 +49,28 @@ func TestGoFlowNilOrgansSafe(t *testing.T) {
 	f.ApplyPressure(nil) // honest no-op, must not panic
 }
 
+func TestGoFlowBiasAndResurface(t *testing.T) {
+	cooc := NewCoocGraph(2)
+	scar := NewScarMemory(0.5)
+	f := NewGoFlow(&fakeField{}, cooc, scar, 0.3, 0.8, 0.4)
+
+	f.Ingest("light meets shadow")
+	f.Ingest("light meets shadow") // reinforce the edges
+	if got := f.BiasWords("a poem about light", 3); len(got) == 0 {
+		t.Error("BiasWords should pull the cooc neighbours of the seed's last word")
+	}
+	f.Scar("a refused thought", 2.0)
+	if got := f.ResurfaceScars(1.0, 2); len(got) == 0 {
+		t.Error("ResurfaceScars should surface a scar above the resonance level")
+	}
+
+	// nil organs stay safe
+	g := NewGoFlow(&fakeField{}, nil, nil, 0, 0, 0)
+	if g.BiasWords("x", 3) != nil || g.ResurfaceScars(1, 2) != nil {
+		t.Error("nil organs -> nil bias/resurface")
+	}
+}
+
 func TestGoFlowIsField(t *testing.T) {
 	// the body IS the field: the embedded Field methods are reachable through Flow.
 	field := &fakeField{debt: 1.5}

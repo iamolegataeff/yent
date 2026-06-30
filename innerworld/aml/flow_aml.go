@@ -27,6 +27,7 @@ import "C"
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"unsafe"
@@ -44,12 +45,15 @@ type Body struct {
 // compile-time guarantee: the native body is a drop-in innerworld.Flow.
 var _ innerworld.Flow = (*Body)(nil)
 
-// Tokenizer turns text into the token ids the AML cooc graph is built over. The
-// production tokenizer is *yent.Tokenizer — the model's own BPE, so the inner cooc
-// graph shares the voices' vocabulary — but any Encode(text, addBos) []int
-// satisfies it. A nil tokenizer makes Ingest a no-op (no ids, no cooc edges).
+// Tokenizer turns text into the token ids the AML cooc graph is built over, and back.
+// The production tokenizer is *yent.Tokenizer — the model's own BPE, so the inner
+// cooc graph shares the voices' vocabulary — but any Encode/Decode pair satisfies it.
+// Encode feeds Ingest (text->ids); Decode turns the cooc graph's neighbour ids back
+// into the words BiasWords pulls into the next seed. A nil tokenizer makes Ingest and
+// BiasWords no-ops (no ids, no edges, no decode).
 type Tokenizer interface {
 	Encode(text string, addBos bool) []int
+	Decode(ids []int) string
 }
 
 // Init resets and initialises the global AML field (chambers, scars, prophecy debt,
@@ -187,6 +191,79 @@ func (b *Body) AutumnEnergy() float32 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return float32(C.am_get_state().autumn_energy)
+}
+
+// BiasWords pulls the next seed toward what the field's cooc memory associates with
+// the seed's last token — the field->circles half of the bidirectional loop. The seed
+// is tokenized, the cooc graph (am_get_state cooc_src/dst/cnt) is scanned for that
+// token's heaviest neighbours, and those ids are decoded back to words. So the OUT
+// pull is the field's own token co-occurrence, not a Go approximation — one physics.
+// nil tokenizer, unknown token, or no neighbours = empty.
+func (b *Body) BiasWords(seed string, n int) []string {
+	if b.tok == nil || n <= 0 {
+		return nil
+	}
+	ids := b.tok.Encode(seed, false)
+	if len(ids) == 0 {
+		return nil
+	}
+	src := C.int(ids[len(ids)-1])
+
+	type edge struct {
+		dst int
+		cnt float32
+	}
+	var edges []edge
+	b.mu.Lock()
+	st := C.am_get_state()
+	for e := 0; e < int(st.cooc_n); e++ {
+		if st.cooc_src[e] == src {
+			edges = append(edges, edge{int(st.cooc_dst[e]), float32(st.cooc_cnt[e])})
+		}
+	}
+	b.mu.Unlock() // decode outside the field lock — the tokenizer is independent
+
+	if len(edges) == 0 {
+		return nil
+	}
+	sort.Slice(edges, func(i, j int) bool { return edges[i].cnt > edges[j].cnt })
+	if n > len(edges) {
+		n = len(edges)
+	}
+	out := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		if w := strings.TrimSpace(b.tok.Decode([]int{edges[i].dst})); w != "" {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// ResurfaceScars surfaces the rejected thoughts the field now resonates with — the
+// scar sea (am_get_state scar_texts) pulled back up when the field carries dark
+// gravity. The native body has no per-scar gravity to threshold (the goFlow form
+// does); instead it gates on the field-level dark_gravity (which grows over the scars
+// in autumn, ariannamethod.c:8063): once dark matter is alive, the most recent scars
+// resonate. The resonance arg is the field's debt, advisory here — the gate is
+// dark_gravity. Returns the most recent n scar texts, newest first.
+func (b *Body) ResurfaceScars(_ float32, n int) []string {
+	if n <= 0 {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	st := C.am_get_state()
+	if float32(st.dark_gravity) <= 0 { // no consolidated dark matter — nothing resonates
+		return nil
+	}
+	ns := int(st.n_scars)
+	out := make([]string, 0, n)
+	for i := ns - 1; i >= 0 && len(out) < n; i-- {
+		if s := strings.TrimSpace(C.GoString(&st.scar_texts[i][0])); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // ── telemetry (read-only, for Kairos observers and smoke) ────────────────────────
