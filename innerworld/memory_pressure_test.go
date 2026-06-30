@@ -29,7 +29,7 @@ func TestFieldPressureForMemoryLightLimpha(t *testing.T) {
 
 func TestFieldPressureForMemorySartreTrace(t *testing.T) {
 	got, ok := FieldPressureForMemory([]string{
-		"SARTRE perception: repo_monitor modified README.md | context_processor research/recursive_resonance_preprint.md tag=.md relevance=0.42 pulse=0.73",
+		"SARTRE perception: repo_monitor modified README.md | context_processor research/recursive_resonance_preprint.md resonance=0.42 pulse=0.73",
 	})
 	if !ok {
 		t.Fatal("expected SARTRE memory pressure")
