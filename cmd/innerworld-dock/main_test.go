@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -188,5 +189,31 @@ func TestLimphaRecallerLimitAndNilSafe(t *testing.T) {
 	got := (limphaRecaller{lc: lc}).Recall(1)
 	if len(got) != 1 || got[0] != "second" {
 		t.Fatalf("limit should return the newest inner thought only, got %#v", got)
+	}
+}
+
+func TestOpenRIFromEnv(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.lines")
+	if err := os.WriteFile(path, []byte(`packet	mode=runtime	input=ri/out/index.lines	count=3
+pressure	text=RI must become structure.
+quote	test=true	text=Don't become me.
+quote	test=false	text=This should not reach runtime.
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("YENT_RI_LINES", path)
+	t.Setenv("YENT_RI_MAX", "8")
+
+	mem := openRIFromEnv()
+	if mem == nil {
+		t.Fatal("expected RI memory")
+	}
+	text := strings.Join(mem.Recall(4), "\n")
+	if !strings.Contains(text, "RI pressure: RI must become structure.") ||
+		!strings.Contains(text, "RI test quote: Don't become me.") {
+		t.Fatalf("RI memory missing runtime records:\n%s", text)
+	}
+	if strings.Contains(text, "This should not reach runtime") {
+		t.Fatalf("RI memory leaked non-test quote:\n%s", text)
 	}
 }
