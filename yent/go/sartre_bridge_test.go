@@ -9,7 +9,7 @@ func TestParseSartreEventsJSONLIgnoresSlotNoise(t *testing.T) {
 	jsonl := `[pipe] slot[0] pid=123 reading events:
 {"util":"repo_monitor","kind":"modified","path":"/Users/ariannamethod/arianna/yent/README.md","ts":1}
 not json
-{"util":"context_processor","path":"/Users/ariannamethod/arianna/yent/research/recursive_resonance_preprint.md","tag":".md","relevance":0.42,"pulse":0.73}
+{"util":"context_processor","path":"/Users/ariannamethod/arianna/yent/research/recursive_resonance_preprint.md","resonance":0.52,"relevance":0.42,"pulse":0.73}
 `
 	events := ParseSartreEventsJSONL(jsonl)
 	if len(events) != 2 {
@@ -19,8 +19,8 @@ not json
 		events[0].Path != ".../arianna/yent/README.md" {
 		t.Fatalf("repo event not normalized: %#v", events[0])
 	}
-	if events[1].Utility != "context_processor" || events[1].Tag != ".md" ||
-		events[1].Relevance != 0.42 || events[1].Pulse != 0.73 ||
+	if events[1].Utility != "context_processor" || events[1].Tag != "" ||
+		events[1].Resonance != 0.52 || events[1].Relevance != 0.42 || events[1].Pulse != 0.73 ||
 		events[1].Path != ".../yent/research/recursive_resonance_preprint.md" {
 		t.Fatalf("context event not normalized: %#v", events[1])
 	}
@@ -30,7 +30,7 @@ func TestStoreSartreEventsAndRecall(t *testing.T) {
 	lc := newTestLimpha(t)
 	events := []SartreEvent{
 		{Utility: "repo_monitor", Kind: "modified", Path: "/repo/README.md"},
-		{Utility: "context_processor", Path: "/repo/research/recursive_resonance_preprint.md", Tag: ".md", Relevance: 0.5, Pulse: 0.7},
+		{Utility: "context_processor", Path: "/repo/research/recursive_resonance_preprint.md", Resonance: 0.63, Relevance: 0.5, Pulse: 0.7},
 	}
 	id, err := lc.StoreSartreEvents(events, LimphaState{Destiny: 0.3, Velocity: 2})
 	if err != nil {
@@ -57,6 +57,9 @@ func TestStoreSartreEventsAndRecall(t *testing.T) {
 	if !strings.Contains(seams[0]["memory_delta"].(string), `"kind":"sartre_perception"`) {
 		t.Fatalf("memory_delta must be typed JSON: %s", seams[0]["memory_delta"])
 	}
+	if !strings.Contains(seams[0]["memory_delta"].(string), `"max_resonance":0.63`) {
+		t.Fatalf("memory_delta must preserve resonance: %s", seams[0]["memory_delta"])
+	}
 
 	got := NewSartreMemory(lc).Recall(2)
 	if len(got) != 1 {
@@ -64,7 +67,9 @@ func TestStoreSartreEventsAndRecall(t *testing.T) {
 	}
 	if !strings.Contains(got[0], "SARTRE perception:") ||
 		!strings.Contains(got[0], "repo_monitor modified") ||
-		!strings.Contains(got[0], "context_processor") {
+		!strings.Contains(got[0], "context_processor") ||
+		!strings.Contains(got[0], "resonance=0.63") ||
+		strings.Contains(got[0], "tag=?") {
 		t.Fatalf("bad sartre recall trace: %#v", got)
 	}
 	if strings.Contains(got[0], "/Users/") {
@@ -77,14 +82,14 @@ func TestBuildSartreReceiptCapsTraceButCountsMetrics(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		events = append(events, SartreEvent{Utility: "repo_monitor", Kind: "modified", Path: "research/file.md"})
 	}
-	events = append(events, SartreEvent{Utility: "context_processor", Path: "research/hot.md", Tag: ".md", Relevance: 0.91, Pulse: 0.88})
+	events = append(events, SartreEvent{Utility: "context_processor", Path: "research/hot.md", Resonance: 0.94, Relevance: 0.91, Pulse: 0.88})
 
 	receipt := BuildSartreReceipt(events)
 	if receipt.EventCount != 21 {
 		t.Fatalf("receipt should count the whole capped packet, got %d", receipt.EventCount)
 	}
-	if receipt.MaxRelevance != 0.91 || receipt.MaxPulse != 0.88 {
-		t.Fatalf("late metric event should still count, relevance=%.2f pulse=%.2f", receipt.MaxRelevance, receipt.MaxPulse)
+	if receipt.MaxResonance != 0.94 || receipt.MaxRelevance != 0.91 || receipt.MaxPulse != 0.88 {
+		t.Fatalf("late metric event should still count, resonance=%.2f relevance=%.2f pulse=%.2f", receipt.MaxResonance, receipt.MaxRelevance, receipt.MaxPulse)
 	}
 	if len(receipt.Trace) > 12 {
 		t.Fatalf("trace should stay capped, got %d", len(receipt.Trace))

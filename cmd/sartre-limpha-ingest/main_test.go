@@ -58,7 +58,7 @@ func writeTestEvents(t *testing.T, path string) {
 	t.Helper()
 	data := `[pipe] slot ready
 {"util":"repo_monitor","kind":"modified","path":"/repo/README.md","ts":1}
-{"util":"context_processor","path":"/repo/research/dario_paper_v2.md","tag":".md","relevance":0.41,"pulse":0.66}
+{"util":"context_processor","path":"/repo/research/dario_paper_v2.md","resonance":0.52,"relevance":0.41,"pulse":0.66}
 `
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		t.Fatal(err)

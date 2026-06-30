@@ -21,7 +21,8 @@ type SartreEvent struct {
 	Utility   string  `json:"util"`
 	Kind      string  `json:"kind,omitempty"`
 	Path      string  `json:"path,omitempty"`
-	Tag       string  `json:"tag,omitempty"`
+	Tag       string  `json:"tag,omitempty"` // legacy context_processor readout; new receipts use Resonance
+	Resonance float64 `json:"resonance,omitempty"`
 	Relevance float64 `json:"relevance,omitempty"`
 	Pulse     float64 `json:"pulse,omitempty"`
 }
@@ -32,6 +33,7 @@ type SartreReceipt struct {
 	EventCount    int           `json:"event_count"`
 	Changed       int           `json:"changed"`
 	ReadmeChanged bool          `json:"readme_changed,omitempty"`
+	MaxResonance  float64       `json:"max_resonance,omitempty"`
 	MaxRelevance  float64       `json:"max_relevance,omitempty"`
 	MaxPulse      float64       `json:"max_pulse,omitempty"`
 	Trace         []string      `json:"trace"`
@@ -89,7 +91,7 @@ func (c *LimphaClient) StoreSartreEvents(events []SartreEvent, st LimphaState) (
 		Prompt:         prompt,
 		AClaim:         response,
 		BClaim:         "SARTRE perception: " + compactLine(strings.Join(receipt.Trace, " | "), 260),
-		Agreement:      clamp01(receipt.MaxRelevance),
+		Agreement:      clamp01(maxFloat(receipt.MaxResonance, receipt.MaxRelevance)),
 		Tension:        sartreTension(receipt),
 		Winner:         "limpha",
 		Reason:         SartreSeamReason,
@@ -112,6 +114,9 @@ func BuildSartreReceipt(events []SartreEvent) SartreReceipt {
 		}
 		if strings.Contains(strings.ToLower(ev.Path), "readme") {
 			receipt.ReadmeChanged = true
+		}
+		if ev.Resonance > receipt.MaxResonance {
+			receipt.MaxResonance = ev.Resonance
 		}
 		if ev.Relevance > receipt.MaxRelevance {
 			receipt.MaxRelevance = ev.Relevance
@@ -142,12 +147,18 @@ func (ev SartreEvent) Trace() string {
 		if ev.Path == "" {
 			return ""
 		}
-		tag := ev.Tag
-		if tag == "" {
-			tag = "?"
+		var parts []string
+		parts = append(parts, "context_processor", ev.Path)
+		if ev.Tag != "" {
+			parts = append(parts, "tag="+ev.Tag)
 		}
-		return compactLine(fmt.Sprintf("context_processor %s tag=%s relevance=%.2f pulse=%.2f",
-			ev.Path, tag, clamp01(ev.Relevance), clamp01(ev.Pulse)), 220)
+		if ev.Resonance > 0 {
+			parts = append(parts, fmt.Sprintf("resonance=%.2f", clamp01(ev.Resonance)))
+		}
+		parts = append(parts,
+			fmt.Sprintf("relevance=%.2f", clamp01(ev.Relevance)),
+			fmt.Sprintf("pulse=%.2f", clamp01(ev.Pulse)))
+		return compactLine(strings.Join(parts, " "), 220)
 	default:
 		return compactLine(strings.TrimSpace(fmt.Sprintf("%s %s %s", ev.Utility, ev.Kind, ev.Path)), 180)
 	}
@@ -209,6 +220,7 @@ func normalizeSartreEvent(ev SartreEvent) SartreEvent {
 	ev.Kind = strings.TrimSpace(ev.Kind)
 	ev.Path = safeSartrePath(ev.Path)
 	ev.Tag = strings.TrimSpace(ev.Tag)
+	ev.Resonance = clamp01(ev.Resonance)
 	ev.Relevance = clamp01(ev.Relevance)
 	ev.Pulse = clamp01(ev.Pulse)
 	return ev
@@ -249,6 +261,13 @@ func sartreTension(r SartreReceipt) float64 {
 
 func minInt(a, b int) int {
 	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxFloat(a, b float64) float64 {
+	if a > b {
 		return a
 	}
 	return b

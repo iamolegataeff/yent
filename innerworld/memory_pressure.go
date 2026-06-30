@@ -61,6 +61,7 @@ func tracePressureScore(trace string) int {
 		"sartre perception",
 		"repo_monitor",
 		"context_processor",
+		"resonance=",
 		"relevance=",
 		"pulse=",
 		"readme",
