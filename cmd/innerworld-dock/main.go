@@ -238,6 +238,20 @@ func openRIFromEnv() innerworld.Memory {
 	return mem
 }
 
+func printMemoryPreview(mem innerworld.Memory, n int) {
+	if mem == nil || n <= 0 {
+		return
+	}
+	traces := mem.Recall(n)
+	if len(traces) == 0 {
+		return
+	}
+	fmt.Printf("=== memory merged: %d recall trace(s) enter the inner seed ===\n", len(traces))
+	for i, p := range traces {
+		fmt.Printf("  memory %d | %s\n", i, p)
+	}
+}
+
 func limphaStateFromCanonical() yent.LimphaState {
 	st := C.am_get_state()
 	return yent.LimphaState{
@@ -368,6 +382,7 @@ func main() {
 	}
 	if mem := innerworld.MergeMemory(memories...); mem != nil {
 		iw.SetMemory(mem)
+		printMemoryPreview(mem, innerworld.DefaultConfig().RecallN)
 	}
 
 	deepWired := false
