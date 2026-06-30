@@ -338,6 +338,37 @@ Hebbian weights in the sleep + spore consolidation (weights → Oleg's mandate).
 
 ---
 
+## Level B / Б3 — scar / dark-matter meta-learning (2026-06-30)
+
+Meta-learning on what the organism refused — the AML SCAR / dark-matter lineage,
+and a direct continuation of the S8 DPO epistemic-self-contour work, now growing on
+its own. `scar.go` adds `ScarMemory`, the sea of rejected thoughts: `Scar` sinks a
+thought in with gravity (a recurring rejection accumulates, so the wound that keeps
+reopening holds — leo trauma-spore), `Consolidate` is the sleep pass (slow decay,
+leo klaus-scar, and prune of the faded), and `Resurrect` surfaces the scars whose
+gravity rose above a resonance level (leo sea-of-memory: a present metric pulls a
+sleeping memory back up). `ScarConsolidator` runs the decay/prune in the sleep slot.
+
+Integration in `inner_world.go`: a thought whose batch prophecy-debt rose above
+`scarThreshold` dissonated with the field's prophecy and is scarred
+(`scarLocked`, gravity = the debt itself — the more it broke prophecy-destiny
+coherence, the deeper the scar). On a later turn, if the present field debt
+resonates with a past rejection, that scar resurfaces in the seed
+(`scarSurface`) — not as a quote to continue, but as a remembered refusal. The
+seed chain is now `recallSeed(coocBias(scarSurface(prompt)))`: memory, cooc pull,
+and resurfaced scar all fold in, then `innerSeed` transforms it (NO-SEED holds).
+`nil` scar = no-op. Velocity operators (UP/DOWN/WALK/STOP) already steer the sleep
+rhythm through the AML field's prophecy-destiny; the full `.aml` velocity scripting
+is a later wiring with Codex's AML/RI work, noted here.
+
+`go test -race` green (5 scar tests: accumulate/forget, resurrect by resonance,
+consolidator in sleep, high-debt→scar→resurface integration, nil-safe). Round-final
+Codex audit + Metal smoke pending. Next: Б2 — DoE Hebbian weights in the sleep +
+spore (weights → Oleg's explicit mandate, with spore-backup + identity-smoke +
+rollback).
+
+---
+
 ## Deferred / parked
 
 - **Cloud** (pre-linguistic affect, 6-chamber MLP reflex) — it is **Python**, with a

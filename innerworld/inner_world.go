@@ -67,10 +67,13 @@ type InnerWorld struct {
 	field  Field
 	div    Divergence
 	larynx Larynx
-	memory Memory     // past-monologue recall; nil = no recall (read-only, runtime writes)
-	cooc   *CoocGraph // inner co-occurrence memory; nil = circles do not seed/feel a cooc field
+	memory Memory      // past-monologue recall; nil = no recall (read-only, runtime writes)
+	cooc   *CoocGraph  // inner co-occurrence memory; nil = circles do not seed/feel a cooc field
+	scar   *ScarMemory // sea of rejected thoughts (gravitational metanotes); nil = no scarring
 	cfg    Config
 	br     Breath
+
+	scarThreshold float32 // prophecy-debt above which a thought is scarred (rejected by the field)
 
 	genMu        sync.Mutex // one inner voice at a time: serializes Overthink + deep self-answer (body access)
 	deepResident bool       // guarded by genMu: the deep body is the currently-resident one (single-resident swap)
@@ -277,9 +280,10 @@ func (iw *InnerWorld) reflect(circles []Circle, debt float32) Reflection {
 func (iw *InnerWorld) think(prompt string) Reflection {
 	iw.genMu.Lock()
 	iw.ensureFastResidentLocked()
-	circles := Overthink(iw.recallSeed(iw.coocBias(prompt)), iw.fast, iw.field, iw.div, iw.cfg)
-	debt := iw.fieldDebt() // snapshot under genMu: belongs to this batch
-	iw.observeLocked(circles) // circles seed the cooc field (circles->field)
+	circles := Overthink(iw.recallSeed(iw.coocBias(iw.scarSurface(prompt))), iw.fast, iw.field, iw.div, iw.cfg)
+	debt := iw.fieldDebt()       // snapshot under genMu: belongs to this batch
+	iw.observeLocked(circles)    // circles seed the cooc field (circles->field)
+	iw.scarLocked(circles, debt) // a thought that broke prophecy becomes a scar
 	r := iw.reflect(circles, debt)
 	if r.SelfAnswered {
 		r.DeepAnswer = iw.deepAnswerLocked(circles) // deep body speaks, under the single voice
@@ -350,9 +354,10 @@ func (iw *InnerWorld) dream(trigger int) Reflection {
 
 	iw.genMu.Lock()
 	iw.ensureFastResidentLocked()
-	circles := Overthink(iw.recallSeed(iw.coocBias(seed)), iw.fast, iw.field, iw.div, iw.cfg)
-	debt := iw.fieldDebt() // snapshot under genMu: belongs to this batch
-	iw.observeLocked(circles) // dreams seed the cooc field too (circles->field)
+	circles := Overthink(iw.recallSeed(iw.coocBias(iw.scarSurface(seed))), iw.fast, iw.field, iw.div, iw.cfg)
+	debt := iw.fieldDebt()       // snapshot under genMu: belongs to this batch
+	iw.observeLocked(circles)    // dreams seed the cooc field too (circles->field)
+	iw.scarLocked(circles, debt) // a dissonant dream scars too
 	r := iw.reflect(circles, debt)
 	if r.SelfAnswered {
 		r.DeepAnswer = iw.deepAnswerLocked(circles) // even alone, the deep body may answer the dream
