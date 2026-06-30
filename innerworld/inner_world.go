@@ -295,11 +295,11 @@ func (iw *InnerWorld) think(prompt string) Reflection {
 	memoryPressure, _ := iw.applyMemoryPressureLocked(traces) // the past as slow field pressure
 	iw.applySenseLocked()                                     // the present world as fast field reflex (SARTRE)
 	circles := Overthink(iw.recallSeedWithTraces(iw.coocBias(iw.scarSurface(prompt)), traces), iw.fast, iw.field, iw.div, iw.cfg)
-	debt := iw.fieldDebt()                               // snapshot under genMu: belongs to this batch
-	iw.observeLocked(circles)                            // circles seed the cooc field (circles->field)
-	iw.scarLocked(circles, debt)                         // a thought that broke prophecy becomes a scar
-	iw.highFeelLocked(circles)                           // the circles' feeling drives the affect axis (High brain)
-	iw.publishMetricsLocked("human_turn", circles, debt) // reciprocal field-weather telemetry
+	debt := iw.fieldDebt()                                               // snapshot under genMu: belongs to this batch
+	iw.observeLocked(circles)                                            // circles seed the cooc field (circles->field)
+	iw.scarLocked(circles, debt)                                         // a thought that broke prophecy becomes a scar
+	iw.highFeelLocked(circles)                                           // the circles' feeling drives the affect axis (High brain)
+	iw.publishMetricsLocked("human_turn", circles, debt, memoryPressure) // reciprocal field-weather telemetry
 	r := iw.reflect(circles, debt)
 	r.MemoryPressure = memoryPressure
 	if r.SelfAnswered {
@@ -375,11 +375,11 @@ func (iw *InnerWorld) dream(trigger int) Reflection {
 	memoryPressure, _ := iw.applyMemoryPressureLocked(traces) // the past as slow field pressure
 	iw.applySenseLocked()                                     // the present world as fast field reflex (SARTRE)
 	circles := Overthink(iw.recallSeedWithTraces(iw.coocBias(iw.scarSurface(seed)), traces), iw.fast, iw.field, iw.div, iw.cfg)
-	debt := iw.fieldDebt()                          // snapshot under genMu: belongs to this batch
-	iw.observeLocked(circles)                       // dreams seed the cooc field too (circles->field)
-	iw.scarLocked(circles, debt)                    // a dissonant dream scars too
-	iw.highFeelLocked(circles)                      // even alone, a dream colours the mood (High brain)
-	iw.publishMetricsLocked("dream", circles, debt) // reciprocal field-weather telemetry
+	debt := iw.fieldDebt()                                          // snapshot under genMu: belongs to this batch
+	iw.observeLocked(circles)                                       // dreams seed the cooc field too (circles->field)
+	iw.scarLocked(circles, debt)                                    // a dissonant dream scars too
+	iw.highFeelLocked(circles)                                      // even alone, a dream colours the mood (High brain)
+	iw.publishMetricsLocked("dream", circles, debt, memoryPressure) // reciprocal field-weather telemetry
 	r := iw.reflect(circles, debt)
 	r.MemoryPressure = memoryPressure
 	if r.SelfAnswered {

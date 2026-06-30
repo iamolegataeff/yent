@@ -611,6 +611,9 @@ void sartre_ingest_metrics_json(const char *json) {
     if (json_get_float(json, "trauma", &v))             { sys.trauma_level = v; touched++; }
     if (json_get_float(json, "warmth", &v))             { sys.warmth = v; touched++; }
     if (json_get_float(json, "flow", &v))               { sys.flow = v; touched++; }
+    if (json_get_float(json, "memory_field_score", &v))    { sys.memory_field_score = v; touched++; }
+    if (json_get_float(json, "memory_field_prophecy", &v)) { sys.memory_field_prophecy = v; touched++; }
+    if (json_get_float(json, "memory_field_step", &v))     { sys.memory_field_step = v; touched++; }
     if (json_get_float(json, "schumann_coherence", &v)) { sys.schumann_coherence = v; touched++; }
     if (touched) sartre_notify_event("metrics_ingest");
 }
@@ -977,6 +980,9 @@ int sartre_state_to_json(char *buf, int max) {
         "\"entropy\":%.3f,"
         "\"warmth\":%.3f,"
         "\"flow\":%.3f,"
+        "\"memory_field_score\":%.3f,"
+        "\"memory_field_prophecy\":%.3f,"
+        "\"memory_field_step\":%.3f,"
         "\"overlay_ratio\":%.4f,"
         "\"overlay_writes\":%d,"
         "\"overlay_base\":%lld,"
@@ -1001,6 +1007,7 @@ int sartre_state_to_json(char *buf, int max) {
         sys.trauma_level, sys.arousal, sys.valence,
         sys.coherence, sys.prophecy_debt, sys.entropy,
         sys.warmth, sys.flow,
+        sys.memory_field_score, sys.memory_field_prophecy, sys.memory_field_step,
         sys.overlay.overlay_ratio, sys.overlay.overlay_writes,
         (long long)sys.overlay.base_size, (long long)sys.overlay.delta_size,
         sys.ns_count, active_ns, spawned_ns,
