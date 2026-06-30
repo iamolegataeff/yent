@@ -45,6 +45,48 @@ func TestRIMemoryFormatsBoundedRuntimePacket(t *testing.T) {
 	}
 }
 
+func TestRIMemoryProvidesTypedFieldPressure(t *testing.T) {
+	mem := NewRIMemory([]riindex.Record{
+		{Kind: "pressure", Fields: map[string]string{"text": "Plain curated pressure."}},
+		{Kind: "quote", Fields: map[string]string{"test": "true", "text": "Don't become me."}},
+		{Kind: "conflict", Fields: map[string]string{"status": "open", "title": "KK/Dario vs Prompt Stuffing"}},
+	})
+	got, ok := FieldPressureFromMemory(mem, 1)
+	if !ok {
+		t.Fatal("expected RI field pressure")
+	}
+	if got.Score != 4 || got.Prophecy != 5 || got.Step != 0.31 {
+		t.Fatalf("RI typed pressure should not depend on trace wording, got %+v", got)
+	}
+	got, ok = FieldPressureFromMemory(mem, 3)
+	if !ok || got.Score != 5 || got.Prophecy != 6 || got.Step != 0.35 {
+		t.Fatalf("RI pressure should cap when multiple records are recalled, got ok=%v %+v", ok, got)
+	}
+}
+
+func TestMergedMemoryPressureFollowsInterleavedRecallWindow(t *testing.T) {
+	ri := NewRIMemory([]riindex.Record{
+		{Kind: "conflict", Fields: map[string]string{"status": "open", "title": "Heavy RI conflict"}},
+	})
+	mem := MergeMemory(
+		fakeMemory{past: []string{"limpha neutral trace"}},
+		ri,
+	)
+
+	got, ok := FieldPressureFromMemory(mem, 1)
+	if !ok {
+		t.Fatal("expected pressure from the selected limpha trace")
+	}
+	if got.Score != 1 || got.Prophecy != 2 || got.Step != 0.19 {
+		t.Fatalf("RI must not pressure field before it enters recall window, got %+v", got)
+	}
+
+	got, ok = FieldPressureFromMemory(mem, 2)
+	if !ok || got.Score != 5 || got.Prophecy != 6 || got.Step != 0.35 {
+		t.Fatalf("RI pressure should apply once selected by interleave, got ok=%v %+v", ok, got)
+	}
+}
+
 func TestLoadRIMemoryUsesRuntimeSelection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime.lines")
 	if err := os.WriteFile(path, []byte(`ri	generated_at=x	root=ri

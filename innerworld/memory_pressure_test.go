@@ -12,7 +12,7 @@ func TestFieldPressureForMemoryBounded(t *testing.T) {
 	if !ok {
 		t.Fatal("expected memory pressure")
 	}
-	if got.Prophecy != 6 || got.Velocity != "WALK" || got.Step != 0.35 {
+	if got.Score != 5 || got.Prophecy != 6 || got.Velocity != "WALK" || got.Step != 0.35 {
 		t.Fatalf("unexpected pressure: %+v", got)
 	}
 }
@@ -22,7 +22,7 @@ func TestFieldPressureForMemoryLightLimpha(t *testing.T) {
 	if !ok {
 		t.Fatal("expected light memory pressure")
 	}
-	if got.Prophecy != 2 || got.Velocity != "WALK" || got.Step != 0.19 {
+	if got.Score != 1 || got.Prophecy != 2 || got.Velocity != "WALK" || got.Step != 0.19 {
 		t.Fatalf("unexpected light pressure: %+v", got)
 	}
 }
@@ -34,7 +34,7 @@ func TestFieldPressureForMemorySartreTrace(t *testing.T) {
 	if !ok {
 		t.Fatal("expected SARTRE memory pressure")
 	}
-	if got.Prophecy < 4 || got.Prophecy > 6 || got.Velocity != "WALK" || got.Step > 0.35 {
+	if got.Score < 3 || got.Score > 5 || got.Prophecy < 4 || got.Prophecy > 6 || got.Velocity != "WALK" || got.Step > 0.35 {
 		t.Fatalf("SARTRE pressure should be live but bounded, got %+v", got)
 	}
 }

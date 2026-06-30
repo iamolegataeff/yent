@@ -10,22 +10,34 @@ import (
 // circles rise, while the recalled text still reaches the model only through the
 // bounded "field traces" seed.
 type MemoryFieldPressure struct {
+	Score    int
 	Prophecy int
 	Velocity string
 	Step     float32
+}
+
+// PressureMemory is an optional Memory extension for sources that can expose
+// field pressure structurally. RI uses it so compiled records can press the AML
+// field by kind/status, without re-parsing their trace text as a prompt-like cue.
+type PressureMemory interface {
+	Memory
+	FieldPressureScore(n int) int
 }
 
 // FieldPressureForMemory turns selected memory traces into one bounded AML pulse.
 // RI/limpha traces should not become a larger prompt wall; this gives them a
 // second route into the organism as field pressure. Empty traces produce no pulse.
 func FieldPressureForMemory(traces []string) (MemoryFieldPressure, bool) {
-	if len(traces) == 0 {
-		return MemoryFieldPressure{}, false
-	}
 	score := 0
 	for _, trace := range traces {
 		score += tracePressureScore(trace)
 	}
+	return FieldPressureForScore(score)
+}
+
+// FieldPressureForScore maps any memory pressure score to the one bounded AML pulse.
+// Scores may be accumulated by text traces or by typed sources; the cap is shared.
+func FieldPressureForScore(score int) (MemoryFieldPressure, bool) {
 	if score <= 0 {
 		return MemoryFieldPressure{}, false
 	}
@@ -33,6 +45,7 @@ func FieldPressureForMemory(traces []string) (MemoryFieldPressure, bool) {
 		score = 5
 	}
 	p := MemoryFieldPressure{
+		Score:    score,     // applied score after the cap, so receipts match physics.
 		Prophecy: 1 + score, // 2..6; memory never claims the whole horizon alone.
 		Velocity: "WALK",
 		Step:     0.15 + 0.04*float32(score),
@@ -41,6 +54,24 @@ func FieldPressureForMemory(traces []string) (MemoryFieldPressure, bool) {
 		p.Step = 0.35
 	}
 	return p, true
+}
+
+// FieldPressureFromMemory returns the exact pressure a Memory source would apply
+// for its next n recalled traces. Typed sources can expose structural scores;
+// plain memories fall back to bounded trace parsing.
+func FieldPressureFromMemory(mem Memory, n int) (MemoryFieldPressure, bool) {
+	if mem == nil || n <= 0 {
+		return MemoryFieldPressure{}, false
+	}
+	traces := mem.Recall(n)
+	return pressureForMemory(mem, traces, n)
+}
+
+func pressureForMemory(mem Memory, traces []string, n int) (MemoryFieldPressure, bool) {
+	if scorer, ok := mem.(PressureMemory); ok {
+		return FieldPressureForScore(scorer.FieldPressureScore(n))
+	}
+	return FieldPressureForMemory(traces)
 }
 
 func tracePressureScore(trace string) int {
@@ -114,7 +145,7 @@ func (iw *InnerWorld) applyMemoryPressureLocked(traces []string) {
 	if iw.field == nil {
 		return
 	}
-	p, ok := FieldPressureForMemory(traces)
+	p, ok := pressureForMemory(iw.memory, traces, iw.cfg.RecallN)
 	if !ok {
 		return
 	}

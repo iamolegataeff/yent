@@ -80,6 +80,45 @@ func (m *RIMemory) Recall(n int) []string {
 	return out
 }
 
+func (m *RIMemory) FieldPressureScore(n int) int {
+	if m == nil || n <= 0 {
+		return 0
+	}
+	score := 0
+	used := 0
+	for _, rec := range m.records {
+		s := riRecordPressureScore(rec)
+		if s <= 0 {
+			continue
+		}
+		score += s
+		used++
+		if used >= n {
+			break
+		}
+	}
+	return score
+}
+
+func riRecordPressureScore(rec riindex.Record) int {
+	switch rec.Kind {
+	case "pressure":
+		if compact(rec.Fields["text"]) != "" {
+			return 4
+		}
+	case "quote":
+		if rec.Fields["test"] == "true" && compact(rec.Fields["text"]) != "" {
+			return 2
+		}
+	case "conflict":
+		if rec.Fields["status"] == "open" &&
+			(compact(rec.Fields["title"]) != "" || compact(rec.Fields["id"]) != "") {
+			return 5
+		}
+	}
+	return 0
+}
+
 func formatRITrace(rec riindex.Record) string {
 	switch rec.Kind {
 	case "pressure":

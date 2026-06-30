@@ -24,29 +24,59 @@ type mergedMemory struct {
 }
 
 func (m mergedMemory) Recall(n int) []string {
-	if n <= 0 || len(m.sources) == 0 {
-		return nil
+	out, _ := m.selectTraces(n)
+	return out
+}
+
+func (m mergedMemory) FieldPressureScore(n int) int {
+	_, selected := m.selectTraces(n)
+	score := 0
+	for _, src := range selected {
+		if src.used <= 0 {
+			continue
+		}
+		if scorer, ok := src.memory.(PressureMemory); ok {
+			score += scorer.FieldPressureScore(src.used)
+			continue
+		}
+		for _, trace := range src.traces[:src.used] {
+			score += tracePressureScore(trace)
+		}
 	}
-	lists := make([][]string, 0, len(m.sources))
+	return score
+}
+
+type selectedMemorySource struct {
+	memory Memory
+	traces []string
+	used   int
+}
+
+func (m mergedMemory) selectTraces(n int) ([]string, []selectedMemorySource) {
+	if n <= 0 || len(m.sources) == 0 {
+		return nil, nil
+	}
+	sources := make([]selectedMemorySource, 0, len(m.sources))
 	for _, src := range m.sources {
 		if src == nil {
 			continue
 		}
 		if got := src.Recall(n); len(got) > 0 {
-			lists = append(lists, got)
+			sources = append(sources, selectedMemorySource{memory: src, traces: got})
 		}
 	}
-	if len(lists) == 0 {
-		return nil
+	if len(sources) == 0 {
+		return nil, nil
 	}
 	out := make([]string, 0, n)
 	for i := 0; len(out) < n; i++ {
 		advanced := false
-		for _, list := range lists {
-			if i >= len(list) {
+		for idx := range sources {
+			if i >= len(sources[idx].traces) {
 				continue
 			}
-			out = append(out, list[i])
+			out = append(out, sources[idx].traces[i])
+			sources[idx].used++
 			advanced = true
 			if len(out) >= n {
 				break
@@ -56,5 +86,5 @@ func (m mergedMemory) Recall(n int) []string {
 			break
 		}
 	}
-	return out
+	return out, sources
 }
