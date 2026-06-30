@@ -368,9 +368,9 @@ func printMemoryPreview(mem innerworld.Memory, n int) {
 	for i, p := range traces {
 		fmt.Printf("  memory %d | %s\n", i, p)
 	}
-	if pressure, ok := innerworld.FieldPressureForMemory(traces); ok {
-		fmt.Printf("=== memory field pressure: prophecy=%d velocity=%s step=%.2f ===\n",
-			pressure.Prophecy, pressure.Velocity, pressure.Step)
+	if pressure, ok := innerworld.FieldPressureFromMemory(mem, n); ok {
+		fmt.Printf("=== memory field pressure: score=%d prophecy=%d velocity=%s step=%.2f ===\n",
+			pressure.Score, pressure.Prophecy, pressure.Velocity, pressure.Step)
 	}
 }
 
