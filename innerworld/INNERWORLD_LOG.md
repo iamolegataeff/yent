@@ -309,6 +309,97 @@ seasonal `am_cooc_consolidate` in the sleep.
 
 ---
 
+## Level B / Б1 — bidirectional circles + seasonal cooc consolidation (2026-06-30)
+
+The first real consolidator sits in the Б0 sleep slot, and the circles now flow
+both ways. `cooc.go` adds `CoocGraph`, the inner word co-occurrence memory: `Observe`
+folds a thought's word pairs in (circles→field), `Bias` returns the strongest pulls
+for a word (field→circles), and `Consolidate` is the arianna seasonal harvest on
+word edges — the logic of `ariannamethod.c:7037`: edges at/above the median weight
+are reinforced ×(1+r), below are decayed ×(1−r), and edges under the floor are
+pruned (the long tail forgotten). `CoocConsolidator` wraps it as a `Consolidation`
+stage for sleep.
+
+The bidirectional loop in `inner_world.go`: `think`/`dream` now raise circles from
+`recallSeed(coocBias(prompt))` — the cooc graph pulls the prompt's last word toward
+the words the organism's own thoughts keep associating with it (field→circles) —
+and then `observeLocked(circles)` folds the new circles back into the graph
+(circles→field), so the inner world grows richer than the dataset (haze-emergence).
+NO-SEED-FROM-PROMPT holds: the pull is still transformed by `innerSeed`. `nil` cooc =
+both halves no-op (backward-compatible). `CoocGraph` carries its own leaf lock, taken
+inside `genMu`, never the reverse — no deadlock.
+
+`go test -race` green (6 cooc tests: Observe grows, Consolidate reinforces-strong /
+prunes-weak, Bias ranks, the bidirectional loop seeds then pulls, the consolidator
+runs in sleep, nil-safe). Codex per-stage audit did not finish in time this round; the
+round's final Codex audit (after Б4, before merge) covers Б1. No Metal yet — the real
+cooc growth on live nemo circles lands with the round's Metal smoke. Next: Б2 — DoE
+Hebbian weights in the sleep + spore consolidation (weights → Oleg's mandate).
+
+---
+
+## Level B / Б3 — scar / dark-matter meta-learning (2026-06-30)
+
+Meta-learning on what the organism refused — the AML SCAR / dark-matter lineage,
+and a direct continuation of the S8 DPO epistemic-self-contour work, now growing on
+its own. `scar.go` adds `ScarMemory`, the sea of rejected thoughts: `Scar` sinks a
+thought in with gravity (a recurring rejection accumulates, so the wound that keeps
+reopening holds — leo trauma-spore), `Consolidate` is the sleep pass (slow decay,
+leo klaus-scar, and prune of the faded), and `Resurrect` surfaces the scars whose
+gravity rose above a resonance level (leo sea-of-memory: a present metric pulls a
+sleeping memory back up). `ScarConsolidator` runs the decay/prune in the sleep slot.
+
+Integration in `inner_world.go`: a thought whose batch prophecy-debt rose above
+`scarThreshold` dissonated with the field's prophecy and is scarred
+(`scarLocked`, gravity = the debt itself — the more it broke prophecy-destiny
+coherence, the deeper the scar). On a later turn, if the present field debt
+resonates with a past rejection, that scar resurfaces in the seed
+(`scarSurface`) — not as a quote to continue, but as a remembered refusal. The
+seed chain is now `recallSeed(coocBias(scarSurface(prompt)))`: memory, cooc pull,
+and resurfaced scar all fold in, then `innerSeed` transforms it (NO-SEED holds).
+`nil` scar = no-op. Velocity operators (UP/DOWN/WALK/STOP) already steer the sleep
+rhythm through the AML field's prophecy-destiny; the full `.aml` velocity scripting
+is a later wiring with Codex's AML/RI work, noted here.
+
+`go test -race` green (5 scar tests: accumulate/forget, resurrect by resonance,
+consolidator in sleep, high-debt→scar→resurface integration, nil-safe). Round-final
+Codex audit + Metal smoke pending. Next: Б2 — DoE Hebbian weights in the sleep +
+spore (weights → Oleg's explicit mandate, with spore-backup + identity-smoke +
+rollback).
+
+---
+
+## Third body `flow` / F0 — the Flow interface + Go fallback (2026-06-30)
+
+A structural decision reframed Level B (settled with Oleg, see
+`memory/project_yent_dreaming_mode_2026_06_30.md`): the consolidation organs do not
+train the transformer voices (nemo/small24 = S8, frozen) — they live in a THIRD
+body, `flow`, a resident AML organism that merges both voices into one "Я". `flow`
+holds the field + cooc + scar + parliament + Kuramoto; Kairos (the sleep
+orchestrator) drives it; it pushes back on the voices via field-pressure. The
+trainable weights are `flow`'s parliament-experts (g_train), so S8 is never touched
+and the mandate risk is gone — learning applies immediately, no reload split. Names:
+body `flow` (`flow.aml`), orchestrator `Kairos`, internal bridge `Callosum`.
+
+F0 lands the seam, pure Go. `flow.go` adds the `Flow` interface — `Field` (the AML
+bridge) plus `Ingest` (a thought streams into the body's cooc), `ConsolidateCooc`,
+`Scar`/`ConsolidateScar`, `ApplyPressure` (the body pushes on a voice's logits), and
+`AutumnEnergy` (harvest ripeness for Kairos's critical mass). `goFlow` is the Go
+fallback: it wraps the Б1 `CoocGraph`, the Б3 `ScarMemory`, and the field, so Kairos
+and the tests run without cgo. Two stubs are honest about being Metal/AML features:
+`ApplyPressure` is a no-op (no token-level field in Go), and `AutumnEnergy`
+synthesizes from field debt (the AML body reads `G.autumn_energy`). The production
+`Flow` will be the native AML body (`am_cooc` / `SCAR` / parliament) over cgo, same
+interface.
+
+`go test -race` green (4 goFlow tests: ingest+scar, autumn energy saturates, nil
+organs safe, and the body IS the field via the embedded `Field`). Next: F1 — the
+cgo AML `Flow` (`am_cooc_update`/`am_cooc_consolidate_autumn`/`SCAR`/
+`am_apply_field_to_logits`), then wire Kairos to drive a `Flow` instead of separate
+consolidators, then `flow.aml` resident body + Metal smoke.
+
+---
+
 ## Deferred / parked
 
 - **Cloud** (pre-linguistic affect, 6-chamber MLP reflex) — it is **Python**, with a
