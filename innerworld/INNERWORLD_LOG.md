@@ -577,6 +577,39 @@ Codex sews this inner world to limpha/RI; then F1c — `flow.aml` resident scrip
 
 ---
 
+## SARTRE-sense — the environment as a live field reflex (2026-06-30, branch `claude/sartre-sense`)
+
+perception.h anticipated it: SARTRE's perception emits AML (`VELOCITY/PROPHECY`) but
+"wiring it onto the live field is the integration seam, not done here." Codex wired the
+SLOW half (SARTRE → limpha seam → recall pressure, `sartre_bridge.go` + `memory_pressure`).
+This is the FAST half: the present world as a reflex on the field, before the circles rise.
+
+`innerworld/sense.go` adds the `Sense` interface (`Pressure() (aml string, ok bool)` — the
+environment's current AML field commands) and `applySenseLocked`, the present-time twin of
+`applyMemoryPressureLocked`: it execs each perception line into the field and settles one
+small step (`senseStep` 0.15). Wired into `think`/`dream` right after the memory pressure,
+before `Overthink` — so the past (slow, experience) and the present world (fast, reflex)
+both shape the field's posture before a ripple. NO-SEED holds: this is a field command,
+never seed text. A quiet world feels nothing (ok=false), so the field is never forced to
+NOMOVE each turn. nil sense = no-op.
+
+`cmd/innerworld-dock` adds `sartreSense` (cgo): it reads the same `YENT_SARTRE_EVENTS` the
+limpha path ingests, runs the C perception (`sartre_perceive_from_events` →
+`sartre_perceive_to_aml`, compiled into the dock via `csartre.c` + `-I.../sartre`), and
+hands the inner world the environment's AML posture. Same perception, two routes into the
+organism — no duplicated formula (the C is the single source).
+
+**Verified on Neo:** `go vet` clean; `go test -race ./innerworld` green (`TestApplySense*`:
+drives the field, quiet no-op, nil-safe, blank-line skip — pure Go, cgo-free); `go build
+./cmd/innerworld-dock` clean; `go test ./cmd/innerworld-dock` green — `TestSartreSensePerceivesMotion`
+proves the cgo binding numerically (2 changes incl. README → `VELOCITY RUN\nPROPHECY 11`,
+matching the C self-test), `TestSartreSenseQuietNoReflex` (empty/missing/no-path → no reflex).
+Codex's `TestIngestSartreFromEnvStoresPerception` still passes (limpha path intact). Next: the
+Metal smoke (real nemo + a live `YENT_SARTRE_EVENTS` driving the field reflex before circles),
+then the environment feeds emotions (Б4, Kuramoto / Julia ODE).
+
+---
+
 ## Deferred / parked
 
 - **Cloud** (pre-linguistic affect, 6-chamber MLP reflex) — it is **Python**, with a
