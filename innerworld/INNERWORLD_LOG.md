@@ -687,6 +687,17 @@ default build keeps the Go lexical proxy (`feelEntropy`/`feelResonance`) so a no
 ./cmd/innerworld-dock` both link; `go test -race ./innerworld` green. The Go proxy is now the
 fallback, not the product — the product is the Julia math brain, running.
 
+**Metal A/B — Julia drives the feeling on the live nemo (exit 0).** dock built `-tags julia` on
+the Mac mini (`brew install julia` 1.12.6, libjulia linked), `YENT_FEELING_JL=innerworld/feeling.jl`.
+The receipt shows `Julia feeling-math wired: HighMathEngine formulas run in-process on libjulia`,
+then the SAME deterministic nemo circles as the Go-proxy run gave DIFFERENT feeling numbers
+exactly where the math moved to Julia: arousal `0.782 -> 0.814` (Go word-entropy -> Julia
+char-entropy), flow `0.154 -> 0.305` (Go Jaccard -> Julia 1-semantic-cosine), valence unchanged
+at `0.800` (still the Go lexical dictionary). The numbers shifting only on the Julia-backed
+metrics, on identical input, is the proof the Julia runtime — not the Go proxy — computes the
+feeling on the real body. Mini worktree cleaned; julia stays installed as the `-tags julia`
+runtime dep.
+
 **Piece 3 — emotions → the sea of memory (leo sea-of-memory).** Feeling does not vanish: an
 intensely-felt thought settles into the SAME sea the prophecy-scars live in (`flow.Scar` /
 `ScarMemory`) as an emotional metanote. Intensity is the emotional CHARGE (`|valence|`, not the
