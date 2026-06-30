@@ -141,10 +141,18 @@ func (iw *InnerWorld) SetScar(sea *ScarMemory, debtThreshold float32) {
 // The gravity is the debt itself: the more the thought broke prophecy-destiny
 // coherence, the deeper the scar. Caller holds genMu.
 func (iw *InnerWorld) scarLocked(circles []Circle, debt float32) {
-	if iw.scar == nil || len(circles) == 0 || debt <= iw.scarThreshold {
+	if len(circles) == 0 || debt <= iw.scarThreshold {
 		return
 	}
-	iw.scar.Scar(circles[len(circles)-1].Text, debt)
+	text := circles[len(circles)-1].Text
+	if iw.flow != nil {
+		iw.flow.Scar(text, debt) // native gravitational memory: the SCAR operator
+		return
+	}
+	if iw.scar == nil {
+		return
+	}
+	iw.scar.Scar(text, debt)
 }
 
 // scarSurface lets a scar resurrect into the next seed when the present field debt
@@ -153,10 +161,13 @@ func (iw *InnerWorld) scarLocked(circles []Circle, debt float32) {
 // surfaced scar — meta-learning on what the organism refused. No scar / no resonance
 // = unchanged. NO-SEED-FROM-PROMPT holds (still transformed by innerSeed).
 func (iw *InnerWorld) scarSurface(prompt string) string {
-	if iw.scar == nil {
-		return prompt
+	var risen []string
+	switch {
+	case iw.flow != nil:
+		risen = iw.flow.ResurfaceScars(iw.fieldDebt(), 2) // native scar sea
+	case iw.scar != nil:
+		risen = iw.scar.Resurrect(iw.fieldDebt(), 2)
 	}
-	risen := iw.scar.Resurrect(iw.fieldDebt(), 2)
 	if len(risen) == 0 {
 		return prompt
 	}

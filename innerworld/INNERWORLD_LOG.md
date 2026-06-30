@@ -400,6 +400,144 @@ consolidators, then `flow.aml` resident body + Metal smoke.
 
 ---
 
+## Third body `flow` / F1a — the native AML body over real libamk.a (2026-06-30)
+
+F0 was the pure-Go `Flow` seam; F1a is the production body behind it. `innerworld/aml`
+(package `aml`, cgo over `libamk.a`) adds `aml.Body`, a drop-in `innerworld.Flow` whose
+organs are the AML field's own — not a Go re-implementation. The mapping, each over a
+real `am_*` call (grounded first-hand in `yent/c/ariannamethod.{c,h}`, not recall):
+
+- `Ingest(text)` → tokenize (injected `Tokenizer`, production = the voices' own BPE) →
+  `am_ingest_tokens`, which folds distance-weighted cooc edges `1/|i-j|`, windowed ±5
+  (`ariannamethod.c:6988`). The IN stream — circles and deep answers grow the field's
+  own memory richer than the dataset (haze-emergence).
+- `ConsolidateCooc()` → `am_cooc_consolidate_autumn` — the seasonal harvest, but
+  PHYSICS-GATED: it fires only in deep autumn (`season==AUTUMN && autumn_energy>0.6`,
+  `:7082`). Returns edges pruned, or 0 off-season. Consolidation follows the field's
+  coherence into autumn, not the clock.
+- `Scar(text,gravity)` → the `SCAR` operator (`:3834`) deposits a rejected thought into
+  gravitational memory; `gravity<=0`/empty ignored (matching goFlow); quote/backslash
+  stripped so the one-line script parses, capped at the field's 63-char slot.
+- `ConsolidateScar()` → honestly inert, returns 0, documented in full: this AML build
+  has NO discrete scar-prune. Deposited scars accumulate, and `dark_gravity`
+  consolidates them CONTINUOUSLY in `am_step`'s autumn physics
+  (`dark_gravity += autumn_energy*0.002*dt`, `:8063`), riding the field step the
+  orchestrator drives. goFlow models per-scar decay (leo klaus-scar) because it has no
+  field to step; the native body defers to the field's dark-matter physics. Not a stub
+  hiding work — a real mechanism difference, named.
+- `ApplyPressure(logits)` → `am_apply_field_to_logits` (`:7132`): gamma + Hebbian
+  H-term + destiny + suffering + attention + laws tilt the vector in place. The OUT
+  influence, the body shaping the next token a voice emits.
+- `AutumnEnergy()` → `autumn_energy` (`:233`), the real season Kairos reads for
+  critical mass (goFlow can only synthesize one from debt).
+
+Plus telemetry for observers/smoke: `CoocStats`/`DarkGravity`/`Scars`/`Season`. `Init`
+is the explicit once-at-start `am_init` (hard reset), kept off `New` so a host that
+already drives `am_init` (the dock) is never reset under it. One process = one global
+AML field; every `am_*` is one shared physics, so the body IS the field plus organs.
+
+The field is pure C / CPU — `libamk.a` builds and runs on Neo (lean
+`-DAM_BLOOD_DISABLED -DAM_ASYNC_DISABLED`), so F1a is verified OFF the Mac mini. Only
+the doe model voices need Metal; the native Flow does not.
+
+**Verified on Neo (`go test ./innerworld/aml`, `cmd/flow-smoke`, real libamk.a):**
+`go vet` + tests green (ingest grows cooc; scar deposits and ignores empty/non-positive
+gravity and parses quoted text; the harvest is gated off-season and forgets the weak
+long tail in autumn; dark gravity grows in autumn; ApplyPressure is empty-safe). The
+pure-Go `innerworld` package stays cgo-free and races clean (`go test -race ./innerworld`).
+flow-smoke output: ingest `cooc mean=0.6554`; off-season harvest `pruned=0` (gated,
+season=0); autumn `energy=0.613 pruned=42  cooc mean 0.6554->0.8117  dark_gravity
+0.5000->0.5133`; pressure `tilted 256/256 logits`. Honest finding, run-to-ground not
+silenced: the first smoke moved 0/16 logits — the Hebbian H-term only reaches
+`logits[dst]` for cooc dst id `< len` (`am_apply_hebbian_to_logits`), and the 16-float
+vector did not span the cooc id space; sizing the vector to the id space showed the real
+tilt (not a field bug, a smoke-vector bug, fixed).
+
+Next: F1b — point Kairos at a `Flow` (a `FlowConsolidator` replacing the separate
+cooc/scar consolidators; Ingest the circles/deep answers; ApplyPressure on the voices),
+then `flow.aml` resident body + persist `flow.soma`, then the Metal smoke with the real
+nemo/small24 voices over the native body. Round-final Codex audit + Metal pending.
+
+---
+
+## Third body `flow` / F1b-core — one AML physics for the whole inner world (2026-06-30)
+
+The decision (Oleg, settled): the inner world runs over ONE AML physics, the native
+`aml.Body`, as the single cooc + scar + field organ — no parallel Go cooc/scar. F1b-core
+lands that unification, fully on Neo (the field is pure C/CPU; the Metal dock wiring with
+the real voices is F1b-dock, next).
+
+The `Flow` interface grew the two seed-level OUT pulls, so the native body is a true
+superset of the Go organs, not a regression — the bidirectional haze loop stays alive at
+seed level now, with the logit channel landing later via Codex's doe-side seam:
+- `BiasWords(seed,n)` — the field->circles cooc pull. Native: encode the seed, scan the
+  field's own cooc graph (`am_get_state` `cooc_src/dst/cnt`, both `AM_State` fields) for
+  the last token's heaviest neighbours, decode them back to words. goFlow delegates to
+  `CoocGraph.Bias`. One physics — the pull is the field's token co-occurrence, not a Go
+  approximation.
+- `ResurfaceScars(resonance,n)` — the scar sea surfacing what was refused. Native: read
+  `scar_texts[]` from `AM_State`, gated by the field-level `dark_gravity` (the native body
+  has no per-scar gravity to threshold; the goFlow form does — named difference). goFlow
+  delegates to `ScarMemory.Resurrect`.
+
+`FlowConsolidator` is the form-A sleep stage: ONE consolidator running the field's own
+`ConsolidateCooc` (autumn cooc harvest) + `ConsolidateScar`, replacing the separate Go
+cooc/scar stages. `InnerWorld` gains `flow Flow` + `SetFlow` + `SetScarThreshold`; when a
+flow is set it takes precedence — `observeLocked`→`flow.Ingest`, `coocBias`→`flow.BiasWords`,
+`scarLocked`→`flow.Scar`, `scarSurface`→`flow.ResurfaceScars`. The Go-organ path
+(SetCooc/SetScar, no flow) is untouched, so every prior test stays green.
+
+**Verified on Neo (`go vet`, `go test -race ./innerworld`, `go test ./innerworld/aml`):**
+all green. The pure-Go `innerworld` package stays cgo-free and races clean (Go-organ path
+intact). Native: BiasWords pulls cooc neighbours / nil-tokenizer-safe; ResurfaceScars reads
+the native sea newest-first / empty-when-none. **Integration — the real `InnerWorld` over
+the native `aml.Body` as BOTH field and Flow (one physics) + a stub voice:** a human turn
+raised circles, grew the field's own cooc (`CoocStats>0`), drove the field to
+`debt=2.005 destiny=0.350`, and the high-debt thought scarred natively (`scars=1`) — through
+the actual `think`/`observeLocked`/`scarLocked` code paths, not a direct call. A second test:
+circles ingest → scar deposit → `driveAutumn` → `FlowConsolidator` harvest → the scar
+resurfaces from the native sea. flow-smoke unchanged after the `Tokenizer.Decode` addition;
+`cmd/innerworld-dock` still builds.
+
+Next: F1b-dock — rewire `cmd/innerworld-dock` to construct the `aml.Body` (Init + a
+tokenizer from `YENT_NEMO_GGUF`) and pass it as field+flow + `SetFlow` + a
+`FlowConsolidator` + an autumn `SleepTrigger`, retiring the dock's inline `amkField`; then
+the Mac-mini Metal smoke with the real nemo/small24 voices ingesting into the native cooc,
+scarring, and the sleep harvest firing on critical mass. Round-final Codex audit + Metal
+pending.
+
+---
+
+## Third body `flow` / F1b-dock — the native body wired into the Metal dock (2026-06-30)
+
+`cmd/innerworld-dock` now runs the inner world over the native `aml.Body` as the one
+physics, retiring the inline `amkField`. `aml.Init()` replaces `C.am_init()`; the body is
+built with the fast voice's BPE (`buildDockTokenizer` loads nemo's GGUF metadata so the
+native cooc shares the voice's token ids), passed as BOTH the field and the Flow
+(`NewInnerWorld(.., flowBody, ..)` + `SetFlow(flowBody)`), with `SetScarThreshold`
+(`YENT_SCAR_THRESHOLD`, default 0.5), one `FlowConsolidator` in the sleep slot, and an
+autumn `SleepTrigger` (`AutumnEnergy() > 0.6` — critical mass). The dock keeps its cgo
+block only for `am_get_state()` telemetry (the same global state the body drives). A
+`SetOnSleep` observer prints each consolidation stage with cooc stats; `YENT_DOCK_FORCE_
+AUTUMN=1` drives the field into deep autumn so the sleep harvest is provable in one run
+(mirrors `YENT_DOCK_FORCE_GATE`).
+
+**Build-verified on Neo:** `go vet ./...` clean, `go build ./...` clean (the rewired dock
+compiles; `sync`/`unsafe` dropped with `amkField`), full test sweep green. The Metal smoke
+with the real nemo/small24 voices (circles ingesting into the native cooc, scarring, the
+sleep harvest firing under `FORCE_AUTUMN`) is the remaining tool-confirmation — it needs
+the Mac mini (`ssh ariannamethod@100.77.243.67`, `doe_field` + GGUF in `~/oyent_gguf`) and
+should be coordinated so it does not collide with Codex's runtime work there. Run:
+`YENT_DOE_BIN=… YENT_NEMO_GGUF=… YENT_24B_GGUF=… YENT_LIMPHA_DB=… YENT_DOCK_FORCE_GATE=1
+YENT_DOCK_FORCE_AUTUMN=1 YENT_DOCK_MAX_DREAMS=1 go run ./cmd/innerworld-dock`.
+
+That closes F1 (native AML Flow body, wired): F1a body + F1b-core unification + F1b-dock
+wiring. Next: the Metal smoke (milestone tool-run), then F1c — `flow.aml` resident script
+(am_exec the .aml on init, persist `flow.soma`) + Kairos's `.aml` velocity-rhythm. Codex
+then sews this inner world to limpha/RI. Round-final Codex audit pending.
+
+---
+
 ## Deferred / parked
 
 - **Cloud** (pre-linguistic affect, 6-chamber MLP reflex) — it is **Python**, with a
