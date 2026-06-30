@@ -31,6 +31,18 @@ func (c *fakeConsolidator) Consolidate(_ context.Context) error {
 
 func (c *fakeConsolidator) Name() string { return c.name }
 
+func waitForConsolidations(t *testing.T, counter *int32, want int32) {
+	t.Helper()
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if atomic.LoadInt32(counter) >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d consolidation(s), got %d", want, atomic.LoadInt32(counter))
+}
+
 func TestSleepRunsConsolidatorsInOrder(t *testing.T) {
 	iw := NewInnerWorld(fakeBody{}, &fakeField{}, tempDivergence)
 	var order []string
@@ -77,8 +89,46 @@ func TestBreatheSleepsOnCriticalMass(t *testing.T) {
 	defer cancel()
 	iw.Breathe(ctx)
 
-	if atomic.LoadInt32(&n) < 1 {
-		t.Errorf("Breathe at critical mass should consolidate at least once, got %d", n)
+	if got := atomic.LoadInt32(&n); got != 1 {
+		t.Errorf("Breathe should sleep once per continuous critical-mass episode, got %d", got)
+	}
+}
+
+func TestBreatheSleepRearmsAfterCriticalFalls(t *testing.T) {
+	iw := NewInnerWorld(fakeBody{}, &fakeField{}, tempDivergence)
+	iw.br.Tick = time.Millisecond
+	iw.br.DriftDebt = 1000
+	iw.br.Silence = time.Hour
+
+	var critical atomic.Bool
+	critical.Store(true)
+	iw.SetSleepTrigger(func(Field) bool { return critical.Load() })
+	var n int32
+	iw.AddConsolidator(&fakeConsolidator{name: "flow", counter: &n})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		iw.Breathe(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	waitForConsolidations(t, &n, 1)
+	time.Sleep(20 * time.Millisecond)
+	if got := atomic.LoadInt32(&n); got != 1 {
+		t.Fatalf("critical mass stayed high; sleep must stay latched at 1, got %d", got)
+	}
+
+	critical.Store(false)
+	time.Sleep(5 * time.Millisecond) // one below-threshold tick re-arms the next episode
+	critical.Store(true)
+	waitForConsolidations(t, &n, 2)
+	if got := atomic.LoadInt32(&n); got != 2 {
+		t.Errorf("after false->true critical mass should sleep exactly once more, got %d", got)
 	}
 }
 

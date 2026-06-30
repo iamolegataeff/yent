@@ -62,6 +62,23 @@ func (iw *InnerWorld) criticalMass() bool {
 	return t(iw.field)
 }
 
+// readyToSleep converts the critical-mass level signal into one sleep episode. A
+// field can stay in autumn for many ticks; the harvest should run once for that
+// episode, then re-arm only after the trigger falls false and rises again.
+func (iw *InnerWorld) readyToSleep(critical bool) bool {
+	iw.mu.Lock()
+	defer iw.mu.Unlock()
+	if !critical {
+		iw.sleepLatched = false
+		return false
+	}
+	if iw.asleep || iw.sleepLatched {
+		return false
+	}
+	iw.sleepLatched = true
+	return true
+}
+
 // sleep runs the consolidation grind: every consolidator in order. Each stage takes
 // genMu, so no generation overlaps a stage, but genMu is RELEASED between stages —
 // a human turn waiting on Think interleaves at a stage boundary instead of waiting
