@@ -161,12 +161,18 @@ func (iw *InnerWorld) scarLocked(circles []Circle, debt float32) {
 // surfaced scar — meta-learning on what the organism refused. No scar / no resonance
 // = unchanged. NO-SEED-FROM-PROMPT holds (still transformed by innerSeed).
 func (iw *InnerWorld) scarSurface(prompt string) string {
+	// Resonance pulls scars up by the field's prophecy-debt OR the organism's present
+	// emotional intensity — a strong feeling now resurfaces past intense feelings too.
+	resonance := iw.fieldDebt()
+	if iw.feelIntensity > resonance {
+		resonance = iw.feelIntensity
+	}
 	var risen []string
 	switch {
 	case iw.flow != nil:
-		risen = iw.flow.ResurfaceScars(iw.fieldDebt(), 2) // native scar sea
+		risen = iw.flow.ResurfaceScars(resonance, 2) // native scar sea
 	case iw.scar != nil:
-		risen = iw.scar.Resurrect(iw.fieldDebt(), 2)
+		risen = iw.scar.Resurrect(resonance, 2)
 	}
 	if len(risen) == 0 {
 		return prompt

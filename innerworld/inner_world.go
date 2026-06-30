@@ -77,6 +77,7 @@ type InnerWorld struct {
 
 	scarThreshold float32 // prophecy-debt above which a thought is scarred (rejected by the field)
 	feelEnabled   bool    // High brain: when on, the circles' emotional valence drives the affect axis
+	feelIntensity float32 // last turn's emotional intensity (guarded by genMu); pulls up resonant scars
 
 	genMu        sync.Mutex // one inner voice at a time: serializes Overthink + deep self-answer (body access)
 	deepResident bool       // guarded by genMu: the deep body is the currently-resident one (single-resident swap)

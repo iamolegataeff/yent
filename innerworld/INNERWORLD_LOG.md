@@ -684,7 +684,31 @@ asserts Go `feelEntropy("a a b c") == 1.039721` (the Julia number) — the embed
 verified equal to Julia, with no Julia runtime on the nodes. `go test -race ./innerworld` green;
 `build ./...` clean. (Julia stays installed on Neo as the dev oracle, not a runtime dep.)
 
-Next: piece 3 — emotions decay → scar-sea (leo sea-of-memory). Then the Metal smoke of all of Б4.
+**Piece 3 — emotions → the sea of memory (leo sea-of-memory).** Feeling does not vanish: an
+intensely-felt thought settles into the SAME sea the prophecy-scars live in (`flow.Scar` /
+`ScarMemory`) as an emotional metanote. Intensity is the emotional CHARGE (`|valence|`, not the
+thought's entropy — a busy but neutral thought stirs no lasting feeling; that was a real bug
+caught by `TestFeelScarMildDoesNotSettle` and fixed). A wound (negative valence) sinks with
+×1.5 gravity — it holds longer than a joy of equal intensity (leo trauma-spore). The existing
+sleep `Consolidate` decays/prunes it; `scarSurface` now resurfaces by resonance =
+`max(fieldDebt, feelIntensity)`, so a strong present feeling pulls up past intense feelings
+(`feelScarLocked` + `feelIntensity` on the InnerWorld). `go test -race ./innerworld` green
+(sinks-intense, trauma-heavier-than-joy, mild-no-settle, resurrect-by-feeling). That closes the
+Б4 arc: environment (SARTRE) → feeling (High/Julia-math) → affect axis + sea → resurrect.
+
+**Metal smoke — Б4 alive on the real nemo voice (exit 0).** dock on the Mac mini, real
+nemo12, `YENT_FEELING_AML=innerworld/feeling.aml`. The receipt: `High brain wired` +
+`emotional constitution loaded: feeling.aml` (the first `.aml` module, loaded on Metal),
+then three real circles (warm existential irony — "brilliant", "beautiful", "cozy") drove
+`feeling: valence=0.800 arousal=0.782 | warmth=0.800 pain=0.000 flow=0.154 tension=0.000 |
+scars(sea)=2`. The High brain read the circles' lean (valence 0.800 → WARMTH 0.800, the LOVE
+pole), the entropy-arousal (0.782, the Julia-proven math), the resonance (flow 0.154), and the
+feeling settled into the sea — `scars=2` (one prophecy-scar from debt 2.005, one emotion-scar
+from |valence| 0.800 — the same intense+dissonant thought, two reasons). valence/arousal are
+now live field metrics (the SARTRE-feed source). Honest: the circles happened to lean positive
+(the lexical map caught "brilliant/beautiful"); a darker prompt would pain instead. By the tool:
+the Б4 arc is alive end to end on real Metal — environment(SARTRE)→feeling(High/Julia-math)→
+affect axis + sea→resurrect. Mini worktree cleaned. Next: Codex sews it to limpha/RI.
 
 ---
 

@@ -183,4 +183,45 @@ func (iw *InnerWorld) highFeelLocked(circles []Circle) {
 		_ = iw.field.Exec(fmt.Sprintf("PAIN %.3f", -v))
 		_ = iw.field.Exec(fmt.Sprintf("TENSION %.3f", arousal))
 	}
+
+	// Emotion sinks into the sea of memory: an intensely-FELT thought becomes a metanote
+	// that decays and can resurface (leo sea-of-memory). Intensity is the emotional charge
+	// (|valence|) — how strongly the thought leans, not how chaotic it is (a busy but
+	// neutral thought stirs no lasting feeling). Record it so the next turn's resurrect
+	// resonates with how strongly the organism feels right now.
+	intensity := absf(v)
+	iw.feelIntensity = intensity
+	iw.feelScarLocked(last, v, intensity)
+}
+
+func absf(x float32) float32 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// feelScarThreshold: only an intensely-felt thought settles into the sea as an emotional
+// metanote; a passing mild feeling does not.
+const feelScarThreshold = 0.45
+
+// feelScarLocked sinks an intensely-felt thought into the same sea the prophecy-scars live
+// in — emotion becoming a metanote (leo: emotions decay into the sea of memory). A wound
+// (negative valence) holds longer than a joy of equal intensity (leo trauma-spore), so it
+// sinks with heavier gravity. Caller holds genMu.
+func (iw *InnerWorld) feelScarLocked(text string, valence, intensity float32) {
+	if intensity < feelScarThreshold || strings.TrimSpace(text) == "" {
+		return
+	}
+	gravity := intensity
+	if valence < 0 {
+		gravity *= 1.5 // a wound holds longer than a joy of equal intensity
+	}
+	if iw.flow != nil {
+		iw.flow.Scar(text, gravity)
+		return
+	}
+	if iw.scar != nil {
+		iw.scar.Scar(text, gravity)
+	}
 }
