@@ -652,9 +652,26 @@ Julia math on nicole2julia is piece 2). The dock enables the brain and loads
 **Verified on Neo:** `go vet`/`go build ./...` clean; `go test -race ./innerworld` green
 (`TestFeelTextLean`, `TestHighFeelWarmsOnPositive`/`PainsOnNegative`, disabled/flat no-ops);
 the WARMTH/FLOW operator smoke (PASS) and the `feeling.aml` load smoke (`am_exec_file` rc=0,
-warmth=0.200 flow=0.200) over real libamk; dock builds + its cgo tests pass. Next: piece 2 —
-the Julia math brain (entropy/resonance/perplexity on `nicole2julia`) as the backend; piece 3
-— emotions decay → scar-sea (leo sea-of-memory). Then the Metal smoke.
+warmth=0.200 flow=0.200) over real libamk; dock builds + its cgo tests pass.
+
+**SARTRE-feed (the reciprocal bridge, my half).** The SARTRE metric-hub
+(`SartreSystemState`, `sartre/sartre_kernel.h:192-197`) mirrors the inner world —
+`valence/arousal/coherence/trauma/prophecy_debt` — and has a setter
+`sartre_update_inner_state(...)`, but it sat on stub values: `valence/arousal` live nowhere
+the hub could read them. A direct cgo call was the wrong seam — `sartre_kernel.c` is a
+separate PROCESS (`main` at `:902`), so its `static sys` is foreign memory. The clean seam is
+the AML field (symmetric to how SARTRE perception reaches me through `sense`): I extended AML
+again — added `VALENCE <v>` (signed, clampf −1..1) + `AROUSAL <v>` (clamp01) operators and the
+two `AM_State` fields (append-only, soma-safe). `highFeelLocked` now publishes `VALENCE/AROUSAL`
+every turn (a live reading, even 0), so the organism's felt valence is field state SARTRE
+reads back via its reverse bridge (its transport). I produce the metric; the SARTRE-Opus
+consumes it — zero file overlap. Smoke: `am_exec("VALENCE -0.7")`→`-0.700`, `("AROUSAL
+0.5")`→`0.500`, clamp `VALENCE 5.0`→`1.000` (PASS). go test -race green. ⚠️ Coordination:
+SARTRE reads `am_get_state().valence/arousal`; canonical `ariannamethod.ai` sync now owes
+WARMTH/FLOW + VALENCE/AROUSAL.
+
+Next: piece 2 — the Julia math brain (entropy/resonance/perplexity on `nicole2julia`) as the
+backend; piece 3 — emotions decay → scar-sea (leo sea-of-memory). Then the Metal smoke.
 
 ---
 

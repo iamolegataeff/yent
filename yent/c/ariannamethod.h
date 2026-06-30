@@ -261,6 +261,8 @@ typedef struct {
   float warmth;      // affiliation / comfort / safe-bonding (LOVE) — the opposite pole of pain
   float flow;        // effortless resonance with the moment (FLOW) — the opposite pole of tension
   float weave;       // pattern-binding, threads cohering into a whole (COMPLEX)
+  float valence;     // emotional lean of the current thought (-1..1), written by the High brain
+  float arousal;     // emotional intensity of the current thought (0..1), written by the High brain
 } AM_State;
 
 // Temporal modes
