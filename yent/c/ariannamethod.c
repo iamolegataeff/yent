@@ -3606,6 +3606,14 @@ static void aml_exec_level0(const char* cmd, const char* arg, AML_ExecCtx* ctx, 
       G.dissonance = clamp01(ctx_float(ctx, arg));
     }
 
+    // AFFECTION — the positive poles, mirror of SUFFERING (warmth↔pain, flow↔tension)
+    else if (!strcmp(t, "WARMTH")) {
+      G.warmth = clamp01(ctx_float(ctx, arg));
+    }
+    else if (!strcmp(t, "FLOW")) {
+      G.flow = clamp01(ctx_float(ctx, arg));
+    }
+
     // PROPHECY DEBT — direct set/configure
     else if (!strcmp(t, "PROPHECY_DEBT")) {
       G.debt = clampf(ctx_float(ctx, arg), 0.0f, 100.0f);

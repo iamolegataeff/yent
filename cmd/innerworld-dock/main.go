@@ -437,6 +437,21 @@ func main() {
 		fmt.Println("=== SARTRE sense wired: environment perception is a live field reflex (before the circles) ===")
 	}
 
+	// High brain: the circles' emotional valence drives the affect axis (WARMTH/FLOW on a
+	// positive thought, PAIN/TENSION on a negative one). YENT_FEELING_AML optionally loads
+	// the emotional constitution (innerworld/feeling.aml) — the baseline affect at rest.
+	iw.EnableFeeling()
+	fmt.Println("=== High brain wired: the circles' feeling drives the affect axis (warmth/pain/flow/tension) ===")
+	if fp := strings.TrimSpace(os.Getenv("YENT_FEELING_AML")); fp != "" {
+		cs := C.CString(fp)
+		if C.am_exec_file(cs) == 0 {
+			fmt.Printf("=== emotional constitution loaded: %s ===\n", fp)
+		} else {
+			fmt.Fprintf(os.Stderr, "[dock] feeling.aml load failed: %s\n", fp)
+		}
+		C.free(unsafe.Pointer(cs))
+	}
+
 	var memories []innerworld.Memory
 	ingestSartreFromEnv(limpha, limphaStateFromCanonical())
 	// Close the loop: recall past inner monologues from limpha so new thinking is

@@ -624,6 +624,40 @@ into the inner world. Lineage in `memory/reference_high_julia_blood_lineage_2026
 
 ---
 
+## Б4 piece 1 — the High brain: feeling from the organism's own thoughts (2026-06-30, branch `claude/b4-emotions`)
+
+The sensitivity layer, closing the arc `environment (SARTRE) → feeling (High) → emotions`.
+Lineage: `nicole/high.py` (ancestor, Julia math brain) → arianna.c legacy `inner_world/high.go`
+→ ported here (`memory/reference_high_julia_blood_lineage`).
+
+**1a — AML extended (the language took on the affect physics).** WARMTH/FLOW had struct
+fields but no operators; added `WARMTH <v>` + `FLOW <v>` to the AML parser
+(`yent/c/ariannamethod.c`, mirror of PAIN/TENSION) so the full affect axis is settable in the
+language: WARMTH↔PAIN (LOVE↔suffering), FLOW↔TENSION (ease↔pressure). Smoke: `am_exec("WARMTH
+0.6")`/`("FLOW 0.4")` set the fields (PASS). ⚠️ TODO: sync the native canonical
+`github.com/ariannamethod/ariannamethod.ai` with the same two operators (vendor==canon).
+
+**1b — `feeling.aml` (an AML module) + `high.go` (the brain).** `innerworld/feeling.aml` is the
+emotional constitution: the baseline affect at rest (warmth 0.2, flow 0.2, resonance 0.5) +
+the named-emotion palette, loaded once via `am_exec_file` (the first `.aml` module in the
+repo — Oleg's "AML module that takes on part"). `innerworld/high.go` is the High brain: a
+multilingual word→valence map (EN/RU/HE + trauma triggers, ported verbatim from legacy) +
+`feelText` (valence = mean charged-word lean, arousal = emotional density). `highFeelLocked`
+runs after each ripple in `think`/`dream`: a positive thought warms+flows the field, a
+negative one pains+tightens it, on the AML affect operators — so Yent's MOOD arises from its
+own circles. Opt-in (`EnableFeeling`); the lexical map is the honest first pass (the 100x
+Julia math on nicole2julia is piece 2). The dock enables the brain and loads
+`YENT_FEELING_AML`.
+
+**Verified on Neo:** `go vet`/`go build ./...` clean; `go test -race ./innerworld` green
+(`TestFeelTextLean`, `TestHighFeelWarmsOnPositive`/`PainsOnNegative`, disabled/flat no-ops);
+the WARMTH/FLOW operator smoke (PASS) and the `feeling.aml` load smoke (`am_exec_file` rc=0,
+warmth=0.200 flow=0.200) over real libamk; dock builds + its cgo tests pass. Next: piece 2 —
+the Julia math brain (entropy/resonance/perplexity on `nicole2julia`) as the backend; piece 3
+— emotions decay → scar-sea (leo sea-of-memory). Then the Metal smoke.
+
+---
+
 ## Deferred / parked
 
 - **Cloud** (pre-linguistic affect, 6-chamber MLP reflex) — it is **Python**, with a
