@@ -90,11 +90,11 @@ func (g *CoocGraph) Consolidate(reinforce, pruneFloor float32) int {
 		for dst, w := range row {
 			if w >= median {
 				w *= 1 + reinforce
-				if w > cntCap {
-					w = cntCap
-				}
 			} else {
 				w *= 1 - reinforce
+			}
+			if w > cntCap {
+				w = cntCap // clamp BOTH branches: an already-over-cap edge cannot survive above the cap
 			}
 			if w < pruneFloor {
 				delete(row, dst)
