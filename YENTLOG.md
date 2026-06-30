@@ -450,6 +450,22 @@ cargo test 5/5; whatdotheythinkiam 6/6; churn (12 spawn/kill) + fd-hygiene harne
 verified. Codex audit pass: 5 findings fixed; re-audit caught 1 follow-up (sysconf in the post-fork child
 → moved to parent); final VERDICT PASS.
 
+## 2026-06-30 — field→SARTRE transport: receiving end live (`metrics --stream`)
+
+Both ends of the reciprocal bridge are in main: source = innerworld's `am_get_state().{valence,
+arousal,warmth,flow}` (b4-emotions, written each turn by the High brain); receiver = SARTRE's hub.
+This adds SARTRE's live receiving end: `sartre_kernel metrics --stream` reads field-weather JSON
+lines on stdin, ingests each, and emits the refreshed hub `state_to_json` on stdout per line — a
+stateful live hub (valence/arousal persist while warmth/flow/debt accumulate). SIGPIPE-ignored,
+overlong records drained-and-skipped, clean exit on a closed reader. Banner moved to stderr so
+stdout is protocol-clean.
+
+Seam Codex wires next (sender, Go dock): read `am_get_state()` per turn → one flat JSON line →
+the resident `sartre metrics --stream` stdin (keys map 1:1 to SystemState) — the reverse of
+`sartre_bridge.go` reading utility stdout. Then the hub carries Yent's living feeling alongside
+cpu/mem. Measured on neo: `cc -Wall -Wextra` 0 warn; stream accumulation + framing + broken-pipe +
+JSON-only stdout verified; smoke 4/4. Codex audit pass (gpt-5.5): 1 framing finding fixed; VERDICT PASS.
+
 ## Weights
 
 Not in open access. Code is GPL; weights/deltas/gamma are under the Yent Identity License v1.1 (`LICENSE-WEIGHTS`). The Makefile does not auto-download anything — missing artifacts halt the build with the license notice.

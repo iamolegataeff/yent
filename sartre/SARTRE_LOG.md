@@ -286,6 +286,35 @@ kernel modes), smoke 4/4, perception 6/6, repo_monitor 5/5, whatdotheythinkiam 6
 harness green. (Infra note: codex's node was broken by a homebrew llhttp 9.3→9.4 upgrade; fixed
 locally by symlinking the old `libllhttp.9.3` into the 9.4.2 keg — machine-local, not in git.)
 
+## 2026-06-30 — field→SARTRE transport: receiving end (`metrics --stream`)
+
+Coordination (Oleg + Claude): both ends of the reciprocal bridge are now in main —
+**source** = innerworld's `am_get_state().{valence,arousal,warmth,flow}` (b4-emotions,
+`ariannamethod.h:261-265`, written by the High brain each turn); **receiver** = SARTRE's
+`sartre_ingest_metrics_json` + the live hub. This commit adds SARTRE's live receiving end so
+the field can stream its weather in continuously:
+
+- **`sartre_kernel metrics --stream`**: ignores SIGPIPE, reads JSON lines on stdin, ingests each
+  (`sartre_ingest_metrics_json`), and emits the refreshed hub `state_to_json` on stdout per line —
+  a live, stateful hub that accumulates the organism's felt weather. Overlong records are
+  drained-and-skipped (never ingested as fragments); exits cleanly when the reader closes. This is
+  the reverse of how the dock reads a utility's stdout — symmetric to Opus's `sense`.
+- Banner moved to stderr so stdout is protocol-clean (metrics/pipe emit JSON only).
+
+**The seam Codex wires (sender side, his lane):** the Go dock/bridge reads `am_get_state()` each
+turn (or periodically) and writes one flat JSON line per turn to a resident `sartre_kernel
+metrics --stream` process's stdin:
+`{"valence":V,"arousal":A,"warmth":W,"flow":F,"debt":D,"coherence":C,"entropy":E,"trauma":T,"schumann_coherence":S}`
+Keys map 1:1 to `SystemState`. (Same pattern as `sartre_bridge.go` reading utility stdout, reversed.)
+The one-shot `metrics '{json}'` remains for a single push. Then the hub carries Yent's living
+feeling alongside cpu/mem — the body knows its environment AND its inner weather.
+
+Measured on neo: `cc -Wall -Wextra` (both modes) 0 warn; stream `{"valence":-0.7}` then
+`{"warmth":0.6,"flow":0.4,"debt":2.0}` → 2 state lines, valence/arousal persist while
+warmth/flow/debt accumulate (live stateful hub); overlong line skipped, short final line ingested;
+broken-pipe (`| head -1`) no crash; stdout JSON-only; smoke 4/4. Codex audit pass (gpt-5.5):
+stream round = 1 finding (overlong-record framing) fixed; final VERDICT PASS.
+
 ## Merge / integration policy (Oleg 2026-06-30)
 - NOT merging `claude/sartre` to main yet, and NOT pulling main into it for now. SARTRE
   is committed (`050751a`) and isolated on its branch. It is connected to NOTHING.

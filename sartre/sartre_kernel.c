@@ -1020,8 +1020,9 @@ int sartre_state_to_json(char *buf, int max) {
 #ifndef HAS_DARIO
 
 int main(int argc, char **argv) {
-    printf("\n  sartre_kernel — Meta-Linux for the Dario Equation\n");
-    printf("  \"L'existence precede l'essence.\"\n\n");
+    /* banner to stderr — stdout stays protocol-clean (metrics/pipe emit JSON there) */
+    fprintf(stderr, "\n  sartre_kernel — Meta-Linux for the Dario Equation\n");
+    fprintf(stderr, "  \"L'existence precede l'essence.\"\n\n");
 
     sartre_init(NULL);
 
@@ -1086,9 +1087,31 @@ int main(int argc, char **argv) {
 
     /* metrics mode: the live telemetry hub — sample real cpu/mem and print the
      * state as JSON. Optional argv[2] = a field-weather JSON to ingest first
-     * (the reciprocal seam): sartre_kernel metrics '{"debt":2.0,"coherence":0.8}'. */
+     * (the reciprocal seam): sartre_kernel metrics '{"debt":2.0,"coherence":0.8}'.
+     * With `--stream`: the field->SARTRE transport — the dock pipes field-weather
+     * JSON lines on stdin, SARTRE ingests each and emits the refreshed hub state on
+     * stdout (the reverse of how the dock reads a utility's stdout). */
     if (argc > 1 && strcmp(argv[1], "metrics") == 0) {
         /* sartre_init already ran at the top of main — do not re-init */
+        if (argc > 2 && strcmp(argv[2], "--stream") == 0) {
+            signal(SIGPIPE, SIG_IGN);   /* reader may close; exit cleanly, not by signal */
+            char line[4096], json[2048];
+            while (fgets(line, sizeof line, stdin)) {
+                size_t len = strlen(line);
+                if (len == sizeof(line) - 1 && line[len - 1] != '\n') {
+                    /* record longer than the frame: drain the rest and skip it, so a
+                     * truncated fragment is never ingested as its own message */
+                    int c;
+                    while ((c = getchar()) != '\n' && c != EOF) { }
+                    continue;
+                }
+                sartre_ingest_metrics_json(line);
+                sartre_state_to_json(json, sizeof json);   /* refreshes live cpu/mem */
+                if (printf("%s\n", json) < 0 || fflush(stdout) != 0) break;  /* reader gone */
+            }
+            sartre_shutdown();
+            return 0;
+        }
         if (argc > 2) sartre_ingest_metrics_json(argv[2]);
         char json[2048];
         sartre_state_to_json(json, sizeof json);  /* refreshes live cpu/mem */
