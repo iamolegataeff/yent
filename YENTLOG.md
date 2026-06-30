@@ -316,6 +316,37 @@ Codex audit pass (gpt-5.5): brick #1 = 6 findings fixed → PASS; bricks #2+#3 =
 fixed → PASS. Next SARTRE step: second utility (`context_neural_processor`, a file
 processor; numpy → notorch, in C).
 
+## 2026-06-30 — RI + limpha field-pressure primer
+
+The memory channel now has a second, non-text route into the organism: selected
+limpha/RI traces are converted into a small AML field pulse before circles rise.
+This is deliberately not another prompt wall. `innerworld.FieldPressureForMemory`
+scores the already bounded recall traces, caps them, applies one
+`PROPHECY`/`VELOCITY`/`Step` primer, and then uses the same traces for the textual
+pressure frame. Unit tests assert both the scoring cap and the command order: the
+memory field pulse runs before the circle-driving `PROPHECY`/`VELOCITY` commands.
+
+Metal calibration mattered. The first aggressive version proved the route but also
+hit the AML recovery brake: field debt jumped above `5`, and the core correctly
+forced `velocity_mode=0` (`NOMOVE`) as a safety rule. The shipped version is a safe
+primer, not a shove: max `PROPHECY 6`, `VELOCITY WALK`, max `Step 0.35`, so it does
+not pay extra gait-switch inertia before circles.
+
+Safe Metal receipt (`/Users/ariannamethod/tmp/yent-ri-flow-pressure-20260630`,
+Nemo v38, temp limpha DB + `ri/out/runtime.lines`):
+
+- merged memory still enters as three traces: one limpha seam, then two RI pressure
+  traces.
+- field primer printed `prophecy=6 velocity=WALK step=0.35`.
+- real circles ran; final field stayed alive rather than braking:
+  `debt=2.006 destiny=0.350 velocity_mode=2 effective_temp=1.015`.
+- sleep consolidation still fired: `cooc mean=0.6993 max=5.7000 dark_gravity=0.5144 scars=1`.
+
+This closes the safe field-primer layer. It is intentionally conservative; the next
+real pressure step is not to raise the debt cap, but to give Flow/DoE a direct
+runtime pressure surface where the AML field can bias generation without tripping
+the core's recovery brake.
+
 ## Weights
 
 Not in open access. Code is GPL; weights/deltas/gamma are under the Yent Identity License v1.1 (`LICENSE-WEIGHTS`). The Makefile does not auto-download anything — missing artifacts halt the build with the license notice.

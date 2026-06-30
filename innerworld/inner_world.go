@@ -158,24 +158,7 @@ func (iw *InnerWorld) SetScarThreshold(t float32) {
 // unchanged (backward-compatible). Past text is framed as pressure/trace, not as
 // dialogue to continue; raw recall otherwise overheats into imitation loops.
 func (iw *InnerWorld) recallSeed(prompt string) string {
-	if iw.memory == nil || iw.cfg.RecallN <= 0 {
-		return prompt
-	}
-	past := iw.memory.Recall(iw.cfg.RecallN)
-	if len(past) == 0 {
-		return prompt
-	}
-	var b strings.Builder
-	b.WriteString("Past inner pressure, not dialogue to continue or imitate. Treat these as field traces, not quoted speech: ")
-	for i, p := range past {
-		if i > 0 {
-			b.WriteString(" | ")
-		}
-		b.WriteString(p)
-	}
-	b.WriteString(". Think fresh from the current human turn: ")
-	b.WriteString(prompt)
-	return b.String()
+	return iw.recallSeedWithTraces(prompt, iw.memoryTracesLocked())
 }
 
 // closeIfResident closes a body that owns a resident process (the doe daemon), so
@@ -302,7 +285,9 @@ func (iw *InnerWorld) reflect(circles []Circle, debt float32) Reflection {
 func (iw *InnerWorld) think(prompt string) Reflection {
 	iw.genMu.Lock()
 	iw.ensureFastResidentLocked()
-	circles := Overthink(iw.recallSeed(iw.coocBias(iw.scarSurface(prompt))), iw.fast, iw.field, iw.div, iw.cfg)
+	traces := iw.memoryTracesLocked()
+	iw.applyMemoryPressureLocked(traces)
+	circles := Overthink(iw.recallSeedWithTraces(iw.coocBias(iw.scarSurface(prompt)), traces), iw.fast, iw.field, iw.div, iw.cfg)
 	debt := iw.fieldDebt()       // snapshot under genMu: belongs to this batch
 	iw.observeLocked(circles)    // circles seed the cooc field (circles->field)
 	iw.scarLocked(circles, debt) // a thought that broke prophecy becomes a scar
@@ -376,7 +361,9 @@ func (iw *InnerWorld) dream(trigger int) Reflection {
 
 	iw.genMu.Lock()
 	iw.ensureFastResidentLocked()
-	circles := Overthink(iw.recallSeed(iw.coocBias(iw.scarSurface(seed))), iw.fast, iw.field, iw.div, iw.cfg)
+	traces := iw.memoryTracesLocked()
+	iw.applyMemoryPressureLocked(traces)
+	circles := Overthink(iw.recallSeedWithTraces(iw.coocBias(iw.scarSurface(seed)), traces), iw.fast, iw.field, iw.div, iw.cfg)
 	debt := iw.fieldDebt()       // snapshot under genMu: belongs to this batch
 	iw.observeLocked(circles)    // dreams seed the cooc field too (circles->field)
 	iw.scarLocked(circles, debt) // a dissonant dream scars too
