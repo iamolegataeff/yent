@@ -52,6 +52,7 @@ yent/
 │   └── recursive_resonance_preprint.md
 ├── innerworld/                   # inner-life / emergence layer (adapted from arianna.c)
 │   └── INNERWORLD_LOG.md         # innerworld design + build log
+├── riindex/                      # public-safe RI line parser/selector for runtime consumers
 ├── prompts/                      # tracked body primers for runtime prompt layer
 │   ├── nemo12_fast_v1.txt        # fast-body primer
 │   └── small24_deep_v1.txt       # deep-body primer
@@ -72,7 +73,7 @@ yent/
 - Memory: `yent/go/limpha.go`, `yent/go/limpha_async.go`
 - Prompts: `prompts/nemo12_fast_v1.txt`, `prompts/small24_deep_v1.txt`
 - Inference: `DoE/doe.c`, `yent/go/amk.go`
-- RI tools: `cmd/ri-compile/main.go`, `cmd/ri-consume/main.go`
+- RI tools: `cmd/ri-compile/main.go`, `cmd/ri-consume/main.go`, `riindex/riindex.go`
 - Theory: `research/ai_is_not_a_tool.md`, `research/dario_paper_v2.md`, `research/recursive_resonance_preprint.md`
 - Entry: `cmd/moyent-body-gate/main.go`, `cmd/moyent-live-smoke/main.go`
 

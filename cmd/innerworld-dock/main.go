@@ -21,6 +21,7 @@
 //	YENT_DOE_WORKDIR  working dir for the doe process
 //	YENT_DOE_ARGS     extra whitespace-split flags after --model <path>
 //	YENT_LIMPHA_DB    optional limpha db path; when set, inner reflections are stored
+//	YENT_RI_LINES     optional compiled RI runtime packet (line protocol)
 //	YENT_DOCK_MAX_DREAMS optional autonomous dream cap for finite receipts
 package main
 
@@ -212,6 +213,31 @@ func openLimphaFromEnv() *yent.LimphaClient {
 	return lc
 }
 
+func openRIFromEnv() innerworld.Memory {
+	path := strings.TrimSpace(os.Getenv("YENT_RI_LINES"))
+	if path == "" {
+		return nil
+	}
+	mode := strings.TrimSpace(os.Getenv("YENT_RI_MODE"))
+	if mode == "" {
+		mode = "runtime"
+	}
+	max := positiveIntEnv("YENT_RI_MAX")
+	if max == 0 {
+		max = 8
+	}
+	mem, err := innerworld.LoadRIMemory(path, mode, max)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[dock] RI open %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	fmt.Printf("=== RI wired: %d %s record(s) from %s ===\n", mem.Len(), mode, path)
+	for i, p := range mem.Recall(3) {
+		fmt.Printf("  ri %d | %s\n", i, p)
+	}
+	return mem
+}
+
 func limphaStateFromCanonical() yent.LimphaState {
 	st := C.am_get_state()
 	return yent.LimphaState{
@@ -321,12 +347,13 @@ func main() {
 	iw.AddConsolidator(&innerworld.FlowConsolidator{Flow: flowBody})
 	iw.SetSleepTrigger(func(innerworld.Field) bool { return flowBody.AutumnEnergy() > 0.6 })
 
+	var memories []innerworld.Memory
 	// Close the loop: recall past inner monologues from limpha so new thinking is
 	// shaped by what Yent thought before. The write side (dock -> limpha) lands the
 	// seams; this reads them back into the seed.
 	if limpha != nil {
 		recaller := limphaRecaller{limpha}
-		iw.SetMemory(recaller)
+		memories = append(memories, recaller)
 		if past := recaller.Recall(3); len(past) > 0 {
 			fmt.Printf("=== recall wired: %d past inner monologue(s) fold into this turn ===\n", len(past))
 			for i, p := range past {
@@ -335,6 +362,12 @@ func main() {
 		} else {
 			fmt.Println("=== recall wired: no past inner monologues yet (first run) ===")
 		}
+	}
+	if riMem := openRIFromEnv(); riMem != nil {
+		memories = append(memories, riMem)
+	}
+	if mem := innerworld.MergeMemory(memories...); mem != nil {
+		iw.SetMemory(mem)
 	}
 
 	deepWired := false
