@@ -670,8 +670,21 @@ consumes it — zero file overlap. Smoke: `am_exec("VALENCE -0.7")`→`-0.700`, 
 SARTRE reads `am_get_state().valence/arousal`; canonical `ariannamethod.ai` sync now owes
 WARMTH/FLOW + VALENCE/AROUSAL.
 
-Next: piece 2 — the Julia math brain (entropy/resonance/perplexity on `nicole2julia`) as the
-backend; piece 3 — emotions decay → scar-sea (leo sea-of-memory). Then the Metal smoke.
+**Piece 2 — the Julia math, proven on Julia then embedded in Go.** `nicole2julia` turned out
+to be a slice of real Julia source (not a tiny compiler), and `high.py` shelled out to the
+`julia` binary. But Julia embeds in-process via `libjulia` (`jl_init`+`jl_eval_string`,
+`julia.h:2258/2326`) — proven first-hand: `brew install julia` (1.12.6) on Neo + a C
+embed-smoke linked `-ljulia` ran `sqrt(2)+sin(0.5)=1.893639` and `ent([.5,.25,.25])=1.039721`
+(PASS). Rather than ship the ~hundreds-of-MB Julia runtime to every node, the feeling-math is
+PORTED to pure Go (`high.go`): `feelEntropy` (Shannon entropy of the thought's word
+distribution — how chaotic) and `feelResonance` (Jaccard echo with the previous circle — how
+it circles one matter). `highFeelLocked` now drives arousal from real entropy (sharper than
+word density) and FLOW from resonance. Julia stayed the ORACLE: `TestFeelEntropyMatchesJuliaOracle`
+asserts Go `feelEntropy("a a b c") == 1.039721` (the Julia number) — the embedded formula is
+verified equal to Julia, with no Julia runtime on the nodes. `go test -race ./innerworld` green;
+`build ./...` clean. (Julia stays installed on Neo as the dev oracle, not a runtime dep.)
+
+Next: piece 3 — emotions decay → scar-sea (leo sea-of-memory). Then the Metal smoke of all of Б4.
 
 ---
 
