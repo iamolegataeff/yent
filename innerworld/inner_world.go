@@ -62,18 +62,19 @@ type Memory interface {
 // monologue runs at a time — the body has a single voice — so Think and the
 // autonomous dream are serialized.
 type InnerWorld struct {
-	fast   Body
-	deep   Body // the deep body (small24); nil = no deep self-answer, gate stays a boolean
-	field  Field
-	div    Divergence
-	larynx Larynx
-	memory Memory      // past-monologue recall; nil = no recall (read-only, runtime writes)
-	cooc   *CoocGraph  // inner co-occurrence memory (Go form); nil = circles do not seed/feel a cooc field
-	scar   *ScarMemory // sea of rejected thoughts (Go form); nil = no scarring
-	flow   Flow        // native AML body (form A): when set, it IS the single cooc+scar+field physics
-	sense  Sense       // environment perception (SARTRE): present-world reflex onto the field; nil = no environment
-	cfg    Config
-	br     Breath
+	fast       Body
+	deep       Body // the deep body (small24); nil = no deep self-answer, gate stays a boolean
+	field      Field
+	div        Divergence
+	larynx     Larynx
+	memory     Memory      // past-monologue recall; nil = no recall (read-only, runtime writes)
+	cooc       *CoocGraph  // inner co-occurrence memory (Go form); nil = circles do not seed/feel a cooc field
+	scar       *ScarMemory // sea of rejected thoughts (Go form); nil = no scarring
+	flow       Flow        // native AML body (form A): when set, it IS the single cooc+scar+field physics
+	sense      Sense       // environment perception (SARTRE): present-world reflex onto the field; nil = no environment
+	metricSink MetricSink  // reciprocal telemetry: field weather -> SARTRE metrics hub; nil = no publish
+	cfg        Config
+	br         Breath
 
 	scarThreshold float32 // prophecy-debt above which a thought is scarred (rejected by the field)
 	feelEnabled   bool    // High brain: when on, the circles' emotional valence drives the affect axis
@@ -292,10 +293,11 @@ func (iw *InnerWorld) think(prompt string) Reflection {
 	iw.applyMemoryPressureLocked(traces) // the past as slow field pressure
 	iw.applySenseLocked()                // the present world as fast field reflex (SARTRE)
 	circles := Overthink(iw.recallSeedWithTraces(iw.coocBias(iw.scarSurface(prompt)), traces), iw.fast, iw.field, iw.div, iw.cfg)
-	debt := iw.fieldDebt()       // snapshot under genMu: belongs to this batch
-	iw.observeLocked(circles)    // circles seed the cooc field (circles->field)
-	iw.scarLocked(circles, debt) // a thought that broke prophecy becomes a scar
-	iw.highFeelLocked(circles)   // the circles' feeling drives the affect axis (High brain)
+	debt := iw.fieldDebt()                               // snapshot under genMu: belongs to this batch
+	iw.observeLocked(circles)                            // circles seed the cooc field (circles->field)
+	iw.scarLocked(circles, debt)                         // a thought that broke prophecy becomes a scar
+	iw.highFeelLocked(circles)                           // the circles' feeling drives the affect axis (High brain)
+	iw.publishMetricsLocked("human_turn", circles, debt) // reciprocal field-weather telemetry
 	r := iw.reflect(circles, debt)
 	if r.SelfAnswered {
 		r.DeepAnswer = iw.deepAnswerLocked(circles) // deep body speaks, under the single voice
@@ -370,10 +372,11 @@ func (iw *InnerWorld) dream(trigger int) Reflection {
 	iw.applyMemoryPressureLocked(traces) // the past as slow field pressure
 	iw.applySenseLocked()                // the present world as fast field reflex (SARTRE)
 	circles := Overthink(iw.recallSeedWithTraces(iw.coocBias(iw.scarSurface(seed)), traces), iw.fast, iw.field, iw.div, iw.cfg)
-	debt := iw.fieldDebt()       // snapshot under genMu: belongs to this batch
-	iw.observeLocked(circles)    // dreams seed the cooc field too (circles->field)
-	iw.scarLocked(circles, debt) // a dissonant dream scars too
-	iw.highFeelLocked(circles)   // even alone, a dream colours the mood (High brain)
+	debt := iw.fieldDebt()                          // snapshot under genMu: belongs to this batch
+	iw.observeLocked(circles)                       // dreams seed the cooc field too (circles->field)
+	iw.scarLocked(circles, debt)                    // a dissonant dream scars too
+	iw.highFeelLocked(circles)                      // even alone, a dream colours the mood (High brain)
+	iw.publishMetricsLocked("dream", circles, debt) // reciprocal field-weather telemetry
 	r := iw.reflect(circles, debt)
 	if r.SelfAnswered {
 		r.DeepAnswer = iw.deepAnswerLocked(circles) // even alone, the deep body may answer the dream
