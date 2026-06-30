@@ -684,7 +684,20 @@ asserts Go `feelEntropy("a a b c") == 1.039721` (the Julia number) — the embed
 verified equal to Julia, with no Julia runtime on the nodes. `go test -race ./innerworld` green;
 `build ./...` clean. (Julia stays installed on Neo as the dev oracle, not a runtime dep.)
 
-Next: piece 3 — emotions decay → scar-sea (leo sea-of-memory). Then the Metal smoke of all of Б4.
+**Piece 3 — emotions → the sea of memory (leo sea-of-memory).** Feeling does not vanish: an
+intensely-felt thought settles into the SAME sea the prophecy-scars live in (`flow.Scar` /
+`ScarMemory`) as an emotional metanote. Intensity is the emotional CHARGE (`|valence|`, not the
+thought's entropy — a busy but neutral thought stirs no lasting feeling; that was a real bug
+caught by `TestFeelScarMildDoesNotSettle` and fixed). A wound (negative valence) sinks with
+×1.5 gravity — it holds longer than a joy of equal intensity (leo trauma-spore). The existing
+sleep `Consolidate` decays/prunes it; `scarSurface` now resurfaces by resonance =
+`max(fieldDebt, feelIntensity)`, so a strong present feeling pulls up past intense feelings
+(`feelScarLocked` + `feelIntensity` on the InnerWorld). `go test -race ./innerworld` green
+(sinks-intense, trauma-heavier-than-joy, mild-no-settle, resurrect-by-feeling). That closes the
+Б4 arc: environment (SARTRE) → feeling (High/Julia-math) → affect axis + sea → resurrect.
+
+Next: the Metal smoke of all of Б4 (real nemo: thoughts → feeling → affect fields →
+valence/arousal → emotional sea), then Codex sews it to limpha/RI.
 
 ---
 

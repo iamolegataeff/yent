@@ -97,6 +97,75 @@ func TestHighFeelPainsOnNegative(t *testing.T) {
 	}
 }
 
+func TestFeelScarSinksIntenseEmotion(t *testing.T) {
+	f := &fakeField{}
+	iw := NewInnerWorld(nil, f, nil)
+	iw.EnableFeeling()
+	sea := NewScarMemory(0.985)
+	iw.SetScar(sea, 999) // prophecy threshold high — ONLY emotion can scar here
+	iw.genMu.Lock()
+	iw.highFeelLocked([]Circle{{Text: "alone broken hopeless, only pain and fear and suffering"}})
+	iw.genMu.Unlock()
+	if n, _ := sea.Stats(); n == 0 {
+		t.Error("an intensely-felt thought should settle into the sea of memory")
+	}
+}
+
+func TestFeelScarTraumaHoldsLonger(t *testing.T) {
+	deposit := func(text string) float32 {
+		f := &fakeField{}
+		iw := NewInnerWorld(nil, f, nil)
+		iw.EnableFeeling()
+		sea := NewScarMemory(0.985)
+		iw.SetScar(sea, 999)
+		iw.genMu.Lock()
+		iw.highFeelLocked([]Circle{{Text: text}})
+		iw.genMu.Unlock()
+		_, total := sea.Stats()
+		return total
+	}
+	neg := deposit("hate pain fear suffer awful terrible")
+	pos := deposit("love joy wonderful beautiful amazing brilliant")
+	if neg <= pos {
+		t.Errorf("a wound should hold heavier than a joy of equal intensity: neg=%.3f pos=%.3f", neg, pos)
+	}
+}
+
+func TestFeelScarMildDoesNotSettle(t *testing.T) {
+	f := &fakeField{}
+	iw := NewInnerWorld(nil, f, nil)
+	iw.EnableFeeling()
+	sea := NewScarMemory(0.985)
+	iw.SetScar(sea, 999)
+	iw.genMu.Lock()
+	iw.highFeelLocked([]Circle{{Text: "the okay fine day passed by the way"}}) // faint charge
+	iw.genMu.Unlock()
+	if n, _ := sea.Stats(); n != 0 {
+		t.Errorf("a passing mild feeling must not settle into the sea, n=%d", n)
+	}
+}
+
+func TestScarSurfaceResonatesWithFeeling(t *testing.T) {
+	f := &fakeField{} // fieldDebt starts 0
+	iw := NewInnerWorld(nil, f, nil)
+	sea := NewScarMemory(0.985)
+	sea.Scar("a deep wound", 1.0)
+	iw.SetScar(sea, 0)
+
+	iw.genMu.Lock()
+	got0 := iw.scarSurface("now")
+	iw.feelIntensity = 0.8 // a strong present feeling
+	got1 := iw.scarSurface("now")
+	iw.genMu.Unlock()
+
+	if got0 != "now" {
+		t.Errorf("no debt, no feeling -> nothing resurfaces, got %q", got0)
+	}
+	if !strings.Contains(got1, "a deep wound") {
+		t.Errorf("a strong present feeling should resurface a resonant scar, got %q", got1)
+	}
+}
+
 func TestHighFeelDisabledIsNoop(t *testing.T) {
 	f := &fakeField{}
 	iw := NewInnerWorld(nil, f, nil) // EnableFeeling NOT called
