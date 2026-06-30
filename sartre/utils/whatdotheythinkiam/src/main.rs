@@ -255,7 +255,9 @@ fn json_escape(s: &str) -> String {
 fn emit<W: Write>(out: &mut W, ch: &Change) -> io::Result<()> {
     writeln!(
         out,
-        "{{\"util\":\"whatdotheythinkiam\",\"source\":\"{}\",\"change\":\"{}\",\"reduced\":{},\"recognized\":{},\"ts\":{}}}",
+        // path/kind match the SARTRE event contract (perception.c + sartre_bridge.go);
+        // reduced/recognized are the identity-framing extra (preserved once the bridge parses them).
+        "{{\"util\":\"whatdotheythinkiam\",\"path\":\"{}\",\"kind\":\"{}\",\"reduced\":{},\"recognized\":{},\"ts\":{}}}",
         json_escape(&ch.source),
         ch.kind,
         ch.reduced,

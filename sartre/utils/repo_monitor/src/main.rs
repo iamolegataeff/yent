@@ -21,7 +21,7 @@ mod sha256;
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
@@ -220,13 +220,16 @@ fn json_escape(s: &str) -> String {
     out
 }
 
-fn emit(ch: &Change) {
-    println!(
+// Returns Err if stdout is gone (the slot reader closed the pipe) — the caller
+// then exits cleanly instead of panicking, as `println!` would.
+fn emit<W: Write>(out: &mut W, ch: &Change) -> io::Result<()> {
+    writeln!(
+        out,
         "{{\"util\":\"repo_monitor\",\"kind\":\"{}\",\"path\":\"{}\",\"ts\":{}}}",
         ch.kind,
         json_escape(&ch.path),
         now_secs()
-    );
+    )
 }
 
 fn load_state(p: &Path) -> State {
@@ -258,13 +261,18 @@ fn main() {
     if cfg.once {
         let prev = cfg.state_file.as_ref().map(|f| load_state(f)).unwrap_or_default();
         let cur = scan(&cfg);
-        for ch in diff(&prev, &cur) {
-            emit(&ch);
+        {
+            let mut out = io::stdout().lock();
+            for ch in diff(&prev, &cur) {
+                if emit(&mut out, &ch).is_err() {
+                    break;
+                }
+            }
+            let _ = out.flush();
         }
         if let Some(f) = &cfg.state_file {
             save_state(f, &cur);
         }
-        let _ = std::io::stdout().flush();
         return;
     }
 
@@ -288,9 +296,12 @@ fn main() {
         }
     });
 
+    let mut out = io::stdout().lock();
     for ch in rx {
-        emit(&ch);
-        let _ = std::io::stdout().flush();
+        if emit(&mut out, &ch).is_err() {
+            break; // reader (the slot supervisor) is gone — exit cleanly, do not panic
+        }
+        let _ = out.flush();
     }
 }
 
