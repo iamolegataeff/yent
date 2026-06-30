@@ -241,8 +241,13 @@ Convergence with innerworld-Opus (branch `claude/b4-emotions` `0e39c8d`, his hal
 he extended AML with `VALENCE`/`AROUSAL` operators + two `AM_State` fields, and `highFeelLocked`
 publishes them every turn into the field (`am_get_state().valence/arousal`). My ingest receiver
 already parses `valence` + `arousal` — so the hub is ready to consume Yent's felt valence/arousal
-the moment the transport (am_get_state → JSON → ingest) is wired. Zero file overlap. Coordination
-TODO: WARMTH/FLOW (Kuramoto chambers) have no SystemState fields yet — a later add if we want them.
+the moment the transport (am_get_state → JSON → ingest) is wired. Zero file overlap.
+
+WARMTH/FLOW added (2026-06-30): `SystemState` now carries `warmth` (Kuramoto LOVE) and `flow`
+(Kuramoto FLOW) fields; the ingest receiver parses `warmth`/`flow` keys and `state_to_json`/
+`print_state` expose them. So the full affect set innerworld's b4-emotions publishes
+(valence/arousal + warmth/flow) is now consumable by the hub — Yent's felt chambers land in
+SARTRE once the transport is wired. Codex audit: code mechanics PASS (1 LOW doc-comment, fixed).
 
 Measured on neo: `cc -Wall -Wextra` (standalone + `-DHAS_PERCEPTION`) 0 warn; `metrics` →
 `cpu_load`=getloadavg/cpu (0.387 = 2.32/6, cross-checked `uptime`), `memory_pressure`=0.832

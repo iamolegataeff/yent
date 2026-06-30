@@ -580,6 +580,8 @@ void sartre_ingest_metrics_json(const char *json) {
     if (json_get_float(json, "valence", &v))            { sys.valence = v; touched++; }
     if (json_get_float(json, "arousal", &v))            { sys.arousal = v; touched++; }
     if (json_get_float(json, "trauma", &v))             { sys.trauma_level = v; touched++; }
+    if (json_get_float(json, "warmth", &v))             { sys.warmth = v; touched++; }
+    if (json_get_float(json, "flow", &v))               { sys.flow = v; touched++; }
     if (json_get_float(json, "schumann_coherence", &v)) { sys.schumann_coherence = v; touched++; }
     if (touched) sartre_notify_event("metrics_ingest");
 }
@@ -861,8 +863,9 @@ void sartre_print_state(void) {
     printf("Inner World:\n");
     printf("  trauma: %.2f  arousal: %.2f  valence: %.2f\n",
            sys.trauma_level, sys.arousal, sys.valence);
-    printf("  coherence: %.2f  prophecy_debt: %.2f  entropy: %.2f\n\n",
+    printf("  coherence: %.2f  prophecy_debt: %.2f  entropy: %.2f\n",
            sys.coherence, sys.prophecy_debt, sys.entropy);
+    printf("  warmth: %.2f  flow: %.2f\n\n", sys.warmth, sys.flow);
 
     printf("Overlay: base=%lldB delta=%lldB writes=%d ratio=%.3f\n\n",
            (long long)sys.overlay.base_size, (long long)sys.overlay.delta_size,
@@ -943,6 +946,8 @@ int sartre_state_to_json(char *buf, int max) {
         "\"coherence\":%.3f,"
         "\"prophecy_debt\":%.3f,"
         "\"entropy\":%.3f,"
+        "\"warmth\":%.3f,"
+        "\"flow\":%.3f,"
         "\"overlay_ratio\":%.4f,"
         "\"overlay_writes\":%d,"
         "\"overlay_base\":%lld,"
@@ -966,6 +971,7 @@ int sartre_state_to_json(char *buf, int max) {
         sys.module_count,
         sys.trauma_level, sys.arousal, sys.valence,
         sys.coherence, sys.prophecy_debt, sys.entropy,
+        sys.warmth, sys.flow,
         sys.overlay.overlay_ratio, sys.overlay.overlay_writes,
         (long long)sys.overlay.base_size, (long long)sys.overlay.delta_size,
         sys.ns_count, active_ns, spawned_ns,

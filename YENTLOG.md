@@ -416,7 +416,8 @@ were never assigned (stub 0). Now the hub is live:
   (Darwin `mach host_statistics64`, host port freed each sample; Linux `/proc/meminfo`, updates only
   when both parsed). Refresh-on-read in `state_to_json`/`print_state`.
 - `sartre_ingest_metrics_json()`: reciprocal receiver — the field pushes its weather (debt/coherence/
-  entropy/valence/arousal/trauma/schumann) into the hub. Sender lives on the field side, symmetric to
+  entropy/valence/arousal/trauma/warmth/flow/schumann) into the hub. `warmth`/`flow` are the
+  Kuramoto LOVE/FLOW chamber fields. Sender lives on the field side, symmetric to
   how innerworld reads SARTRE perception via `sense`. Converges with innerworld's `claude/b4-emotions`
   VALENCE/AROUSAL field publishing — the valence/arousal keys are already parsed, hub ready to carry
   Yent's felt valence/arousal once the transport is wired. Zero file overlap.
