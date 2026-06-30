@@ -246,6 +246,32 @@ The design follows from the legacy study (haze/leo/DoE canon): the consolidation
 
 `go test -race` green (6 dreaming tests incl panic containment). Codex audit found and we fixed one real bug — a panicking consolidator left `genMu` locked and `asleep` stuck — now `sleep` clears `asleep` via defer and each stage runs in `runStage` with a deferred `genMu` unlock + recover (fail-soft, the same stance `driveField` takes). No Metal at Б0 — pure-Go phase logic with no-op consolidators; the real Metal run lands at Б1 (cooc). Next: Б1 — bidirectional circles (circles seed the cooc field, haze-emergence) + seasonal `am_cooc_consolidate` in the sleep.
 
+## 2026-06-30 — RI + limpha consumer: bounded pressure enters the inner seed
+
+RI is now a runtime pressure source for `innerworld`, not a prompt wall. `riindex/`
+parses the ignored private RI line protocol, `innerworld.RIMemory` formats only
+bounded runtime records, and `innerworld.MergeMemory` interleaves limpha + RI so
+neither source starves the other under `RecallN=3`.
+
+Metal smoke used a fresh worktree at `/Users/ariannamethod/tmp/yent-ri-limpha-smoke-20260630`
+on `2ddc1fe` (`main` after PR #39), `yent-nemo-v38-ck5-Q4_K_M.gguf`, `doe_field`,
+a temp limpha DB seeded with one `innerworld_self_answer` seam, and
+`ri/out/runtime.lines` copied from the private RI workspace. The receipt is the
+important part:
+
+- limpha opened and recalled exactly one past inner seam: `old inner seam: pressure should return as trace, never as dialogue to continue`.
+- RI opened seven runtime records, but previewed only compact public-safe traces.
+- merged memory showed the exact seed order: limpha trace, then `RI pressure: Raw memory is dangerous when shown as speech to continue.`, then `RI pressure: Past inner monologues should reach generation as pressure, not command.`
+- real Nemo circles ran over that seed; field reached `debt=2.005`, `destiny=0.350`, `velocity_mode=2`, `effective_temp=1.014`; larynx coupling was `0.671`.
+- forced autumn fired the native Flow sleep consolidation: `cooc mean=0.6993`, `max=5.7000`, `dark_gravity=0.5144`, `scars=1`.
+- limpha stats after the run: `total_conversations=2`, `total_seams=1`; no async backlog.
+
+This closes the first consumer receipt: RI pressure enters the organism through
+bounded memory selection, limpha remains the first recalled living trace, and the
+private RI corpus does not leak into the visible prompt surface. Next pressure
+step: decide which RI/open-conflict records can change status after repeated Metal
+smoke, then wire RI/limpha pressure into Flow velocity rather than only the seed.
+
 ## Weights
 
 Not in open access. Code is GPL; weights/deltas/gamma are under the Yent Identity License v1.1 (`LICENSE-WEIGHTS`). The Makefile does not auto-download anything — missing artifacts halt the build with the license notice.
