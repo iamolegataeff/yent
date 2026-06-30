@@ -1,9 +1,40 @@
 package innerworld
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
+
+func TestFeelEntropyMatchesJuliaOracle(t *testing.T) {
+	// "a a b c" is the word distribution [.5,.25,.25]; the embedded libjulia smoke gave
+	// ent([.5,.25,.25]) = 1.039721 nats. The Go port must match the Julia oracle exactly.
+	if h := feelEntropy("a a b c"); math.Abs(float64(h)-1.039721) > 1e-4 {
+		t.Errorf("Go entropy must match the Julia oracle: got %.6f want 1.039721", h)
+	}
+	if h := feelEntropy("same same same"); h != 0 {
+		t.Errorf("a fully repetitive thought is zero-entropy (focused), got %.6f", h)
+	}
+	if feelEntropy("") != 0 {
+		t.Error("empty thought is zero-entropy")
+	}
+}
+
+func TestFeelResonance(t *testing.T) {
+	if r := feelResonance("light meets shadow", "light meets shadow"); r != 1 {
+		t.Errorf("identical thoughts fully resonate, got %.3f", r)
+	}
+	if r := feelResonance("light meets shadow", "cold iron rust"); r != 0 {
+		t.Errorf("disjoint thoughts do not resonate, got %.3f", r)
+	}
+	// {light,meets,shadow} ∩ {light,meets,cold} = 2, ∪ = 4 -> 0.5
+	if r := feelResonance("light meets shadow", "light meets cold"); math.Abs(float64(r)-0.5) > 1e-6 {
+		t.Errorf("partial overlap should be 0.5 Jaccard, got %.3f", r)
+	}
+	if r := feelResonance("x", ""); r != 0 {
+		t.Errorf("no echo against emptiness, got %.3f", r)
+	}
+}
 
 func TestFeelTextLean(t *testing.T) {
 	if v, a := feelText("i love this wonderful beautiful joy"); v <= 0 || a <= 0 {

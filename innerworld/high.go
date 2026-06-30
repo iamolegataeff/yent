@@ -2,6 +2,7 @@ package innerworld
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -56,6 +57,58 @@ var emotionalWeights = map[string]float32{
 	"כאב": -0.8, "בודד": -0.7, "ריק": -0.5, "שנאה": -0.9,
 }
 
+// feelEntropy is the Shannon entropy (nats) of the thought's word distribution — how
+// chaotic / unfocused the thought is. A repetitive thought is low-entropy (the organism
+// circling one point); a scattered one is high. This is the math the Julia brain proved
+// (ent([.5,.25,.25]) = 1.0397 nats); ported to pure Go so no Julia runtime is needed on
+// the nodes — Julia stayed the oracle, the formula is embedded here.
+func feelEntropy(text string) float32 {
+	words := strings.Fields(strings.ToLower(text))
+	if len(words) == 0 {
+		return 0
+	}
+	counts := make(map[string]int, len(words))
+	for _, w := range words {
+		counts[w]++
+	}
+	n := float64(len(words))
+	var h float64
+	for _, c := range counts {
+		p := float64(c) / n
+		h -= p * math.Log(p)
+	}
+	return float32(h)
+}
+
+// feelResonance is how strongly a thought echoes another (0..1): the Jaccard overlap of
+// their word sets. High resonance = the organism circling the same matter (coherence);
+// low = it has moved on. Empty either side = no echo.
+func feelResonance(a, b string) float32 {
+	sa, sb := wordSet(a), wordSet(b)
+	if len(sa) == 0 || len(sb) == 0 {
+		return 0
+	}
+	inter := 0
+	for w := range sa {
+		if sb[w] {
+			inter++
+		}
+	}
+	union := len(sa) + len(sb) - inter
+	if union == 0 {
+		return 0
+	}
+	return float32(inter) / float32(union)
+}
+
+func wordSet(text string) map[string]bool {
+	s := make(map[string]bool)
+	for _, w := range strings.Fields(strings.ToLower(text)) {
+		s[w] = true
+	}
+	return s
+}
+
 // feelThreshold is the dead-zone: a near-neutral thought stirs no affect.
 const feelThreshold = 0.05
 
@@ -107,18 +160,27 @@ func (iw *InnerWorld) highFeelLocked(circles []Circle) {
 	if !iw.feelEnabled || iw.field == nil || len(circles) == 0 {
 		return
 	}
-	v, a := feelText(circles[len(circles)-1].Text)
-	// Publish the raw feeling as field metrics every turn — a live current reading
-	// (even 0 = "calm now"), the source SARTRE's metric-hub mirrors via its reverse bridge.
+	last := circles[len(circles)-1].Text
+	v, _ := feelText(last)            // valence: which way the thought leans (lexical map)
+	entropy := feelEntropy(last)      // how chaotic the thought is (Julia-proven math)
+	arousal := entropy / (entropy + 1) // intensity from real entropy, saturated to 0..1
+	var resonance float32             // how the thought echoes the previous one
+	if len(circles) >= 2 {
+		resonance = feelResonance(last, circles[len(circles)-2].Text)
+	}
+	// Publish the raw feeling as field metrics every turn — a live current reading (even 0
+	// = "calm now"), the source SARTRE's metric-hub mirrors. Arousal is now entropy-based,
+	// not crude word density — the sharper math the Julia brain proved.
 	_ = iw.field.Exec(fmt.Sprintf("VALENCE %.3f", v))
-	_ = iw.field.Exec(fmt.Sprintf("AROUSAL %.3f", a))
-	// Drive the affect axis only on a charged thought (a near-neutral one stirs no mood).
+	_ = iw.field.Exec(fmt.Sprintf("AROUSAL %.3f", arousal))
+	// Drive the affect axis only on a charged thought: the lean warms (positive) or pains
+	// (negative); a coherent echo flows, a chaotic thought tightens.
 	switch {
 	case v >= feelThreshold:
 		_ = iw.field.Exec(fmt.Sprintf("WARMTH %.3f", v))
-		_ = iw.field.Exec(fmt.Sprintf("FLOW %.3f", a))
+		_ = iw.field.Exec(fmt.Sprintf("FLOW %.3f", resonance))
 	case v <= -feelThreshold:
 		_ = iw.field.Exec(fmt.Sprintf("PAIN %.3f", -v))
-		_ = iw.field.Exec(fmt.Sprintf("TENSION %.3f", a))
+		_ = iw.field.Exec(fmt.Sprintf("TENSION %.3f", arousal))
 	}
 }
