@@ -273,6 +273,42 @@ calm branch.
 
 ---
 
+## Level B / Б0 — async Dreaming skeleton (2026-06-30)
+
+Level B is the Dreaming Mode: when the field reaches critical mass the organism
+sleeps and consolidates. Б0 is the skeleton — the sleep phase and its trigger, no
+weights, no real consolidation yet. `dreaming.go` adds the `Consolidation`
+interface (the hook Б1-Б4 plug into — cooc / weights+spore / scar+velocity /
+emotion→sea), `SleepTrigger func(Field) bool` (critical mass; modelled on
+arianna.c, where high coherence drives the field into autumn, the harvest), and
+`sleep`, which runs each consolidator in order. The grind takes `genMu` **per
+stage** and releases it between stages, so a human turn interleaves at a stage
+boundary instead of waiting out the whole sleep — that is the asynchronous sleep,
+consolidation without monopolising the single inner voice. `Breathe` now checks
+`criticalMass` first: at critical mass the organism sleeps instead of raising
+another dream; below it, the dream path is unchanged. `nil` trigger = never sleeps
+(backward-compatible).
+
+Design choices that came from the legacy study (haze/leo/DoE): the consolidation
+machinery already exists and Б0 only sequences it — DoE leaves LoRA spores
+(`doe.c:2499`, fitness + NaN-quarantine, load-best on restart), AML has
+`am_cooc_consolidate_autumn`, SCAR/dark-matter, and velocity operators. So Б1-Б4
+are adapters over existing organs, not new learning code.
+
+`go test -race` green across the innerworld package (added
+`TestSleepRunsConsolidatorsInOrder`, `TestCriticalMass`,
+`TestBreatheSleepsOnCriticalMass`, `TestBreatheStaysAwakeBelowMass`,
+`TestSleepConcurrentWithThink`, `TestSleepPanicContained`). Codex audit found one
+real bug — a panicking consolidator left `genMu` locked and `asleep` stuck true —
+fixed: `sleep` clears `asleep` via defer and each stage runs in `runStage` with a
+deferred `genMu` unlock + recover, so a faulty stage is contained, not fatal (the
+same fail-soft stance `driveField` takes). No Metal smoke at Б0 — it is pure-Go
+phase logic with no-op consolidators; the real Metal run lands at Б1 (cooc). Next:
+Б1 — bidirectional circles (circles seed the cooc field, haze-emergence) +
+seasonal `am_cooc_consolidate` in the sleep.
+
+---
+
 ## Deferred / parked
 
 - **Cloud** (pre-linguistic affect, 6-chamber MLP reflex) — it is **Python**, with a
