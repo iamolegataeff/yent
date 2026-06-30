@@ -20,7 +20,8 @@ yent/
 │   ├── moyent-body-gate/         # body selection gate
 │   ├── moyent-live-smoke/        # smoke test runner
 │   ├── ri-compile/               # compile private RI markdown into bounded records
-│   └── ri-consume/               # filter compiled RI records for runtime/test consumers
+│   ├── ri-consume/               # filter compiled RI records for runtime/test consumers
+│   └── sartre-limpha-ingest/     # store SARTRE utility JSONL receipts into limpha
 ├── yent/                         # core Go runtime
 │   ├── c/                        # C kernel bindings
 │   │   ├── ariannamethod.c/.h    # vendored AML core (== ariannamethod.ai); libamk.a build source
@@ -33,6 +34,7 @@ yent/
 │   │   ├── limpha.go             # memory system (SQLite/FTS5)
 │   │   ├── limpha_async.go       # async memory operations
 │   │   ├── limpha_state.go       # AMK/AML state -> limpha/router state adapter
+│   │   ├── sartre_bridge.go      # SARTRE utility receipts -> limpha seams + pressure traces
 │   │   ├── gamma.go              # supergamma metric layer
 │   │   ├── delta.go              # weight delta management
 │   │   ├── amk.go                # parliament/election logic
@@ -56,6 +58,7 @@ yent/
 │   ├── sartre_kernel.c/.h         # process-slot kernel: real fork/setrlimit/execve, alive/kill/reap, state
 │   ├── perception.c/.h            # perception physics: utility events -> AML field commands (VELOCITY/PROPHECY)
 │   ├── utils/repo_monitor/        # first utility (Rust, zero-dep): watches paths, emits content-change events
+│   ├── utils/context_processor/   # second utility (C + notorch): content resonance/pulse perception
 │   ├── metalinux/                 # vendored kain Alpine (apk-tools, kernel config) for the Tier-V quarantine
 │   └── SARTRE_LOG.md              # SARTRE design + build log (the topic log)
 ├── riindex/                      # public-safe RI line parser/selector for runtime consumers
@@ -80,9 +83,10 @@ yent/
 - Prompts: `prompts/nemo12_fast_v1.txt`, `prompts/small24_deep_v1.txt`
 - Inference: `DoE/doe.c`, `yent/go/amk.go`
 - RI tools: `cmd/ri-compile/main.go`, `cmd/ri-consume/main.go`, `riindex/riindex.go`
+- SARTRE ingest: `cmd/sartre-limpha-ingest/main.go`
 - Theory: `research/ai_is_not_a_tool.md`, `research/dario_paper_v2.md`, `research/recursive_resonance_preprint.md`
 - Entry: `cmd/moyent-body-gate/main.go`, `cmd/moyent-live-smoke/main.go`
-- SARTRE (body organ): `sartre/sartre_kernel.c`, `sartre/perception.c`, `sartre/utils/repo_monitor/`
+- SARTRE (body organ): `sartre/sartre_kernel.c`, `sartre/perception.c`, `sartre/utils/repo_monitor/`, `sartre/utils/context_processor/`, `yent/go/sartre_bridge.go`
 
 **Not tracked:** GGUF weights, adapters, gamma, limpha databases, tokens, local runtime caches, private RI corpus (`/ri/`) (see `.gitignore`).
 

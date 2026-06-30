@@ -27,6 +27,18 @@ func TestFieldPressureForMemoryLightLimpha(t *testing.T) {
 	}
 }
 
+func TestFieldPressureForMemorySartreTrace(t *testing.T) {
+	got, ok := FieldPressureForMemory([]string{
+		"SARTRE perception: repo_monitor modified README.md | context_processor research/recursive_resonance_preprint.md tag=.md relevance=0.42 pulse=0.73",
+	})
+	if !ok {
+		t.Fatal("expected SARTRE memory pressure")
+	}
+	if got.Prophecy < 4 || got.Prophecy > 6 || got.Velocity != "WALK" || got.Step > 0.35 {
+		t.Fatalf("SARTRE pressure should be live but bounded, got %+v", got)
+	}
+}
+
 func TestFieldPressureForMemoryEmpty(t *testing.T) {
 	if got, ok := FieldPressureForMemory(nil); ok || got != (MemoryFieldPressure{}) {
 		t.Fatalf("empty traces should not pressure field, got ok=%v %+v", ok, got)

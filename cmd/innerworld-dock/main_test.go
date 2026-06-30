@@ -217,3 +217,36 @@ quote	test=false	text=This should not reach runtime.
 		t.Fatalf("RI memory leaked non-test quote:\n%s", text)
 	}
 }
+
+func TestIngestSartreFromEnvStoresPerception(t *testing.T) {
+	lc, err := yent.NewLimphaClientAt(filepath.Join(t.TempDir(), "limpha.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lc.Close()
+
+	path := filepath.Join(t.TempDir(), "sartre.jsonl")
+	if err := os.WriteFile(path, []byte(`[pipe] slot ready
+{"util":"repo_monitor","kind":"modified","path":"/repo/README.md","ts":1}
+{"util":"context_processor","path":"/repo/research/dario_paper_v2.md","tag":".md","relevance":0.41,"pulse":0.66}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("YENT_SARTRE_EVENTS", path)
+
+	if got := ingestSartreFromEnv(lc, yent.LimphaState{Destiny: 0.2}); got != 2 {
+		t.Fatalf("want 2 ingested events, got %d", got)
+	}
+	traces := yent.NewSartreMemory(lc).Recall(2)
+	if len(traces) != 1 || !strings.Contains(traces[0], "SARTRE perception") ||
+		!strings.Contains(traces[0], "context_processor") {
+		t.Fatalf("SARTRE traces missing after ingest: %#v", traces)
+	}
+	stats, err := lc.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats["total_conversations"].(int64) != 1 || stats["total_seams"].(int64) != 1 {
+		t.Fatalf("ingest should store one conversation and one seam, got %v / %v", stats["total_conversations"], stats["total_seams"])
+	}
+}

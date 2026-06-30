@@ -58,6 +58,12 @@ func tracePressureScore(trace string) int {
 		score += 1
 	}
 	for _, marker := range []string{
+		"sartre perception",
+		"repo_monitor",
+		"context_processor",
+		"relevance=",
+		"pulse=",
+		"readme",
 		"danger",
 		"not dialogue",
 		"not as speech",
