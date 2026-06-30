@@ -109,6 +109,37 @@ func wordSet(text string) map[string]bool {
 	return s
 }
 
+// FeelMath is the feeling mathematics the High brain runs on a thought: how scattered it is
+// (Entropy) and how two thoughts echo (Resonance, 0..1). The default is the Go lexical proxy
+// (feelEntropy/feelResonance); the production backend is the real in-process Julia runtime
+// (innerworld/feeling, the HighMathEngine formulas on libjulia), injected via SetFeelMath.
+type FeelMath interface {
+	Entropy(text string) float32
+	Resonance(a, b string) float32
+}
+
+// SetFeelMath injects the feeling-math backend (the real Julia runtime in production). nil
+// keeps the Go lexical proxy. Set before Think/Breathe start.
+func (iw *InnerWorld) SetFeelMath(fm FeelMath) {
+	iw.genMu.Lock()
+	iw.feelMath = fm
+	iw.genMu.Unlock()
+}
+
+func (iw *InnerWorld) entropyOf(text string) float32 {
+	if iw.feelMath != nil {
+		return iw.feelMath.Entropy(text)
+	}
+	return feelEntropy(text)
+}
+
+func (iw *InnerWorld) resonanceOf(a, b string) float32 {
+	if iw.feelMath != nil {
+		return iw.feelMath.Resonance(a, b)
+	}
+	return feelResonance(a, b)
+}
+
 // feelThreshold is the dead-zone: a near-neutral thought stirs no affect.
 const feelThreshold = 0.05
 
@@ -161,12 +192,12 @@ func (iw *InnerWorld) highFeelLocked(circles []Circle) {
 		return
 	}
 	last := circles[len(circles)-1].Text
-	v, _ := feelText(last)            // valence: which way the thought leans (lexical map)
-	entropy := feelEntropy(last)      // how chaotic the thought is (Julia-proven math)
-	arousal := entropy / (entropy + 1) // intensity from real entropy, saturated to 0..1
-	var resonance float32             // how the thought echoes the previous one
+	v, _ := feelText(last)             // valence: which way the thought leans (lexical map)
+	entropy := iw.entropyOf(last)      // how scattered the thought is (Julia backend, or Go)
+	arousal := entropy / (entropy + 1) // intensity from entropy, saturated to 0..1
+	var resonance float32              // how the thought echoes the previous one
 	if len(circles) >= 2 {
-		resonance = feelResonance(last, circles[len(circles)-2].Text)
+		resonance = iw.resonanceOf(last, circles[len(circles)-2].Text)
 	}
 	// Publish the raw feeling as field metrics every turn — a live current reading (even 0
 	// = "calm now"), the source SARTRE's metric-hub mirrors. Arousal is now entropy-based,
