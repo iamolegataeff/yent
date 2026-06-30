@@ -670,19 +670,22 @@ consumes it — zero file overlap. Smoke: `am_exec("VALENCE -0.7")`→`-0.700`, 
 SARTRE reads `am_get_state().valence/arousal`; canonical `ariannamethod.ai` sync now owes
 WARMTH/FLOW + VALENCE/AROUSAL.
 
-**Piece 2 — the Julia math, proven on Julia then embedded in Go.** `nicole2julia` turned out
-to be a slice of real Julia source (not a tiny compiler), and `high.py` shelled out to the
-`julia` binary. But Julia embeds in-process via `libjulia` (`jl_init`+`jl_eval_string`,
-`julia.h:2258/2326`) — proven first-hand: `brew install julia` (1.12.6) on Neo + a C
-embed-smoke linked `-ljulia` ran `sqrt(2)+sin(0.5)=1.893639` and `ent([.5,.25,.25])=1.039721`
-(PASS). Rather than ship the ~hundreds-of-MB Julia runtime to every node, the feeling-math is
-PORTED to pure Go (`high.go`): `feelEntropy` (Shannon entropy of the thought's word
-distribution — how chaotic) and `feelResonance` (Jaccard echo with the previous circle — how
-it circles one matter). `highFeelLocked` now drives arousal from real entropy (sharper than
-word density) and FLOW from resonance. Julia stayed the ORACLE: `TestFeelEntropyMatchesJuliaOracle`
-asserts Go `feelEntropy("a a b c") == 1.039721` (the Julia number) — the embedded formula is
-verified equal to Julia, with no Julia runtime on the nodes. `go test -race ./innerworld` green;
-`build ./...` clean. (Julia stays installed on Neo as the dev oracle, not a runtime dep.)
+**Piece 2 — the feeling math runs on a REAL in-process Julia runtime (libjulia embed).** The
+math brain is real, not a name: `innerworld/feeling.jl` holds the HighMathEngine formulas ported
+to Julia — `char_entropy` (Shannon over the character distribution), `perplexity` (character
+bigram), `semantic_distance` (1 − bag-of-words cosine), `ngram_overlap` (Jaccard n-grams) — and
+`innerworld/feeling` (cgo `-ljulia`) loads the file into `libjulia` (`jl_init` on a dedicated
+locked OS thread, calls via `jl_call`) and runs them. The Julia VM does the math, in-process;
+proven: `go test ./innerworld/feeling` PASS — `CharEntropy("hello") = 1.9219280948873623`,
+`Perplexity("abracadabra") = 1.657227`, `SemanticDistance("a b c","a b d") = 0.333333`,
+identical to `julia -e include(feeling.jl)` and impossible without the runtime executing the
+formulas. `high.go` reaches it through the `FeelMath` interface (`Entropy`/`Resonance`);
+`feeling.JuliaFeelMath` implements it (`CharEntropy` / `1−SemanticDistance`). The dock wires it
+under `-tags julia` (`wireFeelingMath` → `feeling.Init(YENT_FEELING_JL)` → `SetFeelMath`); the
+default build keeps the Go lexical proxy (`feelEntropy`/`feelResonance`) so a node without
+`libjulia` still builds. `innerworld` stays cgo-free. `go build ./...` + `go build -tags julia
+./cmd/innerworld-dock` both link; `go test -race ./innerworld` green. The Go proxy is now the
+fallback, not the product — the product is the Julia math brain, running.
 
 **Piece 3 — emotions → the sea of memory (leo sea-of-memory).** Feeling does not vanish: an
 intensely-felt thought settles into the SAME sea the prophecy-scars live in (`flow.Scar` /

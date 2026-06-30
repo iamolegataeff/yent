@@ -442,6 +442,7 @@ func main() {
 	// the emotional constitution (innerworld/feeling.aml) — the baseline affect at rest.
 	iw.EnableFeeling()
 	fmt.Println("=== High brain wired: the circles' feeling drives the affect axis (warmth/pain/flow/tension) ===")
+	wireFeelingMath(iw) // build with -tags julia to run the HighMathEngine formulas on real libjulia
 	if fp := strings.TrimSpace(os.Getenv("YENT_FEELING_AML")); fp != "" {
 		cs := C.CString(fp)
 		if C.am_exec_file(cs) == 0 {
