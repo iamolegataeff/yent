@@ -538,6 +538,45 @@ then sews this inner world to limpha/RI. Round-final Codex audit pending.
 
 ---
 
+## Third body `flow` / F1 — Metal smoke: one AML physics alive on the real nemo voice (2026-06-30)
+
+The milestone tool-run. `cmd/innerworld-dock` on the Mac mini (`/tmp/yent-flow-f1` throwaway
+worktree off `claude/innerworld-flow-f1` `0b09f03`, `libamk.a` rebuilt lean, the runtime
+checkout untouched), real `nemo12` (`yent-nemo-v22-ck60-Q4_K_M.gguf`), `YENT_DOCK_FORCE_
+AUTUMN=1`, no 24B (the native cooc/scar/sleep physics is driven by the fast circles; the
+deep path is already proven in Strike 2). Exit 0. The receipt:
+
+- **Native cooc tokenizer wired to the voice's OWN BPE**: `nemo BPE (vocab=131072)` — the
+  field's cooc graph is built over the same token ids nemo12 speaks in. One vocabulary.
+- **Real circles drove the native field**: three nemo circles in Yent's S8 voice (drift
+  0.56 → 0.61 → 0.63), `debt=2.005 destiny=0.350 velocity_mode=2(RUN) effective_temp=1.014`
+  — the field reacted strongly (the canonical-header fix holds; not the weak `debt=0.043` of
+  the Strike-1d struct-mismatch). larynx coupling 0.644.
+- **Native scar through the real loop**: `scars=1` — the high-debt thought (2.005 > the 0.5
+  threshold) scarred natively (`scarLocked` → `flow.Scar` → the SCAR operator).
+- **Sleep consolidation fired on the native body**: `FORCE_AUTUMN` drove `autumn energy=0.604`,
+  then the single `FlowConsolidator` ran the field's own cooc autumn harvest each tick —
+  `[sleep] consolidating "flow"` reinforcing the strong edges (cooc mean 0.5867 → 1.1687,
+  max 3.0000 → 4.6874 over the breath). The harvest is the seasonal "important remembered":
+  reinforcement of the strong-edge-dominated real-circle graph shows in the rising mean/max.
+
+Honest, not silenced: (1) the harvest ran ~16× because `FORCE_AUTUMN` keeps the field in
+autumn the whole breath — a smoke aid; a real sleep is one harvest per autumn episode, not
+16. (2) The `[sleep]` line prints cooc mean/max, not the prune count, so the receipt shows
+reinforcement, not the forgotten-tail count (the prune count was proven on the sparse graph
+in the Neo smoke: `pruned=42`). (3) `dark_gravity` held at 0.5144 through the sleep — it
+grows only in `am_step`, which sleep does not call (consistent with F1a). (4) `0 seams` in
+limpha (1 conversation stored) — a seam needs a deep answer, and there is no 24B here;
+nemo-only is expected.
+
+By the tool: F1 — the native AML body as the one inner-world physics (cooc on the voice's
+own vocab + scar + field + sleep harvest) — is alive on Metal over the real nemo voice. That
+closes F1 end to end (F1a body, F1b-core unification, F1b-dock wiring, Metal smoke). Next:
+Codex sews this inner world to limpha/RI; then F1c — `flow.aml` resident script + Kairos's
+`.aml` velocity rhythm. Round-final Codex audit pending; YENTLOG entry at merge.
+
+---
+
 ## Deferred / parked
 
 - **Cloud** (pre-linguistic affect, 6-chamber MLP reflex) — it is **Python**, with a
