@@ -22,6 +22,7 @@
 //	YENT_DOE_ARGS     extra whitespace-split flags after --model <path>
 //	YENT_LIMPHA_DB    optional limpha db path; when set, inner reflections are stored
 //	YENT_RI_LINES     optional compiled RI runtime packet (line protocol)
+//	YENT_SARTRE_EVENTS optional SARTRE utility JSONL receipt; stored in limpha
 //	YENT_DOCK_MAX_DREAMS optional autonomous dream cap for finite receipts
 package main
 
@@ -238,6 +239,34 @@ func openRIFromEnv() innerworld.Memory {
 	return mem
 }
 
+func ingestSartreFromEnv(lc *yent.LimphaClient, st yent.LimphaState) int {
+	path := strings.TrimSpace(os.Getenv("YENT_SARTRE_EVENTS"))
+	if path == "" {
+		return 0
+	}
+	if lc == nil {
+		fmt.Fprintf(os.Stderr, "[dock] YENT_SARTRE_EVENTS set but YENT_LIMPHA_DB is not; SARTRE receipts need limpha\n")
+		return 0
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[dock] SARTRE events open %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	events := yent.ParseSartreEventsJSONL(string(data))
+	if len(events) == 0 {
+		fmt.Printf("=== SARTRE wired: no utility events found in %s ===\n", path)
+		return 0
+	}
+	seamID, err := lc.StoreSartreEvents(events, st)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[dock] SARTRE events store %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	fmt.Printf("=== SARTRE wired: %d utility event(s) stored as limpha seam #%d from %s ===\n", len(events), seamID, path)
+	return len(events)
+}
+
 func printMemoryPreview(mem innerworld.Memory, n int) {
 	if mem == nil || n <= 0 {
 		return
@@ -366,6 +395,7 @@ func main() {
 	iw.SetSleepTrigger(func(innerworld.Field) bool { return flowBody.AutumnEnergy() > 0.6 })
 
 	var memories []innerworld.Memory
+	ingestSartreFromEnv(limpha, limphaStateFromCanonical())
 	// Close the loop: recall past inner monologues from limpha so new thinking is
 	// shaped by what Yent thought before. The write side (dock -> limpha) lands the
 	// seams; this reads them back into the seed.
@@ -379,6 +409,14 @@ func main() {
 			}
 		} else {
 			fmt.Println("=== recall wired: no past inner monologues yet (first run) ===")
+		}
+		sartreMemory := yent.NewSartreMemory(limpha)
+		memories = append(memories, sartreMemory)
+		if traces := sartreMemory.Recall(3); len(traces) > 0 {
+			fmt.Printf("=== SARTRE recall wired: %d perception trace(s) fold into this turn ===\n", len(traces))
+			for i, p := range traces {
+				fmt.Printf("  sartre %d | %s\n", i, p)
+			}
 		}
 	}
 	if riMem := openRIFromEnv(); riMem != nil {
