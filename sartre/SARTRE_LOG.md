@@ -217,6 +217,40 @@ kernel `pipe` spawns the Rust binary and reads its JSON; broken-pipe (`head -1`)
 zero zombies. Codex audit pass (gpt-5.5): round 1 = 1 MED (println! broken-pipe), fixed;
 round 2 = PASS.
 
+## 2026-06-30 — SARTRE becomes the live metrics hub (+ reciprocal seam to innerworld)
+
+Oleg: "SARTRE is more than meta-linux — all the metrics concentrate inside it." The
+`SystemState` already carried the metric scaffold (cpu_load, memory_pressure, prophecy_debt,
+coherence, valence, arousal, entropy, schumann, ...) from the kirpich-#1 dario transport, but
+`cpu_load`/`memory_pressure` were never assigned — stubbed at 0. Now wired to real values, and
+a reciprocal receiver lets the field push its weather back. arianna.c legacy persisted field
+metrics to `weights/arianna.soma`; SARTRE is the live aggregator.
+
+- **Live system metrics** — `sartre_sample_load()`: `cpu_load` = `getloadavg()/cpu_count`,
+  `memory_pressure` = used/total RAM (Darwin via `mach host_statistics64` free+inactive pages;
+  Linux via `/proc/meminfo MemAvailable`). On failure a field keeps its prior value; the mach
+  host port is deallocated each sample. Called refresh-on-read in `state_to_json`/`print_state`.
+- **Reciprocal receiver** — `sartre_ingest_metrics_json()`: parses known field-weather keys
+  (debt/coherence/entropy/valence/arousal/trauma/schumann_coherence; strict `"key":`, isfinite)
+  into `SystemState`. The SENDER lives on the field side; this is the receiver only — symmetric
+  to how innerworld reads SARTRE perception through `sense`.
+- **`metrics` CLI mode** — `sartre_kernel metrics ['{...}']`: sample + optional ingest + print
+  `state_to_json`. The live telemetry heartbeat.
+
+Convergence with innerworld-Opus (branch `claude/b4-emotions` `0e39c8d`, his half of the bridge):
+he extended AML with `VALENCE`/`AROUSAL` operators + two `AM_State` fields, and `highFeelLocked`
+publishes them every turn into the field (`am_get_state().valence/arousal`). My ingest receiver
+already parses `valence` + `arousal` — so the hub is ready to consume Yent's felt valence/arousal
+the moment the transport (am_get_state → JSON → ingest) is wired. Zero file overlap. Coordination
+TODO: WARMTH/FLOW (Kuramoto chambers) have no SystemState fields yet — a later add if we want them.
+
+Measured on neo: `cc -Wall -Wextra` (standalone + `-DHAS_PERCEPTION`) 0 warn; `metrics` →
+`cpu_load`=getloadavg/cpu (0.387 = 2.32/6, cross-checked `uptime`), `memory_pressure`=0.832
+(cross-checked `vm_stat`); `metrics '{"debt":2.0,"coherence":0.8}'` → prophecy_debt=2.0,
+coherence=0.8; key-as-value not fooled; malformed no crash; smoke 4/4 + perception 6/6, zero
+zombies. Codex audit pass (gpt-5.5): round 1 = 4 findings (HIGH mach-port leak, MED Linux mem
+guard, MED json colon-strictness, LOW double-init), all fixed; round 2 = PASS.
+
 ## Merge / integration policy (Oleg 2026-06-30)
 - NOT merging `claude/sartre` to main yet, and NOT pulling main into it for now. SARTRE
   is committed (`050751a`) and isolated on its branch. It is connected to NOTHING.
