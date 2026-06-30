@@ -61,6 +61,9 @@ func TestMemoryPressureDrivesFieldBeforeCircles(t *testing.T) {
 	if scripts[0] != "PROPHECY 5" || scripts[1] != "VELOCITY WALK" {
 		t.Fatalf("memory pressure should lead field commands, got first scripts %#v", scripts[:2])
 	}
+	if r.MemoryPressure.Score != 4 || r.MemoryPressure.Prophecy != 5 || r.MemoryPressure.Velocity != "WALK" {
+		t.Fatalf("reflection should carry applied memory pressure, got %+v", r.MemoryPressure)
+	}
 	field.mu.Lock()
 	steps := field.steps
 	field.mu.Unlock()

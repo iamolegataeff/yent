@@ -40,10 +40,11 @@ func DefaultBreath() Breath {
 // none of it reaches the user.
 type Reflection struct {
 	Circles        []Circle
-	Coupling       float32 // Larynx coupling over the circles [0,1]
-	SelfAnswerProb float32 // gate probability the deep body answers itself [0,1]
-	SelfAnswered   bool    // the unpredictable roll's outcome this time
-	DeepAnswer     string  // small24's inner answer to the circles; empty unless SelfAnswered with a deep body
+	Coupling       float32             // Larynx coupling over the circles [0,1]
+	SelfAnswerProb float32             // gate probability the deep body answers itself [0,1]
+	SelfAnswered   bool                // the unpredictable roll's outcome this time
+	DeepAnswer     string              // small24's inner answer to the circles; empty unless SelfAnswered with a deep body
+	MemoryPressure MemoryFieldPressure // slow pressure applied before circles; Score==0 means none
 }
 
 // Memory lets the inner world recall its own past monologues so new thinking is
@@ -291,8 +292,8 @@ func (iw *InnerWorld) think(prompt string) Reflection {
 	iw.genMu.Lock()
 	iw.ensureFastResidentLocked()
 	traces := iw.memoryTracesLocked()
-	iw.applyMemoryPressureLocked(traces) // the past as slow field pressure
-	iw.applySenseLocked()                // the present world as fast field reflex (SARTRE)
+	memoryPressure, _ := iw.applyMemoryPressureLocked(traces) // the past as slow field pressure
+	iw.applySenseLocked()                                     // the present world as fast field reflex (SARTRE)
 	circles := Overthink(iw.recallSeedWithTraces(iw.coocBias(iw.scarSurface(prompt)), traces), iw.fast, iw.field, iw.div, iw.cfg)
 	debt := iw.fieldDebt()                               // snapshot under genMu: belongs to this batch
 	iw.observeLocked(circles)                            // circles seed the cooc field (circles->field)
@@ -300,6 +301,7 @@ func (iw *InnerWorld) think(prompt string) Reflection {
 	iw.highFeelLocked(circles)                           // the circles' feeling drives the affect axis (High brain)
 	iw.publishMetricsLocked("human_turn", circles, debt) // reciprocal field-weather telemetry
 	r := iw.reflect(circles, debt)
+	r.MemoryPressure = memoryPressure
 	if r.SelfAnswered {
 		r.DeepAnswer = iw.deepAnswerLocked(circles) // deep body speaks, under the single voice
 	}
@@ -370,8 +372,8 @@ func (iw *InnerWorld) dream(trigger int) Reflection {
 	iw.genMu.Lock()
 	iw.ensureFastResidentLocked()
 	traces := iw.memoryTracesLocked()
-	iw.applyMemoryPressureLocked(traces) // the past as slow field pressure
-	iw.applySenseLocked()                // the present world as fast field reflex (SARTRE)
+	memoryPressure, _ := iw.applyMemoryPressureLocked(traces) // the past as slow field pressure
+	iw.applySenseLocked()                                     // the present world as fast field reflex (SARTRE)
 	circles := Overthink(iw.recallSeedWithTraces(iw.coocBias(iw.scarSurface(seed)), traces), iw.fast, iw.field, iw.div, iw.cfg)
 	debt := iw.fieldDebt()                          // snapshot under genMu: belongs to this batch
 	iw.observeLocked(circles)                       // dreams seed the cooc field too (circles->field)
@@ -379,6 +381,7 @@ func (iw *InnerWorld) dream(trigger int) Reflection {
 	iw.highFeelLocked(circles)                      // even alone, a dream colours the mood (High brain)
 	iw.publishMetricsLocked("dream", circles, debt) // reciprocal field-weather telemetry
 	r := iw.reflect(circles, debt)
+	r.MemoryPressure = memoryPressure
 	if r.SelfAnswered {
 		r.DeepAnswer = iw.deepAnswerLocked(circles) // even alone, the deep body may answer the dream
 	}

@@ -387,12 +387,13 @@ func limphaStateFromCanonical() yent.LimphaState {
 }
 
 type innerReflectionTrace struct {
-	Kind           string  `json:"kind"`
-	Source         string  `json:"source"`
-	Circles        int     `json:"circles"`
-	Coupling       float32 `json:"coupling"`
-	SelfAnswerProb float32 `json:"self_answer_prob"`
-	SelfAnswered   bool    `json:"self_answered"`
+	Kind           string                          `json:"kind"`
+	Source         string                          `json:"source"`
+	Circles        int                             `json:"circles"`
+	Coupling       float32                         `json:"coupling"`
+	SelfAnswerProb float32                         `json:"self_answer_prob"`
+	SelfAnswered   bool                            `json:"self_answered"`
+	MemoryPressure *innerworld.MemoryFieldPressure `json:"memory_pressure,omitempty"`
 }
 
 func persistReflection(lc *yent.LimphaClient, kind, source string, r innerworld.Reflection, st yent.LimphaState) {
@@ -419,6 +420,9 @@ func persistReflection(lc *yent.LimphaClient, kind, source string, r innerworld.
 		Coupling:       r.Coupling,
 		SelfAnswerProb: r.SelfAnswerProb,
 		SelfAnswered:   r.SelfAnswered,
+	}
+	if r.MemoryPressure.Score > 0 {
+		trace.MemoryPressure = &r.MemoryPressure
 	}
 	if source = strings.TrimSpace(source); source != "" {
 		trace.Source = kind + ":" + source
@@ -451,6 +455,14 @@ func formatCircleStream(circles []innerworld.Circle) string {
 		fmt.Fprintf(&b, "circle %d temp=%.2f drift=%.2f | %s", c.Index, c.Temp, c.Drift, c.Text)
 	}
 	return b.String()
+}
+
+func printReflectionMemoryPressure(prefix string, p innerworld.MemoryFieldPressure) {
+	if p.Score <= 0 {
+		return
+	}
+	fmt.Printf("%s: score=%d prophecy=%d velocity=%s step=%.2f\n",
+		prefix, p.Score, p.Prophecy, p.Velocity, p.Step)
 }
 
 func main() {
@@ -582,6 +594,7 @@ func main() {
 	st := C.am_get_state()
 	fmt.Printf("  field    : debt=%.3f destiny=%.3f velocity_mode=%d effective_temp=%.3f\n",
 		float32(st.debt), float32(st.destiny), int(st.velocity_mode), float32(st.effective_temp))
+	printReflectionMemoryPressure("  memory   ", r.MemoryPressure)
 	fmt.Printf("  feeling  : valence=%.3f arousal=%.3f | warmth=%.3f pain=%.3f flow=%.3f tension=%.3f | scars(sea)=%d\n",
 		float32(st.valence), float32(st.arousal), float32(st.warmth), float32(st.pain),
 		float32(st.flow), float32(st.tension), int(st.n_scars))
@@ -611,6 +624,7 @@ func main() {
 		if rf.DeepAnswer != "" {
 			fmt.Printf("  [dream/deep] small24 | %s\n", rf.DeepAnswer)
 		}
+		printReflectionMemoryPressure("  [dream/memory]", rf.MemoryPressure)
 		persistReflection(limpha, "dream", "autonomous breath", rf, limphaStateFromCanonical())
 		dreams++
 		if dreamLimit > 0 && dreams >= dreamLimit {
