@@ -51,6 +51,18 @@ Next steps:
    `setrlimit` + `sandbox-exec` it, record real pid/limit in the nucleus (truthful
    observability via `sartre_state_to_json`).
 3. **First utility-package** (e.g. `repo_monitor`) in Go, in a slot, brokered round-trip
-   to Yent — human turns preempt agent-utility inference (slot scheduler).
+   to Yent. **ASYNC, no preemption (Oleg 2026-06-30):** utilities run in the background
+   in parallel; inference requests are fair-queued to the model — a human can wait a
+   couple seconds, it's all async anyway. No "human turn preempts utility" scheduler —
+   that was an over-engineered idea, dropped.
 4. **metalinux arm64 retarget** — when a utility needs apk-managed deps / hard memory cap.
    Build on a Linux carrier (Lima/VZ on the Mac), NOT polygon.
+
+## Merge / integration policy (Oleg 2026-06-30)
+- NOT merging `claude/sartre` to main yet, and NOT pulling main into it for now. SARTRE
+  is committed (`050751a`) and isolated on its branch. It is connected to NOTHING.
+- Before integration, Codex will audit SARTRE and stitch it into limpha + metrics +
+  innerworld (all of which feed SARTRE), then verify ~10× on the Mac Mini. Until then
+  Codex ignores `sartre/` (Oleg will tell it so) — the folder is inert.
+- When the merge finally happens: append the YENTLOG entry once, in one hand, at merge
+  time (the YENTLOG-per-branch conflict rule), and redraw the Repository Map.
