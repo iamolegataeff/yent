@@ -197,6 +197,9 @@ typedef struct {
     float entropy;
     float warmth;            /* Kuramoto LOVE chamber — published by innerworld's affect field */
     float flow;              /* Kuramoto FLOW chamber — published by innerworld's affect field */
+    float memory_field_score;    /* inner recall/RI/SARTRE pressure score; not RAM pressure */
+    float memory_field_prophecy; /* AML prophecy applied by slow memory pressure */
+    float memory_field_step;     /* AML step used to settle slow memory pressure */
 
     /* schumann */
     float schumann_coherence;
@@ -257,7 +260,8 @@ void sartre_sample_load(void);
 
 /* Reciprocal seam: the field/innerworld pushes its inner weather back into the hub.
  * Parses a small JSON object for known keys (debt, coherence, entropy, valence,
- * arousal, trauma, warmth, flow, schumann_coherence) and updates the matching fields. The
+ * arousal, trauma, warmth, flow, memory_field_score, memory_field_prophecy,
+ * memory_field_step, schumann_coherence) and updates the matching fields. The
  * sender lives on the field side; this is only the receiver. Malformed input is
  * ignored, non-finite values are dropped. */
 void sartre_ingest_metrics_json(const char *json);

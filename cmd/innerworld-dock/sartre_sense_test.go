@@ -53,14 +53,17 @@ func TestSartreMetricSinkPublishesFieldWeather(t *testing.T) {
 	defer shutdownSartreHub()
 
 	if err := (sartreMetricSink{}).PublishMetrics(innerworld.MetricSnapshot{
-		Debt:      2.25,
-		Coherence: 0.50,
-		Entropy:   0.40,
-		Valence:   -0.30,
-		Arousal:   0.70,
-		Trauma:    0.30,
-		Warmth:    0.0,
-		Flow:      0.0,
+		Debt:                2.25,
+		Coherence:           0.50,
+		Entropy:             0.40,
+		Valence:             -0.30,
+		Arousal:             0.70,
+		Trauma:              0.30,
+		Warmth:              0.0,
+		Flow:                0.0,
+		MemoryFieldScore:    4,
+		MemoryFieldProphecy: 5,
+		MemoryFieldStep:     0.31,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +75,10 @@ func TestSartreMetricSinkPublishesFieldWeather(t *testing.T) {
 		got["coherence"].(float64) != 0.5 ||
 		got["valence"].(float64) != -0.3 ||
 		got["arousal"].(float64) != 0.7 ||
-		got["trauma"].(float64) != 0.3 {
+		got["trauma"].(float64) != 0.3 ||
+		got["memory_field_score"].(float64) != 4 ||
+		got["memory_field_prophecy"].(float64) != 5 ||
+		got["memory_field_step"].(float64) != 0.31 {
 		t.Fatalf("SARTRE hub did not receive field weather: %+v", got)
 	}
 }

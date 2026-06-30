@@ -247,14 +247,17 @@ func (s sartreMetricSink) PublishMetrics(m innerworld.MetricSnapshot) error {
 		return nil
 	}
 	payload := map[string]float32{
-		"debt":      m.Debt,
-		"coherence": m.Coherence,
-		"entropy":   m.Entropy,
-		"valence":   m.Valence,
-		"arousal":   m.Arousal,
-		"trauma":    m.Trauma,
-		"warmth":    m.Warmth,
-		"flow":      m.Flow,
+		"debt":                  m.Debt,
+		"coherence":             m.Coherence,
+		"entropy":               m.Entropy,
+		"valence":               m.Valence,
+		"arousal":               m.Arousal,
+		"trauma":                m.Trauma,
+		"warmth":                m.Warmth,
+		"flow":                  m.Flow,
+		"memory_field_score":    m.MemoryFieldScore,
+		"memory_field_prophecy": m.MemoryFieldProphecy,
+		"memory_field_step":     m.MemoryFieldStep,
 	}
 	b, err := json.Marshal(payload)
 	if err != nil {

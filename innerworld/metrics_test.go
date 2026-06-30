@@ -24,9 +24,12 @@ func TestMetricSnapshotForCircles(t *testing.T) {
 		{Text: "cold iron rust"},
 		{Text: "i love this wonderful beautiful joy"},
 	}
-	got := metricSnapshotForCircles("human_turn", circles, 2.5)
+	got := metricSnapshotForCircles("human_turn", circles, 2.5, MemoryFieldPressure{Score: 4, Prophecy: 5, Step: 0.31})
 	if got.Source != "human_turn" || got.Circles != 2 || got.Debt != 2.5 {
 		t.Fatalf("basic snapshot wrong: %+v", got)
+	}
+	if got.MemoryFieldScore != 4 || got.MemoryFieldProphecy != 5 || got.MemoryFieldStep != 0.31 {
+		t.Fatalf("memory pressure receipt missing from snapshot: %+v", got)
 	}
 	if got.Valence <= 0 || got.Arousal <= 0 || got.Warmth <= 0 {
 		t.Fatalf("positive feeling should publish valence/arousal/warmth: %+v", got)
@@ -40,7 +43,7 @@ func TestMetricSnapshotForCircles(t *testing.T) {
 }
 
 func TestMetricSnapshotForNegativeFeeling(t *testing.T) {
-	got := metricSnapshotForCircles("dream", []Circle{{Text: "alone broken hopeless pain fear"}}, -10)
+	got := metricSnapshotForCircles("dream", []Circle{{Text: "alone broken hopeless pain fear"}}, -10, MemoryFieldPressure{})
 	if got.Debt != 0 {
 		t.Fatalf("negative debt should clamp to 0, got %.3f", got.Debt)
 	}
@@ -55,6 +58,7 @@ func TestMetricSnapshotForNegativeFeeling(t *testing.T) {
 func TestMetricSinkPublishesOnThinkAndFailsSoft(t *testing.T) {
 	sink := &recordingMetricSink{err: errors.New("ignored")}
 	iw := NewInnerWorld(fakeBody{}, &fakeField{debt: 2}, tempDivergence)
+	iw.SetMemory(fakeMemory{past: []string{"RI pressure: raw memory must become field pressure."}})
 	iw.SetMetricSink(sink)
 	<-iw.Think("what is code")
 	if len(sink.got) != 1 {
@@ -62,6 +66,9 @@ func TestMetricSinkPublishesOnThinkAndFailsSoft(t *testing.T) {
 	}
 	if sink.got[0].Source != "human_turn" || sink.got[0].Circles != 3 {
 		t.Fatalf("unexpected metric snapshot: %+v", sink.got[0])
+	}
+	if sink.got[0].MemoryFieldScore == 0 || sink.got[0].MemoryFieldProphecy == 0 || sink.got[0].MemoryFieldStep == 0 {
+		t.Fatalf("metric snapshot should carry applied memory pressure: %+v", sink.got[0])
 	}
 
 	iw.SetMetricSink(panicMetricSink{})

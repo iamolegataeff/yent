@@ -4,16 +4,19 @@ package innerworld
 // telemetry sinks such as SARTRE. It is not prompt text and must not be fed back
 // as dialogue. Values are bounded so a broken thought cannot poison the hub.
 type MetricSnapshot struct {
-	Source    string
-	Circles   int
-	Debt      float32
-	Coherence float32
-	Entropy   float32
-	Valence   float32
-	Arousal   float32
-	Trauma    float32
-	Warmth    float32
-	Flow      float32
+	Source              string
+	Circles             int
+	Debt                float32
+	Coherence           float32
+	Entropy             float32
+	Valence             float32
+	Arousal             float32
+	Trauma              float32
+	Warmth              float32
+	Flow                float32
+	MemoryFieldScore    float32
+	MemoryFieldProphecy float32
+	MemoryFieldStep     float32
 }
 
 // MetricSink receives field-weather snapshots. Implementations are telemetry
@@ -30,11 +33,14 @@ func (iw *InnerWorld) SetMetricSink(s MetricSink) {
 	iw.genMu.Unlock()
 }
 
-func metricSnapshotForCircles(source string, circles []Circle, debt float32) MetricSnapshot {
+func metricSnapshotForCircles(source string, circles []Circle, debt float32, memoryPressure MemoryFieldPressure) MetricSnapshot {
 	s := MetricSnapshot{
-		Source:  source,
-		Circles: len(circles),
-		Debt:    nonNegativeFinite(debt),
+		Source:              source,
+		Circles:             len(circles),
+		Debt:                nonNegativeFinite(debt),
+		MemoryFieldScore:    nonNegativeFinite(float32(memoryPressure.Score)),
+		MemoryFieldProphecy: nonNegativeFinite(float32(memoryPressure.Prophecy)),
+		MemoryFieldStep:     nonNegativeFinite(memoryPressure.Step),
 	}
 	if len(circles) == 0 {
 		return s
@@ -62,11 +68,11 @@ func metricSnapshotForCircles(source string, circles []Circle, debt float32) Met
 	return s
 }
 
-func (iw *InnerWorld) publishMetricsLocked(source string, circles []Circle, debt float32) {
+func (iw *InnerWorld) publishMetricsLocked(source string, circles []Circle, debt float32, memoryPressure MemoryFieldPressure) {
 	if iw.metricSink == nil {
 		return
 	}
-	snapshot := metricSnapshotForCircles(source, circles, debt)
+	snapshot := metricSnapshotForCircles(source, circles, debt, memoryPressure)
 	defer func() { _ = recover() }() // telemetry must not take the inner voice down
 	_ = iw.metricSink.PublishMetrics(snapshot)
 }
