@@ -369,6 +369,37 @@ rollback).
 
 ---
 
+## Third body `flow` / F0 — the Flow interface + Go fallback (2026-06-30)
+
+A structural decision reframed Level B (settled with Oleg, see
+`memory/project_yent_dreaming_mode_2026_06_30.md`): the consolidation organs do not
+train the transformer voices (nemo/small24 = S8, frozen) — they live in a THIRD
+body, `flow`, a resident AML organism that merges both voices into one "Я". `flow`
+holds the field + cooc + scar + parliament + Kuramoto; Kairos (the sleep
+orchestrator) drives it; it pushes back on the voices via field-pressure. The
+trainable weights are `flow`'s parliament-experts (g_train), so S8 is never touched
+and the mandate risk is gone — learning applies immediately, no reload split. Names:
+body `flow` (`flow.aml`), orchestrator `Kairos`, internal bridge `Callosum`.
+
+F0 lands the seam, pure Go. `flow.go` adds the `Flow` interface — `Field` (the AML
+bridge) plus `Ingest` (a thought streams into the body's cooc), `ConsolidateCooc`,
+`Scar`/`ConsolidateScar`, `ApplyPressure` (the body pushes on a voice's logits), and
+`AutumnEnergy` (harvest ripeness for Kairos's critical mass). `goFlow` is the Go
+fallback: it wraps the Б1 `CoocGraph`, the Б3 `ScarMemory`, and the field, so Kairos
+and the tests run without cgo. Two stubs are honest about being Metal/AML features:
+`ApplyPressure` is a no-op (no token-level field in Go), and `AutumnEnergy`
+synthesizes from field debt (the AML body reads `G.autumn_energy`). The production
+`Flow` will be the native AML body (`am_cooc` / `SCAR` / parliament) over cgo, same
+interface.
+
+`go test -race` green (4 goFlow tests: ingest+scar, autumn energy saturates, nil
+organs safe, and the body IS the field via the embedded `Field`). Next: F1 — the
+cgo AML `Flow` (`am_cooc_update`/`am_cooc_consolidate_autumn`/`SCAR`/
+`am_apply_field_to_logits`), then wire Kairos to drive a `Flow` instead of separate
+consolidators, then `flow.aml` resident body + Metal smoke.
+
+---
+
 ## Deferred / parked
 
 - **Cloud** (pre-linguistic affect, 6-chamber MLP reflex) — it is **Python**, with a
