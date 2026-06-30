@@ -130,6 +130,7 @@ typedef struct {
     float cpu_share;    /* 0-1: allocated CPU fraction */
     float mem_limit_mb; /* memory limit */
     int   active;
+    int   spawned;      /* 1 = backed by a real OS process (fork+exec); 0 = conceptual monad */
 } SartreNamespace;
 
 #define SARTRE_MAX_NS 8
@@ -263,6 +264,17 @@ float sartre_overlay_ratio(void);
 int  sartre_ns_create(const char *name, float cpu_share, float mem_limit_mb);
 void sartre_ns_destroy(int ns_id);
 SartreNamespace *sartre_ns_get(int ns_id);
+
+/* Real process-slot: fork+setrlimit+execve a utility into a namespace slot.
+ * argv[0] must be a RESOLVED executable path (no PATH search — async-signal-safe
+ * child, fork-safe inside a multithreaded host). Returns ns_id (slot backed by a
+ * live OS process) or -1. argv NULL-terminated. */
+int  sartre_ns_spawn(const char *name, char *const argv[], float mem_limit_mb);
+/* Liveness for a spawned slot: reaps if exited, updates active. Returns 1 if alive.
+ * For conceptual monads (spawned==0) returns the stored active flag. */
+int  sartre_ns_alive(int ns_id);
+/* Terminate a spawned slot (SIGTERM, grace, SIGKILL) and reap. Monads: marks dead. */
+void sartre_ns_kill(int ns_id);
 
 /* ═══════════════════════════════════════════════════════════════════
  * PACKAGES (minimal apk-style)

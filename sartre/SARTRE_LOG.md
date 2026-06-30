@@ -58,6 +58,56 @@ Next steps:
 4. **metalinux arm64 retarget** — when a utility needs apk-managed deps / hard memory cap.
    Build on a Linux carrier (Lima/VZ on the Mac), NOT polygon.
 
+## 2026-06-30 — Brick #1: real process-slot (C isolation, bottom layer)
+
+Form confirmed (Oleg): SARTRE is ONE body in the `flow` shape — AML perception-field
+on top, `moyent.Router` as the dirigent (part of the form, not a forbidden zone), C
+process-isolation underneath. Layer order (Oleg's own sequence "connect us after Codex
+finishes the innerworld stitch"): the C bottom layer ships first because it is the only
+layer unique to SARTRE with zero touch on Router/limpha/field — so it cannot collide with
+Codex's in-flight innerworld+limpha stitch. The Go body + `field.Exec` + Router wiring is
+brick #2, after that stitch lands.
+
+Done (tool-verified on neo, this session):
+- `sartre_ns_spawn(name, argv, mem_limit_mb)` — `fork`+`setrlimit`+`execvp` (not posix_spawn:
+  the limit must be set on the child between fork and exec). Records the REAL child pid in a
+  slot, `spawned=1`. Conceptual monads (`dario`/`observer`) keep `spawned=0`, untouched.
+- `sartre_ns_alive(id)` — `waitpid(WNOHANG)` reap + exit-detect, updates `active`; no zombies.
+- `sartre_ns_kill(id)` — SIGTERM, ~500ms grace reaping, SIGKILL + final reap if it survives.
+- Truthful observability: `print_state` shows `(proc)`/`(monad)` + real pid; `state_to_json`
+  gains `"ns_spawned"` (count of real-process slots). End of the fake `pid=id+1` for spawned.
+
+Checklist (all measured, not claimed):
+- Build `cc sartre_kernel.c -O2 -lm` AND `-Wall -Wextra` → 0 errors, 0 warnings.
+- In-binary smoke 3/3 PASS: spawn `sleep 30`→alive=1; kill→alive=0; `sh -c 'exit 0'`→reaped.
+- `hold` mode: `ps -p <pid>` showed the child as a real process (comm=`sleep`, ppid=the
+  kernel, stat=`SN`); after release `ps` = gone; zombie/leftover scan = none.
+- Monads `dario`/`observer` still print `(monad) ... ACTIVE`, unchanged.
+
+setrlimit enforcement probe (Darwin arm64, measured — `scratchpad/rlimit_probe.c`, throwaway):
+
+| Limit         | Darwin arm64                          | Note |
+|---------------|---------------------------------------|------|
+| `RLIMIT_AS`   | **setrlimit returns EINVAL** (unsupported) | mem cap is a NO-OP on macOS — real on Linux |
+| `RLIMIT_NOFILE` | ENFORCED (open refused past cap)    | |
+| `RLIMIT_FSIZE`  | ENFORCED (child killed SIGXFSZ 25)  | |
+| `RLIMIT_CPU`    | ENFORCED (child killed SIGXCPU 24)  | |
+| `RLIMIT_NPROC`  | untested by design (fork-bomb risk) | |
+
+Honest claim of brick #1: a utility really runs in a slot, is killable, and is observed
+truthfully. It is NOT memory-isolated on macOS (`RLIMIT_AS` unsupported). A hard `memory.max`
+stays the metalinux/Tier-V job (Virtualization.framework), exactly as the transport entry says.
+
+Codex audit pass (gpt-5.5, xhigh): round 1 returned 6 findings — 2 High (`sartre_ns_destroy`
+leaked spawned children; `sartre_ns_kill` could SIGKILL a reused pid after reaping), 3 Medium
+(waitpid EINTR not retried; print_state/state_to_json trusted stale `active`; execvp PATH-search
+not fork-safe), 1 Low (mem_limit float→rlim_t overflow). All fixed and tool-verified (smoke 4/4
+incl. destroy; shutdown-reap leaves no orphan; global zombie scan clean; execve+EINTR-wrapper+
+reaped-guard+refresh confirmed by grep). Round 2 re-audit: VERDICT PASS, no new issues.
+
+Committed on `claude/sartre` (Oleg's go). NOT merged — brick #2 (Go body + Router + field) lands
+after Codex finishes the innerworld+limpha stitch.
+
 ## Merge / integration policy (Oleg 2026-06-30)
 - NOT merging `claude/sartre` to main yet, and NOT pulling main into it for now. SARTRE
   is committed (`050751a`) and isolated on its branch. It is connected to NOTHING.

@@ -26,6 +26,11 @@
 
 #include "sartre_kernel.h"
 #include <time.h>
+#include <unistd.h>
+#include <signal.h>
+#include <errno.h>
+#include <sys/wait.h>
+#include <sys/resource.h>
 
 #ifdef __APPLE__
 #include <sys/sysctl.h>
@@ -68,6 +73,9 @@ int sartre_init(const char *config_path) {
 
 void sartre_shutdown(void) {
     if (!sartre_ready) return;
+    for (int i = 0; i < sys.ns_count; i++)   /* don't leak live children on shutdown */
+        if (sys.namespaces[i].spawned && sys.namespaces[i].active)
+            sartre_ns_kill(i);
     sartre_notify_event("kernel_shutdown");
     sartre_ready = 0;
     fprintf(stderr, "[sartre] kernel shutdown\n");
@@ -199,6 +207,7 @@ int sartre_ns_create(const char *name, float cpu_share, float mem_limit_mb) {
     sys.namespaces[id].cpu_share    = cpu_share;
     sys.namespaces[id].mem_limit_mb = mem_limit_mb;
     sys.namespaces[id].active       = 1;
+    sys.namespaces[id].spawned      = 0;   /* conceptual monad, not an OS process */
 
     char ev[128];
     snprintf(ev, sizeof(ev), "ns_create:%s", name);
@@ -209,6 +218,10 @@ int sartre_ns_create(const char *name, float cpu_share, float mem_limit_mb) {
 
 void sartre_ns_destroy(int ns_id) {
     if (ns_id < 0 || ns_id >= sys.ns_count) return;
+    if (sys.namespaces[ns_id].spawned) {     /* real process: terminate + reap, don't leak */
+        sartre_ns_kill(ns_id);
+        return;
+    }
     sys.namespaces[ns_id].active = 0;
 
     char ev[128];
@@ -219,6 +232,123 @@ void sartre_ns_destroy(int ns_id) {
 SartreNamespace *sartre_ns_get(int ns_id) {
     if (ns_id < 0 || ns_id >= sys.ns_count) return NULL;
     return &sys.namespaces[ns_id];
+}
+
+extern char **environ;
+
+/* EINTR-safe waitpid: a real reaper must not be fooled by an interrupting signal. */
+static pid_t sartre_waitpid(pid_t pid, int *status, int flags) {
+    pid_t r;
+    do { r = waitpid(pid, status, flags); } while (r < 0 && errno == EINTR);
+    return r;
+}
+
+/* Real process-slot. fork+setrlimit+execve — the limit must be set on the child
+ * between fork and exec, so this is not posix_spawn. The child path uses only
+ * execve (async-signal-safe) + a bare setrlimit syscall, so it is safe even when
+ * the kernel is linked into a multithreaded host (the future Go/cgo runtime).
+ * argv[0] must be a RESOLVED executable path — no PATH search. On Linux RLIMIT_AS
+ * is a real address-space cap; on Darwin setrlimit(RLIMIT_AS) returns EINVAL
+ * (unsupported — measured, see SARTRE_LOG), so mem_limit_mb does not bound memory
+ * on macOS. A hard memory cap is the metalinux/Tier-V job. A utility must really
+ * run before it can feed the field. */
+int sartre_ns_spawn(const char *name, char *const argv[], float mem_limit_mb) {
+    if (sys.ns_count >= SARTRE_MAX_NS) return -1;
+    if (!name || !argv || !argv[0]) return -1;
+
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+
+    if (pid == 0) {
+        /* child: bound, then become the utility. Only async-signal-safe work here. */
+        if (mem_limit_mb > 0.0f && mem_limit_mb <= 1048576.0f) {   /* guard float->rlim_t overflow */
+            rlim_t bytes = (rlim_t)(mem_limit_mb * 1024.0f * 1024.0f);
+            struct rlimit rl = { bytes, bytes };
+            setrlimit(RLIMIT_AS, &rl);      /* real cap on Linux; EINVAL on Darwin (measured) */
+        }
+        execve(argv[0], argv, environ);     /* async-signal-safe; argv[0] = resolved path */
+        _exit(127);                          /* exec failed */
+    }
+
+    /* parent: record the real child in a slot */
+    int id = sys.ns_count++;
+    strncpy(sys.namespaces[id].name, name, 63);
+    sys.namespaces[id].name[63]     = '\0';
+    sys.namespaces[id].pid          = (int)pid;
+    sys.namespaces[id].cpu_share    = 0.0f;
+    sys.namespaces[id].mem_limit_mb = mem_limit_mb;
+    sys.namespaces[id].active       = 1;
+    sys.namespaces[id].spawned      = 1;
+
+    char ev[128];
+    snprintf(ev, sizeof(ev), "ns_spawn:%s pid=%d", name, (int)pid);
+    sartre_notify_event(ev);
+
+    return id;
+}
+
+int sartre_ns_alive(int ns_id) {
+    if (ns_id < 0 || ns_id >= sys.ns_count) return 0;
+    SartreNamespace *ns = &sys.namespaces[ns_id];
+    if (!ns->spawned) return ns->active;     /* monad: stored flag is its truth */
+    if (!ns->active)  return 0;
+
+    int status;
+    pid_t r = sartre_waitpid((pid_t)ns->pid, &status, WNOHANG);
+    if (r == 0) return 1;                     /* still running, not reaped */
+    if (r == (pid_t)ns->pid || (r < 0 && errno == ECHILD)) {
+        ns->active = 0;                       /* exited (reaped now or already gone) */
+        char ev[128];
+        snprintf(ev, sizeof(ev), "ns_exit:%s pid=%d", ns->name, ns->pid);
+        sartre_notify_event(ev);
+        return 0;
+    }
+    /* any other waitpid error on our own child: treat as dead — do NOT probe a
+     * possibly-reused pid with kill(pid,0) (would touch an unrelated process). */
+    ns->active = 0;
+    return 0;
+}
+
+void sartre_ns_kill(int ns_id) {
+    if (ns_id < 0 || ns_id >= sys.ns_count) return;
+    SartreNamespace *ns = &sys.namespaces[ns_id];
+
+    if (!ns->spawned) {                       /* conceptual monad: same as destroy */
+        ns->active = 0;
+        char ev[128];
+        snprintf(ev, sizeof(ev), "ns_destroy:%s", ns->name);
+        sartre_notify_event(ev);
+        return;
+    }
+
+    if (ns->active && ns->pid > 0) {
+        int status, reaped = 0;
+        pid_t r;
+        /* preflight: it may have already exited — reap without signalling */
+        r = sartre_waitpid((pid_t)ns->pid, &status, WNOHANG);
+        if (r == (pid_t)ns->pid || (r < 0 && errno == ECHILD)) reaped = 1;
+
+        if (!reaped) {
+            kill((pid_t)ns->pid, SIGTERM);
+            for (int i = 0; i < 50; i++) {    /* up to ~500ms grace, reaping as we wait */
+                r = sartre_waitpid((pid_t)ns->pid, &status, WNOHANG);
+                if (r == (pid_t)ns->pid || (r < 0 && errno == ECHILD)) { reaped = 1; break; }
+                struct timespec ts = { 0, 10 * 1000 * 1000 };  /* 10ms */
+                nanosleep(&ts, NULL);
+            }
+        }
+        /* only escalate if NOT yet reaped — never signal a pid we already reaped
+         * (it could have been reused by an unrelated process). */
+        if (!reaped) {
+            kill((pid_t)ns->pid, SIGKILL);
+            sartre_waitpid((pid_t)ns->pid, &status, 0);
+        }
+    }
+
+    ns->active = 0;
+    char ev[128];
+    snprintf(ev, sizeof(ev), "ns_kill:%s pid=%d", ns->name, ns->pid);
+    sartre_notify_event(ev);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -640,10 +770,14 @@ void sartre_print_state(void) {
                i, sys.modules[i].name, sys.modules[i].status, sys.modules[i].load);
     }
 
+    for (int i = 0; i < sys.ns_count; i++)   /* refresh real-process liveness before reporting */
+        if (sys.namespaces[i].spawned) sartre_ns_alive(i);
     printf("\nNamespaces (%d):\n", sys.ns_count);
     for (int i = 0; i < sys.ns_count; i++) {
-        printf("  [%d] %-16s cpu=%.1f%% mem=%.0fMB %s\n",
+        printf("  [%d] %-16s %-7s pid=%-6d cpu=%.1f%% mem=%.0fMB %s\n",
                i, sys.namespaces[i].name,
+               sys.namespaces[i].spawned ? "(proc)" : "(monad)",
+               sys.namespaces[i].pid,
                sys.namespaces[i].cpu_share * 100,
                sys.namespaces[i].mem_limit_mb,
                sys.namespaces[i].active ? "ACTIVE" : "dead");
@@ -672,10 +806,16 @@ int sartre_state_to_json(char *buf, int max) {
     for (int i = 0; i < sys.pkg_count; i++)
         if (sys.packages[i].installed) installed++;
 
-    /* count active namespaces */
-    int active_ns = 0;
+    /* refresh real-process liveness so the counts are truth, not stale cache */
     for (int i = 0; i < sys.ns_count; i++)
-        if (sys.namespaces[i].active) active_ns++;
+        if (sys.namespaces[i].spawned) sartre_ns_alive(i);
+
+    /* count active + real-process namespaces */
+    int active_ns = 0, spawned_ns = 0;
+    for (int i = 0; i < sys.ns_count; i++) {
+        if (sys.namespaces[i].active)  active_ns++;
+        if (sys.namespaces[i].spawned) spawned_ns++;
+    }
 
     return snprintf(buf, max,
         "{"
@@ -697,6 +837,7 @@ int sartre_state_to_json(char *buf, int max) {
         "\"overlay_delta\":%lld,"
         "\"namespaces\":%d,"
         "\"ns_active\":%d,"
+        "\"ns_spawned\":%d,"
         "\"packages\":%d,"
         "\"pkg_installed\":%d,"
         "\"events\":%d,"
@@ -715,7 +856,7 @@ int sartre_state_to_json(char *buf, int max) {
         sys.coherence, sys.prophecy_debt, sys.entropy,
         sys.overlay.overlay_ratio, sys.overlay.overlay_writes,
         (long long)sys.overlay.base_size, (long long)sys.overlay.delta_size,
-        sys.ns_count, active_ns,
+        sys.ns_count, active_ns, spawned_ns,
         sys.pkg_count, installed,
         sys.event_count,
         sys.memory_pressure, sys.cpu_load,
@@ -732,12 +873,26 @@ int sartre_state_to_json(char *buf, int max) {
 #ifndef HAS_DARIO
 
 int main(int argc, char **argv) {
-    (void)argc; (void)argv;
-
     printf("\n  sartre_kernel — Meta-Linux for the Dario Equation\n");
     printf("  \"L'existence precede l'essence.\"\n\n");
 
     sartre_init(NULL);
+
+    /* hold mode: spawn a real sleeper, print its pid, block — so an external
+     * `ps -p <pid>` can confirm the slot is a real OS process. Press Enter to
+     * terminate+reap and exit (external ps then confirms it is gone, no zombie). */
+    if (argc > 1 && strcmp(argv[1], "hold") == 0) {
+        char *targv[] = { "/bin/sh", "-c", "sleep 30", NULL };
+        int h = sartre_ns_spawn("hold_sleeper", targv, 64.0f);
+        if (h < 0) { printf("SPAWN_FAILED\n"); return 1; }
+        printf("SPAWNED_PID=%d alive=%d\n", sartre_ns_get(h)->pid, sartre_ns_alive(h));
+        fflush(stdout);
+        getchar();
+        sartre_ns_kill(h);
+        printf("KILLED pid=%d alive=%d\n", sartre_ns_get(h)->pid, sartre_ns_alive(h));
+        sartre_shutdown();
+        return 0;
+    }
 
     /* register core packages */
     sartre_pkg_register("dario_equation", "1.0.0", 83);
@@ -760,6 +915,42 @@ int main(int argc, char **argv) {
     sartre_ns_create("dario", 0.8f, 64.0f);
     sartre_ns_create("observer", 0.1f, 8.0f);
 
+    /* === real process-slot smoke (brick #1) — self-verifying lifecycle === */
+    {
+        int pass = 0, total = 4;
+
+        char *sargv[] = { "/bin/sh", "-c", "sleep 30", NULL };
+        int s = sartre_ns_spawn("smoke_sleeper", sargv, 64.0f);
+        int alive1 = (s >= 0) && sartre_ns_alive(s);
+        printf("[smoke] spawn sleep -> alive=%d  %s\n", alive1, alive1 ? "PASS" : "FAIL");
+        pass += alive1;
+
+        if (s >= 0) sartre_ns_kill(s);
+        int dead1 = (s >= 0) && !sartre_ns_alive(s);
+        printf("[smoke] kill      -> alive=%d  %s\n", s >= 0 ? sartre_ns_alive(s) : -1,
+               dead1 ? "PASS" : "FAIL");
+        pass += dead1;
+
+        char *eargv[] = { "/bin/sh", "-c", "exit 0", NULL };
+        int e = sartre_ns_spawn("smoke_exiter", eargv, 64.0f);
+        struct timespec ts = { 0, 100 * 1000 * 1000 };  /* 100ms for the child to exit */
+        nanosleep(&ts, NULL);
+        int reaped = (e >= 0) && !sartre_ns_alive(e);
+        printf("[smoke] self-exit -> alive=%d  %s\n", e >= 0 ? sartre_ns_alive(e) : -1,
+               reaped ? "PASS" : "FAIL");
+        pass += reaped;
+
+        char *dargv[] = { "/bin/sh", "-c", "sleep 30", NULL };
+        int d = sartre_ns_spawn("smoke_destroy", dargv, 64.0f);
+        if (d >= 0) sartre_ns_destroy(d);     /* spawned destroy must terminate+reap, not leak */
+        int dead2 = (d >= 0) && !sartre_ns_alive(d);
+        printf("[smoke] destroy   -> alive=%d  %s\n", d >= 0 ? sartre_ns_alive(d) : -1,
+               dead2 ? "PASS" : "FAIL");
+        pass += dead2;
+
+        printf("[smoke] %d/%d PASS\n", pass, total);
+    }
+
     /* simulate some inner state */
     sartre_update_inner_state(0.15f, 0.6f, 0.7f, 0.85f, 1.2f);
     sartre_notify_event("boot_complete");
@@ -774,6 +965,14 @@ int main(int argc, char **argv) {
 
     /* package list */
     sartre_pkg_list();
+
+    /* shutdown-reap check: leave a live spawned child — sartre_shutdown must reap it
+     * (external `ps -p <LEFT_PID>` after exit confirms no orphan/zombie). */
+    {
+        char *largv[] = { "/bin/sh", "-c", "sleep 30", NULL };
+        int l = sartre_ns_spawn("shutdown_left", largv, 64.0f);
+        if (l >= 0) printf("LEFT_PID=%d (expect reaped by shutdown)\n", sartre_ns_get(l)->pid);
+    }
 
     sartre_shutdown();
     return 0;
