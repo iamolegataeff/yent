@@ -67,7 +67,8 @@ type InnerWorld struct {
 	field  Field
 	div    Divergence
 	larynx Larynx
-	memory Memory // past-monologue recall; nil = no recall (read-only, runtime writes)
+	memory Memory     // past-monologue recall; nil = no recall (read-only, runtime writes)
+	cooc   *CoocGraph // inner co-occurrence memory; nil = circles do not seed/feel a cooc field
 	cfg    Config
 	br     Breath
 
@@ -276,8 +277,9 @@ func (iw *InnerWorld) reflect(circles []Circle, debt float32) Reflection {
 func (iw *InnerWorld) think(prompt string) Reflection {
 	iw.genMu.Lock()
 	iw.ensureFastResidentLocked()
-	circles := Overthink(iw.recallSeed(prompt), iw.fast, iw.field, iw.div, iw.cfg)
+	circles := Overthink(iw.recallSeed(iw.coocBias(prompt)), iw.fast, iw.field, iw.div, iw.cfg)
 	debt := iw.fieldDebt() // snapshot under genMu: belongs to this batch
+	iw.observeLocked(circles) // circles seed the cooc field (circles->field)
 	r := iw.reflect(circles, debt)
 	if r.SelfAnswered {
 		r.DeepAnswer = iw.deepAnswerLocked(circles) // deep body speaks, under the single voice
@@ -348,8 +350,9 @@ func (iw *InnerWorld) dream(trigger int) Reflection {
 
 	iw.genMu.Lock()
 	iw.ensureFastResidentLocked()
-	circles := Overthink(iw.recallSeed(seed), iw.fast, iw.field, iw.div, iw.cfg)
+	circles := Overthink(iw.recallSeed(iw.coocBias(seed)), iw.fast, iw.field, iw.div, iw.cfg)
 	debt := iw.fieldDebt() // snapshot under genMu: belongs to this batch
+	iw.observeLocked(circles) // dreams seed the cooc field too (circles->field)
 	r := iw.reflect(circles, debt)
 	if r.SelfAnswered {
 		r.DeepAnswer = iw.deepAnswerLocked(circles) // even alone, the deep body may answer the dream

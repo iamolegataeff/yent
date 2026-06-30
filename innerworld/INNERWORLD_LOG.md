@@ -309,6 +309,35 @@ seasonal `am_cooc_consolidate` in the sleep.
 
 ---
 
+## Level B / Б1 — bidirectional circles + seasonal cooc consolidation (2026-06-30)
+
+The first real consolidator sits in the Б0 sleep slot, and the circles now flow
+both ways. `cooc.go` adds `CoocGraph`, the inner word co-occurrence memory: `Observe`
+folds a thought's word pairs in (circles→field), `Bias` returns the strongest pulls
+for a word (field→circles), and `Consolidate` is the arianna seasonal harvest on
+word edges — the logic of `ariannamethod.c:7037`: edges at/above the median weight
+are reinforced ×(1+r), below are decayed ×(1−r), and edges under the floor are
+pruned (the long tail forgotten). `CoocConsolidator` wraps it as a `Consolidation`
+stage for sleep.
+
+The bidirectional loop in `inner_world.go`: `think`/`dream` now raise circles from
+`recallSeed(coocBias(prompt))` — the cooc graph pulls the prompt's last word toward
+the words the organism's own thoughts keep associating with it (field→circles) —
+and then `observeLocked(circles)` folds the new circles back into the graph
+(circles→field), so the inner world grows richer than the dataset (haze-emergence).
+NO-SEED-FROM-PROMPT holds: the pull is still transformed by `innerSeed`. `nil` cooc =
+both halves no-op (backward-compatible). `CoocGraph` carries its own leaf lock, taken
+inside `genMu`, never the reverse — no deadlock.
+
+`go test -race` green (6 cooc tests: Observe grows, Consolidate reinforces-strong /
+prunes-weak, Bias ranks, the bidirectional loop seeds then pulls, the consolidator
+runs in sleep, nil-safe). Codex per-stage audit did not finish in time this round; the
+round's final Codex audit (after Б4, before merge) covers Б1. No Metal yet — the real
+cooc growth on live nemo circles lands with the round's Metal smoke. Next: Б2 — DoE
+Hebbian weights in the sleep + spore consolidation (weights → Oleg's mandate).
+
+---
+
 ## Deferred / parked
 
 - **Cloud** (pre-linguistic affect, 6-chamber MLP reflex) — it is **Python**, with a
