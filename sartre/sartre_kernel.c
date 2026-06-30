@@ -921,13 +921,15 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    /* pipe mode: spawn a real utility into a piped slot and read its JSON event
-     * stream — proving the slot is language-agnostic (the binary may be Rust).
-     * usage: sartre_kernel pipe <utility-binary> <scan-path> */
-    if (argc > 3 && strcmp(argv[1], "pipe") == 0) {
-        char *uargv[] = { argv[2], "--once", "--path", argv[3], NULL };
+    /* pipe mode: spawn ANY utility into a piped slot and read its stdout — proving
+     * the slot is language-agnostic (Rust repo_monitor, C context_processor, ...).
+     * usage: sartre_kernel pipe <utility-binary> [args...] */
+    if (argc > 2 && strcmp(argv[1], "pipe") == 0) {
+        char *const *uargv = &argv[2];          /* binary + args, NULL-terminated by the OS */
+        const char *slash = strrchr(argv[2], '/');
+        const char *uname = slash ? slash + 1 : argv[2];
         int fd = -1;
-        int id = sartre_ns_spawn_piped("repo_monitor", uargv, 0.0f, &fd);
+        int id = sartre_ns_spawn_piped(uname, uargv, 0.0f, &fd);
         if (id < 0) { printf("PIPE_SPAWN_FAILED\n"); return 1; }
         printf("[pipe] slot[%d] pid=%d reading events:\n", id, sartre_ns_get(id)->pid);
         char evbuf[8192];

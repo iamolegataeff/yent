@@ -147,6 +147,41 @@ all fixed and re-verified. Round 2 re-audit: VERDICT PASS.
 Committed on `claude/sartre` (Oleg's go). NOT merged — Codex bridges utility receipts → limpha →
 field after the innerworld stitch.
 
+## 2026-06-30 — Second utility: context_processor (C + notorch)
+
+Where repo_monitor reports that a file moved (structural), context_processor reads its
+CONTENT and gives a neural perception of it — richer food for the field. Ported from
+Indiana `utils/context_neural_processor.py` (numpy) to **C + notorch**, zero external deps;
+spawned by the same language-agnostic slot. The slot demo (`pipe`) is now argv-passthrough
+(`pipe <binary> [args...]`), so the kernel hosts a Rust utility (repo_monitor) and a C
+utility (context_processor) through one path — language-agnostic proven concretely.
+
+- **MiniESN on notorch** (`sartre/utils/context_processor/context_processor.c`): reservoir
+  W_in[H×512]/W[H×H]/W_out[14×H] (`nt_tensor_rand`), the three projections via `nt_blas_matvec`
+  (the mandated matvec), leaky-tanh state, argmax → tag. The numpy `eigvals` spectral-radius
+  step is replaced by zero-dep **power iteration** (W·v/‖v‖ via nt_blas_matvec), scaling W to
+  ρ≈1 (echo-state). Honest: the ESN is random-init (untrained), so the tag is a reservoir
+  fingerprint, not a trained file-type classification — the resonance/relevance is the
+  load-bearing signal.
+- **Resonance + relevance**: `compute_relevance` = Jaccard of content vs Yent's own vocabulary
+  (resonance/field/recursion/dario/limpha/... — replaces Indiana's Musk-domain seed corpus);
+  `chaos_pulse` (sentiment keywords → [0.1,0.9]) + somatic float dynamics (BloodFlux/SixthSense)
+  over a deterministic xorshift RNG.
+- **Zero-dep extraction**: txt/md/json/csv/source raw, html tag-strip, binary → empty content
+  (ESN still runs on raw bytes). Binary formats (PDF/docx/rtf/odt/zip/rar/tar/image) and the
+  sqlite cache are a later increment (external libs / break zero-dep).
+- **Output**: JSON perception `{"util":"context_processor","path":..,"tag":..,"relevance":F,"pulse":F}`.
+  Links system notorch (`/opt/homebrew` install-path, not a sibling checkout) + Accelerate on
+  Darwin (libnotorch BLAS). `Makefile` carries the flags.
+
+Measured on neo: `make` 0 warn; `make test` 12/12 (spectral radius ρ≈1, forward tag in range,
+relevance, chaos/somatic bounds, html-strip, binary-empty, json-escape, read_file); kernel
+`-DHAS_PERCEPTION` 0 warn; end-to-end the kernel spawns context_processor (C) AND repo_monitor
+(Rust) through the one piped slot, reads each utility's JSON, reaps, zero zombies.
+
+Codex audit pass (gpt-5.5): round 1 = 2 findings (HIGH read_file size→int, MED esn_init NULL/
+cleanup), round 2 = 1 MED (self-test NULL-deref gate), all fixed; round 3 = VERDICT PASS.
+
 ## Merge / integration policy (Oleg 2026-06-30)
 - NOT merging `claude/sartre` to main yet, and NOT pulling main into it for now. SARTRE
   is committed (`050751a`) and isolated on its branch. It is connected to NOTHING.
