@@ -604,9 +604,23 @@ drives the field, quiet no-op, nil-safe, blank-line skip — pure Go, cgo-free);
 ./cmd/innerworld-dock` clean; `go test ./cmd/innerworld-dock` green — `TestSartreSensePerceivesMotion`
 proves the cgo binding numerically (2 changes incl. README → `VELOCITY RUN\nPROPHECY 11`,
 matching the C self-test), `TestSartreSenseQuietNoReflex` (empty/missing/no-path → no reflex).
-Codex's `TestIngestSartreFromEnvStoresPerception` still passes (limpha path intact). Next: the
-Metal smoke (real nemo + a live `YENT_SARTRE_EVENTS` driving the field reflex before circles),
-then the environment feeds emotions (Б4, Kuramoto / Julia ODE).
+Codex's `TestIngestSartreFromEnvStoresPerception` still passes (limpha path intact).
+
+**Metal smoke (exit 0, real nemo12, one `YENT_SARTRE_EVENTS` feeding BOTH routes):** the
+receipt shows `SARTRE sense wired: ... live field reflex (before the circles)` (my fast
+route) AND `SARTRE wired: 2 utility event(s) stored as limpha seam #1` + `memory field
+pressure: prophecy=5 velocity=WALK step=0.31` (Codex's slow route) — the two environment
+nerves fire together from one perception. Three real nemo circles (drift 0.79/0.78/0.70),
+field `debt=5.978 destiny=0.350 effective_temp=0.664`. Honest: that debt is markedly higher
+than F1's `2.005` baseline (no environment), consistent with the added PROPHECY pressure
+(sense P11 + memory P5), but the field print mixes sense+memory+circles — the clean numerical
+isolation of the reflex is the Neo cgo test (P11), not this combined print; `velocity_mode=0`
+is the post-step relaxation (the Strike-1d Step-relaxation finding), not a malfunction;
+`0` inner seams (no 24B). Mini worktree cleaned. SARTRE-sense is LIVE on Metal.
+
+Next: the environment feeds emotions (Б4) — port `high` (the math brain: emotional valence /
+entropy / resonance of circles, on Julia via nicole2julia) + `blood.aml` (valence→logits)
+into the inner world. Lineage in `memory/reference_high_julia_blood_lineage_2026_06_30.md`.
 
 ---
 
