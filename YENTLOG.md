@@ -430,6 +430,26 @@ Measured on neo: `cc -Wall -Wextra` (standalone + `-DHAS_PERCEPTION`) 0 warn; `c
 Codex audit pass (gpt-5.5): round 1 = 4 findings (HIGH mach-port leak, MED Linux mem guard, MED json
 colon-strictness, LOW double-init), all fixed; round 2 = PASS.
 
+## 2026-06-30 — SARTRE holistic audit: 5 cross-cutting bugs fixed
+
+With the whole SARTRE body merged (kernel + 3 utilities + perception + metrics hub), a consolidated
+adversarial Codex sweep over all of it found 5 real cross-cutting bugs the per-increment passes missed:
+- HIGH slot exhaustion: `sartre_ns_spawn_piped` grew `ns_count` permanently while `_kill` only set
+  `active=0` — a long-lived supervisor died after `SARTRE_MAX_NS` spawn/kill cycles. Fixed by reusing a
+  dead (spawned && !active) slot before growing, with grow-rollback + memset (verified 12 cycles).
+- HIGH fd inheritance: spawned utilities inherited the host's other fds across `execve`. Fixed: the
+  child closes fds 3..maxfd after dup2; maxfd is computed in the PARENT (sysconf is not async-signal-safe).
+- MED repo_monitor broken-pipe: still used `println!`; now `writeln!` + locked stdout + clean exit.
+- MED whatdotheythinkiam schema drift: emitted `source`/`change`, which `perception.c` + `sartre_bridge.go`
+  (both consume `kind`/`path`) dropped. Now emits `path`/`kind`; `reduced`/`recognized` kept as extras.
+- LOW json_get_float: `strstr` could match a key inside a quoted value; now requires a top-level member
+  boundary then `:`.
+
+Measured on neo: `cc -Wall -Wextra` (both kernel modes) 0 warn; smoke 4/4; perception 6/6; repo_monitor
+cargo test 5/5; whatdotheythinkiam 6/6; churn (12 spawn/kill) + fd-hygiene harness green; json boundary
+verified. Codex audit pass: 5 findings fixed; re-audit caught 1 follow-up (sysconf in the post-fork child
+→ moved to parent); final VERDICT PASS.
+
 ## Weights
 
 Not in open access. Code is GPL; weights/deltas/gamma are under the Yent Identity License v1.1 (`LICENSE-WEIGHTS`). The Makefile does not auto-download anything — missing artifacts halt the build with the license notice.
