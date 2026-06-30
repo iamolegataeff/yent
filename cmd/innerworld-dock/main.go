@@ -522,6 +522,9 @@ func main() {
 	st := C.am_get_state()
 	fmt.Printf("  field    : debt=%.3f destiny=%.3f velocity_mode=%d effective_temp=%.3f\n",
 		float32(st.debt), float32(st.destiny), int(st.velocity_mode), float32(st.effective_temp))
+	fmt.Printf("  feeling  : valence=%.3f arousal=%.3f | warmth=%.3f pain=%.3f flow=%.3f tension=%.3f | scars(sea)=%d\n",
+		float32(st.valence), float32(st.arousal), float32(st.warmth), float32(st.pain),
+		float32(st.flow), float32(st.tension), int(st.n_scars))
 	fmt.Printf("  membrane : larynx coupling=%.3f\n", r.Coupling)
 	fmt.Printf("  gate     : self-answer prob=%.3f  ->  self-answered=%v\n", r.SelfAnswerProb, r.SelfAnswered)
 	if r.DeepAnswer != "" {
