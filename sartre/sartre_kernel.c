@@ -31,6 +31,7 @@
 #include <errno.h>
 #include <sys/wait.h>
 #include <sys/resource.h>
+#include <math.h>
 
 #ifdef HAS_PERCEPTION
 #include "perception.h"
@@ -38,6 +39,7 @@
 
 #ifdef __APPLE__
 #include <sys/sysctl.h>
+#include <mach/mach.h>
 #endif
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -503,6 +505,87 @@ static void sartre_detect_platform(void) {
 #endif
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+ * LIVE METRICS HUB — SARTRE concentrates the body's telemetry
+ * ═══════════════════════════════════════════════════════════════════ */
+
+static float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
+
+/* Sample real cpu_load (load average / cpu count) + memory_pressure (used/total).
+ * On failure a field keeps its previous value — never crashes, never fabricates. */
+void sartre_sample_load(void) {
+    double la[1];
+    if (getloadavg(la, 1) == 1 && sys.cpu_count > 0) {
+        sys.cpu_load = clamp01((float)(la[0] / (double)sys.cpu_count));
+    }
+
+#ifdef __APPLE__
+    vm_statistics64_data_t vm;
+    mach_msg_type_number_t cnt = HOST_VM_INFO64_COUNT;
+    long page = sysconf(_SC_PAGESIZE);
+    mach_port_t host = mach_host_self();
+    if (page > 0 && sys.total_ram_mb > 0 &&
+        host_statistics64(host, HOST_VM_INFO64, (host_info64_t)&vm, &cnt) == KERN_SUCCESS) {
+        /* free + inactive (reclaimable) ≈ available, as `vm_stat` reports */
+        uint64_t avail = ((uint64_t)vm.free_count + (uint64_t)vm.inactive_count) * (uint64_t)page;
+        double total = (double)sys.total_ram_mb * 1024.0 * 1024.0;
+        if (total > 0.0) sys.memory_pressure = clamp01((float)(1.0 - (double)avail / total));
+    }
+    mach_port_deallocate(mach_task_self(), host);  /* release mach_host_self() send right */
+#else
+    FILE *f = fopen("/proc/meminfo", "r");
+    if (f) {
+        long total_kb = 0, avail_kb = 0;
+        char line[256];
+        while (fgets(line, sizeof line, f)) {
+            if (total_kb == 0) sscanf(line, "MemTotal: %ld kB", &total_kb);
+            if (avail_kb == 0) sscanf(line, "MemAvailable: %ld kB", &avail_kb);
+        }
+        fclose(f);
+        if (total_kb > 0 && avail_kb > 0)  /* keep prior value if either is unparsed */
+            sys.memory_pressure = clamp01(1.0f - (float)avail_kb / (float)total_kb);
+    }
+#endif
+}
+
+/* Find "key": <number> in a flat JSON object; returns 1 and writes *out if found
+ * and finite. Minimal scan — the event shape is fixed, not arbitrary JSON. */
+static int json_get_float(const char *json, const char *key, float *out) {
+    char pat[64];
+    int pn = snprintf(pat, sizeof pat, "\"%s\"", key);
+    if (pn <= 0 || pn >= (int)sizeof pat) return 0;
+    const char *p = strstr(json, pat);
+    if (!p) return 0;
+    p += pn;                                  /* require "key" <ws>? : <number> */
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    if (*p != ':') return 0;                  /* a key inside a value won't be -> rejected */
+    p++;
+    char *end = NULL;
+    double v = strtod(p, &end);
+    if (end == p || !isfinite(v)) return 0;
+    *out = (float)v;
+    return 1;
+}
+
+/* Reciprocal seam: the field/innerworld pushes its inner weather into the hub.
+ * Receiver only — the sender lives on the field side (same shape as utilities
+ * emitting JSON to the field, now reversed). */
+void sartre_ingest_metrics_json(const char *json) {
+    if (!json) return;
+    float v;
+    int touched = 0;
+    if (json_get_float(json, "debt", &v))               { sys.prophecy_debt = v; touched++; }
+    if (json_get_float(json, "coherence", &v))          { sys.coherence = v; touched++; }
+    if (json_get_float(json, "entropy", &v))            { sys.entropy = v; touched++; }
+    if (json_get_float(json, "valence", &v))            { sys.valence = v; touched++; }
+    if (json_get_float(json, "arousal", &v))            { sys.arousal = v; touched++; }
+    if (json_get_float(json, "trauma", &v))             { sys.trauma_level = v; touched++; }
+    if (json_get_float(json, "warmth", &v))             { sys.warmth = v; touched++; }
+    if (json_get_float(json, "flow", &v))               { sys.flow = v; touched++; }
+    if (json_get_float(json, "schumann_coherence", &v)) { sys.schumann_coherence = v; touched++; }
+    if (touched) sartre_notify_event("metrics_ingest");
+}
+
 /* ── Device auto-detection — forward-looking (robot camera/motors/sensors).
  * Empty on a Mac host (no peripherals we own). On a Linux robot/SBC this is
  * where /dev video / motor-serial / i2c-sensor nodes get registered. The
@@ -769,6 +852,8 @@ void sartre_print_state(void) {
         return;
     }
 
+    sartre_sample_load();  /* live cpu/mem before reporting */
+
     int64_t uptime_s = (int64_t)time(NULL) - sys.boot_time_ms / 1000;
 
     printf("\n=== SARTRE KERNEL STATE ===\n\n");
@@ -778,8 +863,9 @@ void sartre_print_state(void) {
     printf("Inner World:\n");
     printf("  trauma: %.2f  arousal: %.2f  valence: %.2f\n",
            sys.trauma_level, sys.arousal, sys.valence);
-    printf("  coherence: %.2f  prophecy_debt: %.2f  entropy: %.2f\n\n",
+    printf("  coherence: %.2f  prophecy_debt: %.2f  entropy: %.2f\n",
            sys.coherence, sys.prophecy_debt, sys.entropy);
+    printf("  warmth: %.2f  flow: %.2f\n\n", sys.warmth, sys.flow);
 
     printf("Overlay: base=%lldB delta=%lldB writes=%d ratio=%.3f\n\n",
            (long long)sys.overlay.base_size, (long long)sys.overlay.delta_size,
@@ -826,6 +912,8 @@ void sartre_print_state(void) {
 int sartre_state_to_json(char *buf, int max) {
     if (!sartre_ready) return snprintf(buf, max, "{\"ready\":false}");
 
+    sartre_sample_load();  /* live cpu/mem before reporting */
+
     int64_t uptime_s = (int64_t)time(NULL) - sys.boot_time_ms / 1000;
 
     /* count installed packages */
@@ -858,6 +946,8 @@ int sartre_state_to_json(char *buf, int max) {
         "\"coherence\":%.3f,"
         "\"prophecy_debt\":%.3f,"
         "\"entropy\":%.3f,"
+        "\"warmth\":%.3f,"
+        "\"flow\":%.3f,"
         "\"overlay_ratio\":%.4f,"
         "\"overlay_writes\":%d,"
         "\"overlay_base\":%lld,"
@@ -881,6 +971,7 @@ int sartre_state_to_json(char *buf, int max) {
         sys.module_count,
         sys.trauma_level, sys.arousal, sys.valence,
         sys.coherence, sys.prophecy_debt, sys.entropy,
+        sys.warmth, sys.flow,
         sys.overlay.overlay_ratio, sys.overlay.overlay_writes,
         (long long)sys.overlay.base_size, (long long)sys.overlay.delta_size,
         sys.ns_count, active_ns, spawned_ns,
@@ -960,6 +1051,19 @@ int main(int argc, char **argv) {
                    perc.changed, perc.readme_changed, aml);
         }
 #endif
+        sartre_shutdown();
+        return 0;
+    }
+
+    /* metrics mode: the live telemetry hub — sample real cpu/mem and print the
+     * state as JSON. Optional argv[2] = a field-weather JSON to ingest first
+     * (the reciprocal seam): sartre_kernel metrics '{"debt":2.0,"coherence":0.8}'. */
+    if (argc > 1 && strcmp(argv[1], "metrics") == 0) {
+        /* sartre_init already ran at the top of main — do not re-init */
+        if (argc > 2) sartre_ingest_metrics_json(argv[2]);
+        char json[2048];
+        sartre_state_to_json(json, sizeof json);  /* refreshes live cpu/mem */
+        printf("%s\n", json);
         sartre_shutdown();
         return 0;
     }
