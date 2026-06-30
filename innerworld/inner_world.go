@@ -79,13 +79,14 @@ type InnerWorld struct {
 	genMu        sync.Mutex // one inner voice at a time: serializes Overthink + deep self-answer (body access)
 	deepResident bool       // guarded by genMu: the deep body is the currently-resident one (single-resident swap)
 
-	mu         sync.Mutex // guards circles, lastActive, lastFire, onDream, larynx, roll, asleep
-	circles    []Circle
-	lastActive time.Time
-	lastFire   [nTrig]time.Time
-	onDream    func(Reflection)
-	roll       func() float32 // [0,1) draw for the deep-self-answer gate
-	asleep     bool           // guarded by mu: the organism is in the consolidation sleep
+	mu           sync.Mutex // guards circles, lastActive, lastFire, onDream, larynx, roll, asleep, sleepLatched
+	circles      []Circle
+	lastActive   time.Time
+	lastFire     [nTrig]time.Time
+	onDream      func(Reflection)
+	roll         func() float32 // [0,1) draw for the deep-self-answer gate
+	asleep       bool           // guarded by mu: the organism is in the consolidation sleep
+	sleepLatched bool           // guarded by mu: sleep ran for the current critical-mass episode
 
 	// Dreaming (Level B skeleton): when the field reaches critical mass the organism
 	// sleeps and runs its consolidators in order. sleepTrigger reports critical mass;
@@ -416,20 +417,25 @@ func (iw *InnerWorld) Breathe(ctx context.Context) {
 			return
 		case now := <-t.C:
 			// Critical mass takes priority over dreaming: when the field is full, the
-			// organism sleeps and consolidates instead of raising another circle.
-			if iw.criticalMass() {
+			// organism sleeps and consolidates instead of raising another circle. A
+			// single critical-mass episode sleeps once; it re-arms only after the
+			// trigger falls false, so a long autumn does not harvest every tick.
+			critical := iw.criticalMass()
+			if iw.readyToSleep(critical) {
 				iw.sleep(ctx)
 				select {
 				case <-ctx.Done():
 					return
 				default:
 				}
-			} else if trigger, ok := iw.due(now); ok {
-				iw.dream(trigger)
-				select {
-				case <-ctx.Done():
-					return
-				default:
+			} else if !critical {
+				if trigger, ok := iw.due(now); ok {
+					iw.dream(trigger)
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
 				}
 			}
 			// pick up a tick changed by SetBreath while breathing
