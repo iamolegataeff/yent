@@ -74,12 +74,21 @@ type InnerWorld struct {
 	genMu        sync.Mutex // one inner voice at a time: serializes Overthink + deep self-answer (body access)
 	deepResident bool       // guarded by genMu: the deep body is the currently-resident one (single-resident swap)
 
-	mu         sync.Mutex // guards circles, lastActive, lastFire, onDream, larynx, roll
+	mu         sync.Mutex // guards circles, lastActive, lastFire, onDream, larynx, roll, asleep
 	circles    []Circle
 	lastActive time.Time
 	lastFire   [nTrig]time.Time
 	onDream    func(Reflection)
 	roll       func() float32 // [0,1) draw for the deep-self-answer gate
+	asleep     bool           // guarded by mu: the organism is in the consolidation sleep
+
+	// Dreaming (Level B skeleton): when the field reaches critical mass the organism
+	// sleeps and runs its consolidators in order. sleepTrigger reports critical mass;
+	// nil = never sleeps (backward-compatible). Consolidation stages (cooc, weights,
+	// scar, emotion) plug into consolidators; the skeleton only sequences them.
+	sleepTrigger  SleepTrigger
+	consolidators []Consolidation
+	onSleep       func(stage string) // optional observer of consolidation stages (inner only)
 }
 
 // NewInnerWorld builds the inner world over a fast body, the shared field, and a
@@ -377,7 +386,16 @@ func (iw *InnerWorld) Breathe(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case now := <-t.C:
-			if trigger, ok := iw.due(now); ok {
+			// Critical mass takes priority over dreaming: when the field is full, the
+			// organism sleeps and consolidates instead of raising another circle.
+			if iw.criticalMass() {
+				iw.sleep(ctx)
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+			} else if trigger, ok := iw.due(now); ok {
 				iw.dream(trigger)
 				select {
 				case <-ctx.Done():

@@ -237,6 +237,14 @@ The drift between overthinking circles was a word-set Jaccard, which counts "per
 - Metal fast-only smoke (`yent-nemo-v38-ck5`): three circles drift `0.82 / 0.76 / 0.77`, field `debt=2.005 velocity_mode=2(RUN) destiny=0.350`, larynx 0.759 — lower than the old Jaccard run's `0.95 / 0.88 / 0.91` because trigrams see the real lexical return to "resonance / shadow / mirror" that word Jaccard missed.
 - `go test -race` green (`TestNgramDivergence`, `TestNgramBeatsJaccardOnMorphology` proves it strictly beats word Jaccard on a shared morphological run); Codex audit clean; `recallSeed`/pressure-guard untouched. Next: Level B — DoE Hebbian learning between turns (weights, in its own branch).
 
+## 2026-06-30 — innerworld Level B / Б0: async Dreaming skeleton
+
+Level B is Dreaming Mode — when the field reaches critical mass the organism sleeps and consolidates. Б0 lands the skeleton, no weights. `innerworld/dreaming.go` adds the `Consolidation` interface (the hook Б1-Б4 plug into: cooc, weights+spore, scar/velocity, emotion→sea-of-memory), `SleepTrigger func(Field) bool` (critical mass, modelled on arianna.c where high coherence drives the field into autumn — the harvest), and `sleep`, which runs each consolidator in order. The grind takes `genMu` per stage and releases it between stages, so a human turn interleaves at a boundary rather than waiting out the whole sleep — the asynchronous sleep, consolidation without monopolising the single inner voice. `Breathe` sleeps at critical mass instead of dreaming; `nil` trigger keeps the old dream path (backward-compatible).
+
+The design follows from the legacy study (haze/leo/DoE canon): the consolidation organs already exist, so Б1-Б4 are adapters, not new learning code — DoE already leaves LoRA spores (`doe.c:2499`, fitness + NaN-quarantine, load-best on restart), AML already has `am_cooc_consolidate_autumn`, SCAR/dark-matter, and velocity operators.
+
+`go test -race` green (6 dreaming tests incl panic containment). Codex audit found and we fixed one real bug — a panicking consolidator left `genMu` locked and `asleep` stuck — now `sleep` clears `asleep` via defer and each stage runs in `runStage` with a deferred `genMu` unlock + recover (fail-soft, the same stance `driveField` takes). No Metal at Б0 — pure-Go phase logic with no-op consolidators; the real Metal run lands at Б1 (cooc). Next: Б1 — bidirectional circles (circles seed the cooc field, haze-emergence) + seasonal `am_cooc_consolidate` in the sleep.
+
 ## Weights
 
 Not in open access. Code is GPL; weights/deltas/gamma are under the Yent Identity License v1.1 (`LICENSE-WEIGHTS`). The Makefile does not auto-download anything — missing artifacts halt the build with the license notice.
