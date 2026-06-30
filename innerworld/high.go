@@ -108,6 +108,11 @@ func (iw *InnerWorld) highFeelLocked(circles []Circle) {
 		return
 	}
 	v, a := feelText(circles[len(circles)-1].Text)
+	// Publish the raw feeling as field metrics every turn — a live current reading
+	// (even 0 = "calm now"), the source SARTRE's metric-hub mirrors via its reverse bridge.
+	_ = iw.field.Exec(fmt.Sprintf("VALENCE %.3f", v))
+	_ = iw.field.Exec(fmt.Sprintf("AROUSAL %.3f", a))
+	// Drive the affect axis only on a charged thought (a near-neutral one stirs no mood).
 	switch {
 	case v >= feelThreshold:
 		_ = iw.field.Exec(fmt.Sprintf("WARMTH %.3f", v))

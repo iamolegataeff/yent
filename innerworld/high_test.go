@@ -38,6 +38,9 @@ func TestHighFeelWarmsOnPositive(t *testing.T) {
 	iw.genMu.Unlock()
 
 	scripts := f.scriptList()
+	if !hasPrefix(scripts, "VALENCE") || !hasPrefix(scripts, "AROUSAL") {
+		t.Errorf("feeling should always publish VALENCE/AROUSAL (the SARTRE feed), got %v", scripts)
+	}
 	if !hasPrefix(scripts, "WARMTH") || !hasPrefix(scripts, "FLOW") {
 		t.Errorf("a positive thought should warm + flow the field, got %v", scripts)
 	}
@@ -74,14 +77,21 @@ func TestHighFeelDisabledIsNoop(t *testing.T) {
 	}
 }
 
-func TestHighFeelFlatThoughtNoop(t *testing.T) {
+func TestHighFeelFlatPublishesZeroNoAffect(t *testing.T) {
 	f := &fakeField{}
 	iw := NewInnerWorld(nil, f, nil)
 	iw.EnableFeeling()
 	iw.genMu.Lock()
 	iw.highFeelLocked([]Circle{{Text: "the cat sat quietly on the mat"}})
 	iw.genMu.Unlock()
-	if len(f.scriptList()) != 0 {
-		t.Error("an uncharged thought stirs no affect")
+	scripts := f.scriptList()
+	// a flat thought still publishes a live reading (valence/arousal 0) for SARTRE...
+	if !hasPrefix(scripts, "VALENCE") || !hasPrefix(scripts, "AROUSAL") {
+		t.Errorf("a flat thought should still publish a 0 reading, got %v", scripts)
+	}
+	// ...but it stirs no mood (no affect poles).
+	if hasPrefix(scripts, "WARMTH") || hasPrefix(scripts, "PAIN") ||
+		hasPrefix(scripts, "FLOW") || hasPrefix(scripts, "TENSION") {
+		t.Errorf("an uncharged thought must stir no affect, got %v", scripts)
 	}
 }
