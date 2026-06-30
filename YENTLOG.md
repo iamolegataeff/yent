@@ -405,6 +405,30 @@ behavioral — reframing README to assistant/chatbot/tool flips the signal (redu
 recognized 6→2); kernel `pipe` reads the Rust binary's JSON; broken-pipe no panic; zero
 zombies. Codex audit pass (gpt-5.5): round 1 = 1 MED (broken-pipe panic) fixed; round 2 = PASS.
 
+## 2026-06-30 — SARTRE live metrics hub + reciprocal field-weather receiver
+
+"SARTRE is more than meta-linux — all metrics concentrate in it." The `SystemState` already
+carried the metric scaffold (cpu_load, memory_pressure, prophecy_debt, coherence, valence,
+arousal, entropy, schumann, ...) from the kirpich-#1 dario transport, but cpu_load/memory_pressure
+were never assigned (stub 0). Now the hub is live:
+
+- `sartre_sample_load()`: `cpu_load` = `getloadavg()/cpu_count`; `memory_pressure` = used/total RAM
+  (Darwin `mach host_statistics64`, host port freed each sample; Linux `/proc/meminfo`, updates only
+  when both parsed). Refresh-on-read in `state_to_json`/`print_state`.
+- `sartre_ingest_metrics_json()`: reciprocal receiver — the field pushes its weather (debt/coherence/
+  entropy/valence/arousal/trauma/schumann) into the hub. Sender lives on the field side, symmetric to
+  how innerworld reads SARTRE perception via `sense`. Converges with innerworld's `claude/b4-emotions`
+  VALENCE/AROUSAL field publishing — the valence/arousal keys are already parsed, hub ready to carry
+  Yent's felt valence/arousal once the transport is wired. Zero file overlap.
+- `metrics` CLI mode (`sartre_kernel metrics ['{...}']`) — the live telemetry heartbeat. Foundation
+  for the future robot/camera telemetry too (their metrics land in the same hub).
+
+Measured on neo: `cc -Wall -Wextra` (standalone + `-DHAS_PERCEPTION`) 0 warn; `cpu_load`=0.387
+(=2.32/6, cross-checked `uptime`), `memory_pressure`=0.832 (cross-checked `vm_stat`); ingest
+{debt,coherence} reflected; key-as-value not fooled; malformed no crash; smoke 4/4 + perception 6/6.
+Codex audit pass (gpt-5.5): round 1 = 4 findings (HIGH mach-port leak, MED Linux mem guard, MED json
+colon-strictness, LOW double-init), all fixed; round 2 = PASS.
+
 ## Weights
 
 Not in open access. Code is GPL; weights/deltas/gamma are under the Yent Identity License v1.1 (`LICENSE-WEIGHTS`). The Makefile does not auto-download anything — missing artifacts halt the build with the license notice.
