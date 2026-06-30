@@ -1,10 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ariannamethod/yent/innerworld"
 )
 
 // TestSartreSensePerceivesMotion proves the cgo perception binding end to end on Neo
@@ -42,5 +45,34 @@ func TestSartreSenseQuietNoReflex(t *testing.T) {
 	}
 	if _, ok := (sartreSense{eventsPath: filepath.Join(dir, "nope.jsonl")}).Pressure(); ok {
 		t.Error("a missing file is no environment: no reflex")
+	}
+}
+
+func TestSartreMetricSinkPublishesFieldWeather(t *testing.T) {
+	initSartreHub()
+	defer shutdownSartreHub()
+
+	if err := (sartreMetricSink{}).PublishMetrics(innerworld.MetricSnapshot{
+		Debt:      2.25,
+		Coherence: 0.50,
+		Entropy:   0.40,
+		Valence:   -0.30,
+		Arousal:   0.70,
+		Trauma:    0.30,
+		Warmth:    0.0,
+		Flow:      0.0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(sartreStateJSON()), &got); err != nil {
+		t.Fatalf("bad SARTRE JSON: %v", err)
+	}
+	if got["prophecy_debt"].(float64) != 2.25 ||
+		got["coherence"].(float64) != 0.5 ||
+		got["valence"].(float64) != -0.3 ||
+		got["arousal"].(float64) != 0.7 ||
+		got["trauma"].(float64) != 0.3 {
+		t.Fatalf("SARTRE hub did not receive field weather: %+v", got)
 	}
 }

@@ -17,6 +17,9 @@ yent/
 │   ├── pixtral_vision.c          # vision model support
 │   └── stb_image.h               # image loading
 ├── cmd/                          # executable entry points
+│   ├── flow-smoke/                # native AML Flow smoke
+│   ├── innerworld-dock/           # Metal dock: real voices + native AML Flow + limpha/RI/SARTRE
+│   ├── innerworld-run/            # local/stub innerworld runner
 │   ├── moyent-body-gate/         # body selection gate
 │   ├── moyent-live-smoke/        # smoke test runner
 │   ├── ri-compile/               # compile private RI markdown into bounded records
@@ -53,6 +56,7 @@ yent/
 │   ├── dario_paper_v2.md         # Dario v2 operational paper
 │   └── recursive_resonance_preprint.md
 ├── innerworld/                   # inner-life / emergence layer (adapted from arianna.c)
+│   ├── metrics.go                # reciprocal field-weather snapshots -> metric sinks
 │   └── INNERWORLD_LOG.md         # innerworld design + build log
 ├── sartre/                        # SARTRE: body organ — mini-OS where utilities plug in as packages
 │   ├── sartre_kernel.c/.h         # process-slot kernel: real fork/setrlimit/execve, alive/kill/reap, state
@@ -83,6 +87,7 @@ yent/
 - Memory: `yent/go/limpha.go`, `yent/go/limpha_async.go`
 - Prompts: `prompts/nemo12_fast_v1.txt`, `prompts/small24_deep_v1.txt`
 - Inference: `DoE/doe.c`, `yent/go/amk.go`
+- Innerworld dock: `cmd/innerworld-dock/main.go`, `innerworld/metrics.go`, `innerworld/flow.go`, `innerworld/aml/flow_aml.go`
 - RI tools: `cmd/ri-compile/main.go`, `cmd/ri-consume/main.go`, `riindex/riindex.go`
 - SARTRE ingest: `cmd/sartre-limpha-ingest/main.go`
 - Theory: `research/ai_is_not_a_tool.md`, `research/dario_paper_v2.md`, `research/recursive_resonance_preprint.md`

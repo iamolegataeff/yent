@@ -28,9 +28,10 @@ package main
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../yent/c -I${SRCDIR}/../../sartre
-#cgo LDFLAGS: ${SRCDIR}/../../yent/c/libamk.a
+#cgo LDFLAGS: ${SRCDIR}/../../yent/c/libamk.a -lm
 #include "ariannamethod.h"
 #include "perception.h"
+#include "sartre_kernel.h"
 #include <stdlib.h>
 */
 import "C"
@@ -224,6 +225,59 @@ func (s sartreSense) Pressure() (string, bool) {
 	return C.GoStringN(&buf[0], n), true
 }
 
+// sartreMetricSink is the reciprocal half of the SARTRE bridge: after innerworld
+// updates the AML field, its weather is mirrored into the SARTRE metrics hub. This
+// is telemetry only; PublishMetrics fails soft and never feeds prompt text.
+type sartreMetricSink struct{}
+
+func initSartreHub() {
+	if C.sartre_is_ready() == 0 {
+		C.sartre_init((*C.char)(nil))
+	}
+}
+
+func shutdownSartreHub() {
+	if C.sartre_is_ready() != 0 {
+		C.sartre_shutdown()
+	}
+}
+
+func (s sartreMetricSink) PublishMetrics(m innerworld.MetricSnapshot) error {
+	if C.sartre_is_ready() == 0 {
+		return nil
+	}
+	payload := map[string]float32{
+		"debt":      m.Debt,
+		"coherence": m.Coherence,
+		"entropy":   m.Entropy,
+		"valence":   m.Valence,
+		"arousal":   m.Arousal,
+		"trauma":    m.Trauma,
+		"warmth":    m.Warmth,
+		"flow":      m.Flow,
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	cs := C.CString(string(b))
+	defer C.free(unsafe.Pointer(cs))
+	C.sartre_ingest_metrics_json(cs)
+	return nil
+}
+
+func sartreStateJSON() string {
+	var buf [2048]C.char
+	n := C.sartre_state_to_json(&buf[0], C.int(len(buf)))
+	if n <= 0 {
+		return ""
+	}
+	if int(n) >= len(buf) {
+		n = C.int(len(buf) - 1)
+	}
+	return C.GoStringN(&buf[0], n)
+}
+
 func buildDockTokenizer(nemoGGUF string) aml.Tokenizer {
 	gf, err := yent.LoadGGUF(nemoGGUF)
 	if err != nil {
@@ -400,6 +454,9 @@ func formatCircleStream(circles []innerworld.Circle) string {
 }
 
 func main() {
+	initSartreHub()
+	defer shutdownSartreHub()
+
 	bin := mustEnv("YENT_DOE_BIN")
 	fastModel := mustEnv("YENT_NEMO_GGUF")
 	deepModel := strings.TrimSpace(os.Getenv("YENT_24B_GGUF")) // optional deep body (small24)
@@ -425,6 +482,7 @@ func main() {
 	flowBody := aml.New(buildDockTokenizer(fastModel))
 	iw := innerworld.NewInnerWorld(doeBody{fast}, flowBody, innerworld.NgramDivergence)
 	iw.SetFlow(flowBody)
+	iw.SetMetricSink(sartreMetricSink{})
 	iw.SetScarThreshold(scarThresholdEnv())
 	iw.AddConsolidator(&innerworld.FlowConsolidator{Flow: flowBody})
 	iw.SetSleepTrigger(func(innerworld.Field) bool { return flowBody.AutumnEnergy() > 0.6 })
@@ -442,6 +500,7 @@ func main() {
 	// the emotional constitution (innerworld/feeling.aml) — the baseline affect at rest.
 	iw.EnableFeeling()
 	fmt.Println("=== High brain wired: the circles' feeling drives the affect axis (warmth/pain/flow/tension) ===")
+	fmt.Println("=== SARTRE metrics hub wired: inner field weather mirrors back into the body hub ===")
 	if fp := strings.TrimSpace(os.Getenv("YENT_FEELING_AML")); fp != "" {
 		cs := C.CString(fp)
 		if C.am_exec_file(cs) == 0 {
