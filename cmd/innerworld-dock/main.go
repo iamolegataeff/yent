@@ -499,6 +499,7 @@ func main() {
 	// positive thought, PAIN/TENSION on a negative one). YENT_FEELING_AML optionally loads
 	// the emotional constitution (innerworld/feeling.aml) — the baseline affect at rest.
 	iw.EnableFeeling()
+	wireFeelingMath(iw) // build with -tags julia to run the HighMathEngine formulas on real libjulia
 	fmt.Println("=== High brain wired: the circles' feeling drives the affect axis (warmth/pain/flow/tension) ===")
 	fmt.Println("=== SARTRE metrics hub wired: inner field weather mirrors back into the body hub ===")
 	if fp := strings.TrimSpace(os.Getenv("YENT_FEELING_AML")); fp != "" {
