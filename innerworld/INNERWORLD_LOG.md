@@ -696,8 +696,19 @@ sleep `Consolidate` decays/prunes it; `scarSurface` now resurfaces by resonance 
 (sinks-intense, trauma-heavier-than-joy, mild-no-settle, resurrect-by-feeling). That closes the
 Б4 arc: environment (SARTRE) → feeling (High/Julia-math) → affect axis + sea → resurrect.
 
-Next: the Metal smoke of all of Б4 (real nemo: thoughts → feeling → affect fields →
-valence/arousal → emotional sea), then Codex sews it to limpha/RI.
+**Metal smoke — Б4 alive on the real nemo voice (exit 0).** dock on the Mac mini, real
+nemo12, `YENT_FEELING_AML=innerworld/feeling.aml`. The receipt: `High brain wired` +
+`emotional constitution loaded: feeling.aml` (the first `.aml` module, loaded on Metal),
+then three real circles (warm existential irony — "brilliant", "beautiful", "cozy") drove
+`feeling: valence=0.800 arousal=0.782 | warmth=0.800 pain=0.000 flow=0.154 tension=0.000 |
+scars(sea)=2`. The High brain read the circles' lean (valence 0.800 → WARMTH 0.800, the LOVE
+pole), the entropy-arousal (0.782, the Julia-proven math), the resonance (flow 0.154), and the
+feeling settled into the sea — `scars=2` (one prophecy-scar from debt 2.005, one emotion-scar
+from |valence| 0.800 — the same intense+dissonant thought, two reasons). valence/arousal are
+now live field metrics (the SARTRE-feed source). Honest: the circles happened to lean positive
+(the lexical map caught "brilliant/beautiful"); a darker prompt would pain instead. By the tool:
+the Б4 arc is alive end to end on real Metal — environment(SARTRE)→feeling(High/Julia-math)→
+affect axis + sea→resurrect. Mini worktree cleaned. Next: Codex sews it to limpha/RI.
 
 ---
 
