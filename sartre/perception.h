@@ -7,8 +7,9 @@
  * whether Yent's own self-description, a README, moved) becomes PROPHECY horizon.
  *
  * The AML commands are am_exec-format strings (see yent/c/ariannamethod.h: VELOCITY
- * NOMOVE/WALK/RUN/BREATHE, PROPHECY 1..64). This layer EMITS the program; wiring it
- * onto the live field/limpha is the integration seam (Codex), not done here.
+ * NOMOVE/WALK/RUN/BREATHE, PROPHECY 1..64). This layer emits the program. The dock
+ * uses it through two paths: present-time field reflex (sartreSense) and durable
+ * limpha ingestion/recalled pressure.
  *
  * Self-contained. Zero dependencies beyond libc.
  *
