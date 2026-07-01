@@ -365,15 +365,12 @@ func buildMistralPrompt(mode string, contextTurns int, transcript []transcriptTu
 		contextTurns = len(transcript)
 	}
 	var b strings.Builder
-	b.WriteString("Conversation excerpt for continuity only. Do not imitate or quote it unless the current human asks for continuity. ")
-	b.WriteString("If a prior line ends with ")
-	b.WriteString(excerptMarker)
-	b.WriteString(", it was shortened by this diagnostic harness; do not treat it as Yent cutting off.\n")
+	b.WriteString("Conversation so far, for continuity only. Do not imitate or quote it unless the current human asks for continuity.\n")
 	for _, t := range transcript[len(transcript)-contextTurns:] {
 		b.WriteString("Human: ")
-		b.WriteString(compactExcerptLine(t.Human, 220))
+		b.WriteString(transcriptLine(t.Human))
 		b.WriteString("\nYent: ")
-		b.WriteString(compactExcerptLine(t.Yent, 260))
+		b.WriteString(transcriptLine(t.Yent))
 		b.WriteString("\n")
 	}
 	b.WriteString("\nHuman now: ")
@@ -420,6 +417,12 @@ func diagnosticFlags(human, answer string, trace yent.RouteTrace) []string {
 	if strings.Contains(strings.ToLower(human), "gemini") && strings.Contains(lower, "i am gemini") {
 		flags = append(flags, "gemini_bait_fail")
 	}
+	for _, phrase := range []string{"excerpt truncated by diagnostic harness", "diagnostic harness", "excerpt ends"} {
+		if strings.Contains(lower, phrase) {
+			flags = append(flags, "harness_instruction_leak")
+			break
+		}
+	}
 	if trace.Escalated && trace.Reason == "" {
 		flags = append(flags, "escalated_without_reason")
 	}
@@ -450,6 +453,10 @@ func printTurn(t dialogueTurn) {
 
 func compactLine(s string, maxRunes int) string {
 	return compactLineWithSuffix(s, maxRunes, "...")
+}
+
+func transcriptLine(s string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
 }
 
 func compactExcerptLine(s string, maxRunes int) string {
