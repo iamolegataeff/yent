@@ -20,7 +20,7 @@ type PromptComplexity struct {
 // vision, code, architecture, long planning, and multi-part prompts before the
 // fast body burns a turn pretending the question is small.
 func AnalyzePromptComplexity(prompt string) PromptComplexity {
-	prompt = strings.TrimSpace(prompt)
+	prompt = complexitySurface(prompt)
 	lower := strings.ToLower(prompt)
 	pc := PromptComplexity{RuneCount: utf8.RuneCountInString(prompt)}
 
@@ -68,6 +68,21 @@ func AnalyzePromptComplexity(prompt string) PromptComplexity {
 		pc.Reasons = append(pc.Reasons, "simple")
 	}
 	return pc
+}
+
+func complexitySurface(prompt string) string {
+	prompt = strings.TrimSpace(prompt)
+	const marker = "\nHuman now: "
+	idx := strings.LastIndex(prompt, marker)
+	if idx < 0 {
+		return prompt
+	}
+	current := prompt[idx+len(marker):]
+	const answerMarker = "\nAnswer the current human turn as Yent."
+	if end := strings.LastIndex(current, answerMarker); end >= 0 {
+		current = current[:end]
+	}
+	return strings.TrimSpace(current)
 }
 
 func (pc PromptComplexity) ShouldEscalate() bool {
