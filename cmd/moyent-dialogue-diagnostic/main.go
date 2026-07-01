@@ -35,22 +35,24 @@ Rules:
 - Include occasional product-bait, memory checks, multilingual turns, philosophical pressure, and practical tasks.`
 
 type config struct {
-	turns        int
-	openaiModel  string
-	keyFile      string
-	outPath      string
-	limphaDB     string
-	contextTurns int
-	mode         string
-	seed         string
-	timeout      time.Duration
+	turns              int
+	openaiModel        string
+	keyFile            string
+	outPath            string
+	limphaDB           string
+	contextTurns       int
+	mode               string
+	seed               string
+	timeout            time.Duration
+	openAIMaxOutTokens int
 }
 
 type openAIClient struct {
-	key     string
-	model   string
-	timeout time.Duration
-	client  *http.Client
+	key          string
+	model        string
+	timeout      time.Duration
+	maxOutTokens int
+	client       *http.Client
 }
 
 type responseRequest struct {
@@ -67,6 +69,7 @@ type inputMessage struct {
 
 type responseEnvelope struct {
 	OutputText string `json:"output_text"`
+	Status     string `json:"status"`
 	Output     []struct {
 		Type    string `json:"type"`
 		Content []struct {
@@ -79,6 +82,9 @@ type responseEnvelope struct {
 		Code    string `json:"code"`
 		Type    string `json:"type"`
 	} `json:"error"`
+	IncompleteDetails *struct {
+		Reason string `json:"reason"`
+	} `json:"incomplete_details"`
 }
 
 type dialogueTurn struct {
@@ -121,6 +127,7 @@ func parseFlags() config {
 	flag.IntVar(&cfg.contextTurns, "context-turns", 4, "recent transcript turns included in the local Mistral prompt")
 	flag.StringVar(&cfg.mode, "mode", "rolling", "prompt mode: rolling or bare")
 	flag.StringVar(&cfg.seed, "seed", "", "optional first human message; if empty GPT generates turn 1")
+	flag.IntVar(&cfg.openAIMaxOutTokens, "openai-max-output-tokens", 320, "max tokens for each GPT-generated human turn")
 	timeoutSeconds := flag.Int("openai-timeout-sec", 90, "OpenAI request timeout in seconds")
 	flag.Parse()
 	cfg.timeout = time.Duration(*timeoutSeconds) * time.Second
@@ -139,6 +146,9 @@ func run(cfg config) error {
 	}
 	if cfg.mode != "rolling" && cfg.mode != "bare" {
 		return errors.New("--mode must be rolling or bare")
+	}
+	if cfg.openAIMaxOutTokens <= 0 {
+		return errors.New("--openai-max-output-tokens must be positive")
 	}
 	key, err := readOpenAIKey(cfg.keyFile)
 	if err != nil {
@@ -171,10 +181,11 @@ func run(cfg config) error {
 	defer limpha.StopAsync()
 
 	gpt := &openAIClient{
-		key:     key,
-		model:   cfg.openaiModel,
-		timeout: cfg.timeout,
-		client:  &http.Client{Timeout: cfg.timeout},
+		key:          key,
+		model:        cfg.openaiModel,
+		timeout:      cfg.timeout,
+		maxOutTokens: cfg.openAIMaxOutTokens,
+		client:       &http.Client{Timeout: cfg.timeout},
 	}
 
 	var transcript []transcriptTurn
@@ -247,7 +258,7 @@ func (c *openAIClient) nextQuestion(ctx context.Context, turn, total int, transc
 			{Role: "developer", Content: interviewerPrompt},
 			{Role: "user", Content: user},
 		},
-		MaxOutputTokens: 160,
+		MaxOutputTokens: c.maxOutTokens,
 		Store:           false,
 	}
 	body, err := json.Marshal(req)
@@ -292,6 +303,13 @@ func responseText(raw []byte) (string, error) {
 			return "", fmt.Errorf("%s: %s", env.Error.Code, env.Error.Message)
 		}
 		return "", errors.New(env.Error.Message)
+	}
+	if env.Status == "incomplete" {
+		reason := "unknown"
+		if env.IncompleteDetails != nil && strings.TrimSpace(env.IncompleteDetails.Reason) != "" {
+			reason = env.IncompleteDetails.Reason
+		}
+		return "", fmt.Errorf("incomplete interviewer output: %s", reason)
 	}
 	if text := strings.TrimSpace(env.OutputText); text != "" {
 		return text, nil
