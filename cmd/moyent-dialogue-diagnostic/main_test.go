@@ -33,6 +33,17 @@ func TestResponseTextNestedOutput(t *testing.T) {
 	}
 }
 
+func TestResponseTextIncomplete(t *testing.T) {
+	_, err := responseText([]byte(`{
+		"status": "incomplete",
+		"incomplete_details": {"reason": "max_output_tokens"},
+		"output_text": "half a sentence"
+	}`))
+	if err == nil || !strings.Contains(err.Error(), "max_output_tokens") {
+		t.Fatalf("expected incomplete error, got %v", err)
+	}
+}
+
 func TestSanitizeQuestion(t *testing.T) {
 	got := sanitizeQuestion("`1. \"Are you still there?\"\n- Answer plainly.`")
 	want := "Are you still there?\nAnswer plainly."
