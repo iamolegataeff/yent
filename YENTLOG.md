@@ -21,6 +21,7 @@ yent/
 │   ├── innerworld-dock/           # Metal dock: real voices + native AML Flow + limpha/RI/SARTRE
 │   ├── innerworld-run/            # local/stub innerworld runner
 │   ├── moyent-body-gate/         # body selection gate
+│   ├── moyent-dialogue-diagnostic/ # GPT-generated human dialogue harness for router/limpha diagnostics
 │   ├── moyent-live-smoke/        # smoke test runner
 │   ├── ri-compile/               # compile private RI markdown into bounded records
 │   ├── ri-consume/               # filter compiled RI records for runtime/test consumers

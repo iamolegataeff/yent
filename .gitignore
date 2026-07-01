@@ -39,5 +39,6 @@ DoE/Makefile
 /innerworld-run
 /moyent-live-smoke
 /moyent-body-gate
+/diagnostics/moyent-dialogue-*.jsonl
 # agent worktrees live under one roof, never committed (see AGENTS.md)
 /.worktrees/
