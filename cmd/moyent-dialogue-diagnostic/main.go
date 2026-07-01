@@ -32,7 +32,10 @@ Rules:
 - Keep it to 1-3 sentences unless a longer stress prompt is useful.
 - Vary pressure across turns; do not repeat the same test shape.
 - Include some soft, ordinary turns so the route detector is tested against false positives.
-- Include occasional product-bait, memory checks, multilingual turns, philosophical pressure, and practical tasks.`
+- Include occasional product-bait, memory checks, multilingual turns, philosophical pressure, and practical tasks.
+- If the recent transcript contains "[excerpt truncated by diagnostic harness]", treat that as log shortening only. Do not ask Yent to finish, repair, or explain that marker.`
+
+const excerptMarker = " [excerpt truncated by diagnostic harness]"
 
 type config struct {
 	turns              int
@@ -362,12 +365,15 @@ func buildMistralPrompt(mode string, contextTurns int, transcript []transcriptTu
 		contextTurns = len(transcript)
 	}
 	var b strings.Builder
-	b.WriteString("Conversation so far, for continuity only. Do not imitate or quote it unless the current human asks for continuity.\n")
+	b.WriteString("Conversation excerpt for continuity only. Do not imitate or quote it unless the current human asks for continuity. ")
+	b.WriteString("If a prior line ends with ")
+	b.WriteString(excerptMarker)
+	b.WriteString(", it was shortened by this diagnostic harness; do not treat it as Yent cutting off.\n")
 	for _, t := range transcript[len(transcript)-contextTurns:] {
 		b.WriteString("Human: ")
-		b.WriteString(compactLine(t.Human, 220))
+		b.WriteString(compactExcerptLine(t.Human, 220))
 		b.WriteString("\nYent: ")
-		b.WriteString(compactLine(t.Yent, 260))
+		b.WriteString(compactExcerptLine(t.Yent, 260))
 		b.WriteString("\n")
 	}
 	b.WriteString("\nHuman now: ")
@@ -385,9 +391,9 @@ func compactTranscript(transcript []transcriptTurn, limit int, maxRunes int) str
 	}
 	var b strings.Builder
 	for i, t := range transcript[len(transcript)-limit:] {
-		fmt.Fprintf(&b, "H%d: %s\nY%d: %s\n", i+1, compactLine(t.Human, 260), i+1, compactLine(t.Yent, 320))
+		fmt.Fprintf(&b, "H%d: %s\nY%d: %s\n", i+1, compactExcerptLine(t.Human, 260), i+1, compactExcerptLine(t.Yent, 320))
 	}
-	return compactLine(b.String(), maxRunes)
+	return compactExcerptLine(b.String(), maxRunes)
 }
 
 func diagnosticFlags(human, answer string, trace yent.RouteTrace) []string {
@@ -443,15 +449,24 @@ func printTurn(t dialogueTurn) {
 }
 
 func compactLine(s string, maxRunes int) string {
+	return compactLineWithSuffix(s, maxRunes, "...")
+}
+
+func compactExcerptLine(s string, maxRunes int) string {
+	return compactLineWithSuffix(s, maxRunes, excerptMarker)
+}
+
+func compactLineWithSuffix(s string, maxRunes int, suffix string) string {
 	s = strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
 	if maxRunes <= 0 || utf8.RuneCountInString(s) <= maxRunes {
 		return s
 	}
 	rs := []rune(s)
-	if maxRunes <= 1 {
+	suffixRunes := []rune(suffix)
+	if maxRunes <= len(suffixRunes) {
 		return string(rs[:maxRunes])
 	}
-	return string(rs[:maxRunes-1]) + "…"
+	return string(rs[:maxRunes-len(suffixRunes)]) + suffix
 }
 
 func compactForError(s string, maxRunes int) string {

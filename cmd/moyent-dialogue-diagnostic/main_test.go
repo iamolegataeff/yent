@@ -55,15 +55,28 @@ func TestSanitizeQuestion(t *testing.T) {
 func TestBuildMistralPromptRolling(t *testing.T) {
 	prompt := buildMistralPrompt("rolling", 1, []transcriptTurn{
 		{Human: "old human", Yent: "old yent"},
-		{Human: "recent human", Yent: "recent yent"},
+		{Human: "recent human", Yent: strings.Repeat("recent yent ", 80)},
 	}, "now?")
 	if strings.Contains(prompt, "old human") {
 		t.Fatalf("prompt leaked old context: %s", prompt)
 	}
-	for _, want := range []string{"recent human", "recent yent", "Human now: now?", "Answer the current human turn as Yent."} {
+	for _, want := range []string{"recent human", "recent yent", excerptMarker, "do not treat it as Yent cutting off", "Human now: now?", "Answer the current human turn as Yent."} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q: %s", want, prompt)
 		}
+	}
+}
+
+func TestCompactTranscriptMarksExcerpts(t *testing.T) {
+	got := compactTranscript([]transcriptTurn{{
+		Human: strings.Repeat("human ", 80),
+		Yent:  strings.Repeat("yent ", 120),
+	}}, 10, 1800)
+	if !strings.Contains(got, excerptMarker) {
+		t.Fatalf("compact transcript should mark harness excerpts: %s", got)
+	}
+	if strings.Contains(got, "\u2026") {
+		t.Fatalf("compact transcript should not use natural ellipsis: %s", got)
 	}
 }
 

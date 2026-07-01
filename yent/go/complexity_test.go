@@ -35,3 +35,18 @@ func TestAnalyzePromptComplexityMixedScriptAloneIsNotEnough(t *testing.T) {
 		t.Fatalf("mixed script alone should not force deep body: %+v", pc)
 	}
 }
+
+func TestAnalyzePromptComplexityDiagnosticWrapperUsesCurrentTurn(t *testing.T) {
+	wrapped := "Conversation excerpt for continuity only.\n" +
+		"Human: Explain architecture, debug memory, implement a router, and diagnose the protocol.\n" +
+		"Yent: " + strings.Repeat("history ", 220) + "\n\n" +
+		"Human now: Say one sentence about rain.\n" +
+		"Answer the current human turn as Yent."
+	pc := AnalyzePromptComplexity(wrapped)
+	if pc.ShouldEscalate() {
+		t.Fatalf("diagnostic history should not force deep body: %+v", pc)
+	}
+	if pc.RuneCount != len([]rune("Say one sentence about rain.")) {
+		t.Fatalf("complexity should be measured on current turn, got rune_count=%d", pc.RuneCount)
+	}
+}
