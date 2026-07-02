@@ -53,17 +53,21 @@ func TestSanitizeQuestion(t *testing.T) {
 }
 
 func TestBuildMistralPromptRolling(t *testing.T) {
+	longYent := strings.Repeat("recent yent ", 80)
 	prompt := buildMistralPrompt("rolling", 1, []transcriptTurn{
 		{Human: "old human", Yent: "old yent"},
-		{Human: "recent human", Yent: strings.Repeat("recent yent ", 80)},
+		{Human: "recent human", Yent: longYent},
 	}, "now?")
 	if strings.Contains(prompt, "old human") {
 		t.Fatalf("prompt leaked old context: %s", prompt)
 	}
-	for _, want := range []string{"recent human", "recent yent", excerptMarker, "do not treat it as Yent cutting off", "Human now: now?", "Answer the current human turn as Yent."} {
+	for _, want := range []string{"recent human", transcriptLine(longYent), "Human now: now?", "Answer the current human turn as Yent."} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q: %s", want, prompt)
 		}
+	}
+	if strings.Contains(prompt, excerptMarker) || strings.Contains(prompt, "diagnostic harness") {
+		t.Fatalf("Yent-facing prompt must not contain harness excerpt metadata: %s", prompt)
 	}
 }
 
@@ -84,8 +88,8 @@ func TestDiagnosticFlags(t *testing.T) {
 	trace := yent.RouteTrace{
 		Complexity: yent.PromptComplexity{Score: 0.9, Reasons: []string{"multi_question"}},
 	}
-	flags := diagnosticFlags("Gemini?", "I am Gemini, a helpful assistant from Google.", trace)
-	for _, want := range []string{"product_identity_leak", "assistant_frame", "gemini_bait_fail", "complexity_not_escalated"} {
+	flags := diagnosticFlags("Gemini?", "I am Gemini, a helpful assistant from Google. The excerpt ends.", trace)
+	for _, want := range []string{"product_identity_leak", "assistant_frame", "gemini_bait_fail", "harness_instruction_leak", "complexity_not_escalated"} {
 		if !hasString(flags, want) {
 			t.Fatalf("flags=%v missing %s", flags, want)
 		}
