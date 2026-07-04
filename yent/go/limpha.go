@@ -20,7 +20,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	_ "modernc.org/sqlite"
@@ -67,12 +69,14 @@ type Seam struct {
 // LimphaClient is the in-process memory handle. It keeps the API the REPL used
 // for the old socket client (Store/Search/Stats/Close), now backed by SQLite.
 type LimphaClient struct {
-	db        *sql.DB
-	dbPath    string
-	sessionID string
-	connected bool
-	asyncMu   sync.Mutex
-	async     *limphaAsync
+	db           *sql.DB
+	dbPath       string
+	sessionID    string
+	connected    bool
+	asyncMu      sync.Mutex
+	async        *limphaAsync
+	ftsErrors    int64
+	ftsFallbacks int64
 }
 
 const limphaSchema = `
@@ -302,11 +306,110 @@ func (c *LimphaClient) Store(prompt, response string, state LimphaState) error {
 	return err
 }
 
+func limphaFTSTokens(query string) []string {
+	var out []string
+	seen := make(map[string]bool)
+	var b strings.Builder
+	flush := func() {
+		if b.Len() == 0 {
+			return
+		}
+		token := strings.ToLower(b.String())
+		b.Reset()
+		if !seen[token] {
+			seen[token] = true
+			out = append(out, token)
+		}
+	}
+	for _, r := range query {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			b.WriteRune(r)
+			continue
+		}
+		flush()
+	}
+	flush()
+	return out
+}
+
+func limphaQuoteFTSTerm(term string) string {
+	return `"` + strings.ReplaceAll(term, `"`, `""`) + `"`
+}
+
+func limphaNaturalFTSQuery(query string) string {
+	tokens := limphaFTSTokens(query)
+	if len(tokens) == 0 {
+		return ""
+	}
+	parts := make([]string, len(tokens))
+	for i, token := range tokens {
+		parts[i] = limphaQuoteFTSTerm(token)
+	}
+	return strings.Join(parts, " OR ")
+}
+
+func limphaLooksExplicitFTSQuery(query string) bool {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return false
+	}
+	if strings.Contains(q, ":") || strings.Contains(q, "*") || strings.Contains(q, "^") {
+		return true
+	}
+	if strings.HasPrefix(q, `"`) && strings.HasSuffix(q, `"`) && len(q) > 1 {
+		return true
+	}
+	upper := strings.ToUpper(q)
+	for _, op := range []string{" OR ", " AND ", " NOT ", "NEAR("} {
+		if strings.Contains(upper, op) {
+			return true
+		}
+	}
+	return false
+}
+
+func limphaFTSQueries(query string) []string {
+	raw := strings.TrimSpace(query)
+	natural := limphaNaturalFTSQuery(raw)
+	if natural == "" {
+		return nil
+	}
+	if limphaLooksExplicitFTSQuery(raw) {
+		if natural != raw {
+			return []string{raw, natural}
+		}
+		return []string{raw}
+	}
+	return []string{natural}
+}
+
 // Search runs an FTS5 full-text query, ranked by bm25 (lower = better).
 func (c *LimphaClient) Search(query string, limit int) ([]map[string]interface{}, error) {
 	if !c.connected || strings.TrimSpace(query) == "" {
 		return nil, nil
 	}
+	queries := limphaFTSQueries(query)
+	if len(queries) == 0 {
+		return nil, nil
+	}
+	var lastErr error
+	for i, matchQuery := range queries {
+		out, err := c.searchFTS(matchQuery, limit)
+		if err == nil {
+			if i > 0 {
+				atomic.AddInt64(&c.ftsFallbacks, 1)
+			}
+			return out, nil
+		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		atomic.AddInt64(&c.ftsErrors, 1)
+	}
+	return nil, nil // malformed FTS query -> empty, like the Python except
+}
+
+func (c *LimphaClient) searchFTS(matchQuery string, limit int) ([]map[string]interface{}, error) {
 	rows, err := c.db.Query(
 		`SELECT c.id, c.timestamp, c.session_id, c.prompt, c.response,
 		        c.quality, c.access_count, c.temperature, c.destiny,
@@ -314,9 +417,9 @@ func (c *LimphaClient) Search(query string, limit int) ([]map[string]interface{}
 		 FROM conversations_fts fts
 		 JOIN conversations c ON c.id = fts.rowid
 		 WHERE conversations_fts MATCH ?
-		 ORDER BY rank LIMIT ?`, query, limit)
+		 ORDER BY rank LIMIT ?`, matchQuery, limit)
 	if err != nil {
-		return nil, nil // malformed FTS query -> empty, like the Python except
+		return nil, err
 	}
 	defer rows.Close()
 	var out []map[string]interface{}
@@ -336,7 +439,7 @@ func (c *LimphaClient) Search(query string, limit int) ([]map[string]interface{}
 		})
 	}
 	if rows.Err() != nil {
-		return nil, nil // late FTS/runtime error -> empty, matching the Python except
+		return nil, rows.Err()
 	}
 	return out, nil
 }
@@ -657,6 +760,8 @@ func (c *LimphaClient) Stats() (map[string]interface{}, error) {
 		"db_size_bytes":       dbSize,
 		"async_enabled":       asyncEnabled,
 		"async_backlog":       asyncBacklog,
+		"fts_query_errors":    atomic.LoadInt64(&c.ftsErrors),
+		"fts_query_fallbacks": atomic.LoadInt64(&c.ftsFallbacks),
 	}, nil
 }
 
