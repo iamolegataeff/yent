@@ -21,7 +21,9 @@ static int read_string(FILE* f, char* buf, int max) {
     if (!read_u64(f, &len)) return 0;
     if (len >= (uint64_t)max) {
         // String too long: read and discard
-        for (uint64_t i = 0; i < len; i++) fgetc(f);
+        for (uint64_t i = 0; i < len; i++) {
+            if (fgetc(f) == EOF) return 0;
+        }
         buf[0] = 0;
         return 1;
     }
@@ -32,6 +34,7 @@ static int read_string(FILE* f, char* buf, int max) {
 
 static int skip_value(FILE* f, uint32_t type);
 static float f16_to_f32(uint16_t h);   /* defined below, used by gguf_load_f16 helpers */
+static uint64_t gguf_dtype_nbytes(uint32_t dtype, uint64_t n);
 
 static int skip_array(FILE* f) {
     uint32_t atype;
@@ -44,14 +47,14 @@ static int skip_array(FILE* f) {
 
 static int skip_value(FILE* f, uint32_t type) {
     switch (type) {
-        case 4: fseek(f, 4, SEEK_CUR); return 1;  // uint32
-        case 5: fseek(f, 4, SEEK_CUR); return 1;  // int32
-        case 6: fseek(f, 4, SEEK_CUR); return 1;  // float32
-        case 7: fseek(f, 1, SEEK_CUR); return 1;  // bool
+        case 4: return fseek(f, 4, SEEK_CUR) == 0;  // uint32
+        case 5: return fseek(f, 4, SEEK_CUR) == 0;  // int32
+        case 6: return fseek(f, 4, SEEK_CUR) == 0;  // float32
+        case 7: return fseek(f, 1, SEEK_CUR) == 0;  // bool
         case 8: { char buf[4096]; return read_string(f, buf, sizeof(buf)); } // string
         case 9: return skip_array(f);               // array
-        case 10: fseek(f, 8, SEEK_CUR); return 1;  // uint64
-        case 12: fseek(f, 8, SEEK_CUR); return 1;  // uint64
+        case 10: return fseek(f, 8, SEEK_CUR) == 0;  // uint64
+        case 12: return fseek(f, 8, SEEK_CUR) == 0;  // uint64
         default: return 0;
     }
 }
@@ -61,6 +64,7 @@ static int skip_value(FILE* f, uint32_t type) {
 gguf_file* gguf_open(const char* path) {
     FILE* f = fopen(path, "rb");
     if (!f) { fprintf(stderr, "gguf: cannot open %s\n", path); return NULL; }
+    gguf_file* gf = NULL;
 
     // Header
     uint32_t magic;
@@ -69,12 +73,15 @@ gguf_file* gguf_open(const char* path) {
         fclose(f); return NULL;
     }
 
-    gguf_file* gf = (gguf_file*)calloc(1, sizeof(gguf_file));
+    gf = (gguf_file*)calloc(1, sizeof(gguf_file));
     if (!gf) { fclose(f); return NULL; }
 
-    read_u32(f, &gf->version);
-    read_u64(f, &gf->n_tensors);
-    read_u64(f, &gf->n_kv);
+    if (!read_u32(f, &gf->version) ||
+        !read_u64(f, &gf->n_tensors) ||
+        !read_u64(f, &gf->n_kv)) {
+        fprintf(stderr, "gguf: truncated header (%s)\n", path);
+        goto fail;
+    }
 
     // The tensor-info table is fixed-size. With more tensors than it holds, the
     // info loop stops early and data_offset (computed from ftell after the loop)
@@ -90,8 +97,10 @@ gguf_file* gguf_open(const char* path) {
     for (uint64_t i = 0; i < gf->n_kv; i++) {
         char key[512] = {0};
         uint32_t vtype;
-        read_string(f, key, sizeof(key));
-        read_u32(f, &vtype);
+        if (!read_string(f, key, sizeof(key)) || !read_u32(f, &vtype)) {
+            fprintf(stderr, "gguf: truncated metadata (%s)\n", path);
+            goto fail;
+        }
 
         // Store simple types, skip arrays
         if (gf->n_kv_parsed < GGUF_MAX_KV && vtype != 9) {
@@ -99,17 +108,17 @@ gguf_file* gguf_open(const char* path) {
             strncpy(kv->key, key, GGUF_MAX_NAME - 1);
             kv->type = vtype;
             switch (vtype) {
-                case 4: read_u32(f, &kv->val.u32); break;
-                case 5: { int32_t v; fread(&v, 4, 1, f); kv->val.i32 = v; break; }
-                case 6: read_f32(f, &kv->val.f32); break;
-                case 7: { uint8_t v; fread(&v, 1, 1, f); kv->val.b = v; break; }
-                case 8: read_string(f, kv->val.str, sizeof(kv->val.str)); break;
-                case 10: case 12: read_u64(f, &kv->val.u64); break;
-                default: skip_value(f, vtype); break;
+                case 4: if (!read_u32(f, &kv->val.u32)) goto fail; break;
+                case 5: { int32_t v; if (fread(&v, 4, 1, f) != 1) goto fail; kv->val.i32 = v; break; }
+                case 6: if (!read_f32(f, &kv->val.f32)) goto fail; break;
+                case 7: { uint8_t v; if (fread(&v, 1, 1, f) != 1) goto fail; kv->val.b = v; break; }
+                case 8: if (!read_string(f, kv->val.str, sizeof(kv->val.str))) goto fail; break;
+                case 10: case 12: if (!read_u64(f, &kv->val.u64)) goto fail; break;
+                default: if (!skip_value(f, vtype)) goto fail; break;
             }
             gf->n_kv_parsed++;
         } else {
-            skip_value(f, vtype);
+            if (!skip_value(f, vtype)) goto fail;
         }
     }
 
@@ -144,25 +153,47 @@ gguf_file* gguf_open(const char* path) {
     // Parse tensor infos
     for (uint64_t i = 0; i < gf->n_tensors && i < GGUF_MAX_TENSORS; i++) {
         gguf_tensor_info* ti = &gf->tensors[i];
-        read_string(f, ti->name, GGUF_MAX_NAME);
-        read_u32(f, &ti->ndim);
+        if (!read_string(f, ti->name, GGUF_MAX_NAME) || !read_u32(f, &ti->ndim)) {
+            fprintf(stderr, "gguf: truncated tensor info (%s)\n", path);
+            goto fail;
+        }
+        if (ti->ndim > 4) {
+            fprintf(stderr, "gguf: tensor '%s' ndim=%u exceeds 4 (%s)\n", ti->name, ti->ndim, path);
+            goto fail;
+        }
         ti->n_elements = 1;
-        for (uint32_t d = 0; d < ti->ndim && d < 4; d++) {
-            read_u64(f, &ti->shape[d]);
+        for (uint32_t d = 0; d < ti->ndim; d++) {
+            if (!read_u64(f, &ti->shape[d])) goto fail;
+            if (ti->shape[d] == 0 || ti->n_elements > UINT64_MAX / ti->shape[d]) {
+                fprintf(stderr, "gguf: tensor '%s' has invalid shape (%s)\n", ti->name, path);
+                goto fail;
+            }
             ti->n_elements *= ti->shape[d];
         }
-        read_u32(f, &ti->dtype);
-        read_u64(f, &ti->offset);
+        if (!read_u32(f, &ti->dtype) || !read_u64(f, &ti->offset)) goto fail;
     }
 
     // Data section starts at aligned offset after tensor infos
     long pos = ftell(f);
+    if (pos < 0) goto fail;
     gf->data_offset = (pos + 31) & ~31UL;  // align to 32 bytes
 
     // Load tensor data (offsets are relative to data section start)
-    fseek(f, 0, SEEK_END);
+    if (fseek(f, 0, SEEK_END) != 0) goto fail;
     long fsize = ftell(f);
+    if (fsize < 0 || (uint64_t)fsize < gf->data_offset) goto fail;
     long data_size = fsize - gf->data_offset;
+    uint64_t raw_data_size = (uint64_t)data_size;
+    for (uint64_t i = 0; i < gf->n_tensors; i++) {
+        gguf_tensor_info* ti = &gf->tensors[i];
+        uint64_t nbytes = gguf_dtype_nbytes(ti->dtype, ti->n_elements);
+        if (nbytes == 0 || ti->offset > raw_data_size || nbytes > raw_data_size - ti->offset) {
+            fprintf(stderr, "gguf: tensor '%s' outside data section (off %llu + %llu, data %llu) in %s\n",
+                    ti->name, (unsigned long long)ti->offset, (unsigned long long)nbytes,
+                    (unsigned long long)raw_data_size, path);
+            goto fail;
+        }
+    }
     // Page-align the tensor block so the Metal backend can wrap it as one
     // zero-copy NoCopy MTLBuffer (resident weights). free() stays valid.
     size_t pg = (size_t)getpagesize();
@@ -170,11 +201,21 @@ gguf_file* gguf_open(const char* path) {
     gf->data = NULL;
     if (posix_memalign((void**)&gf->data, pg, alloc) != 0 || !gf->data) { fclose(f); free(gf); return NULL; }
     gf->data_size = (uint64_t)alloc;
-    fseek(f, gf->data_offset, SEEK_SET);
-    fread(gf->data, 1, data_size, f);
+    if (fseek(f, (long)gf->data_offset, SEEK_SET) != 0) goto fail;
+    if (fread(gf->data, 1, (size_t)data_size, f) != (size_t)data_size) {
+        fprintf(stderr, "gguf: truncated tensor data (%s)\n", path);
+        goto fail;
+    }
     fclose(f);
 
     return gf;
+fail:
+    if (f) fclose(f);
+    if (gf) {
+        free(gf->data);
+        free(gf);
+    }
+    return NULL;
 }
 
 void gguf_close(gguf_file* gf) {
