@@ -717,6 +717,7 @@ kernel void parliament_elect(
         if (alive[e] != 0.0f) { votes[e] = vdot[e] + res[e]; n_alive++; }
         else                  { votes[e] = -3.0e38f; }
     }
+    if (n_alive == 0u) return;
     if (n_alive < min_e) return;                 /* CPU returns 0 -> no injection (gate all 0) */
     float mean = 0.0f;
     for (uint e = 0u; e < ne; e++) if (alive[e] != 0.0f) mean += votes[e];
@@ -1341,16 +1342,21 @@ int nt_metal_slot_alloc(int slot, uint64_t bytes)
         int rc = nt_metal_init();
         if (rc != 0) return rc;
     }
-    if (slot < 0 || slot >= NT_SLOT_MAX) return 20;
+    if (slot < 0 || slot >= NT_SLOT_MAX || bytes == 0 || bytes > (uint64_t)SIZE_MAX) return 20;
     if (g_slot_tab[slot].live && g_slot_tab[slot].bytes >= bytes) return 0;  /* idempotent */
     if (g_slot_tab[slot].live) return 21;     /* grow of a live slot: not supported */
     @autoreleasepool {
-        NSUInteger need = ((g_slot_used + 255u) & ~(NSUInteger)255u) + (NSUInteger)bytes;
+        NSUInteger off0 = (g_slot_used + 255u) & ~(NSUInteger)255u;
+        if (off0 < g_slot_used || (NSUInteger)bytes > SIZE_MAX - off0) return 20;
+        NSUInteger need = off0 + (NSUInteger)bytes;
         if (need > g_slot_cap) {
             /* growing reallocates: drain any batch, then copy live contents */
             if (g_batch_active) { int rc = batch_drain(); if (rc) return rc; rc = batch_open_cb(); if (rc) return rc; }
             NSUInteger cap = g_slot_cap ? g_slot_cap : (NSUInteger)1 << 20;
-            while (cap < need) cap <<= 1;
+            while (cap < need) {
+                if (cap > SIZE_MAX / 2u) return 11;
+                cap <<= 1;
+            }
             id<MTLBuffer> nb = [g_device newBufferWithLength:cap options:MTLResourceStorageModeShared];
             if (!nb) return 11;
             if (g_slot_buf && g_slot_used)
@@ -1358,7 +1364,7 @@ int nt_metal_slot_alloc(int slot, uint64_t bytes)
             g_slot_buf = nb;
             g_slot_cap = cap;
         }
-        NSUInteger off = (g_slot_used + 255u) & ~(NSUInteger)255u;
+        NSUInteger off = off0;
         g_slot_tab[slot].off   = off;
         g_slot_tab[slot].bytes = (NSUInteger)bytes;
         g_slot_tab[slot].live  = 1;
@@ -1416,10 +1422,62 @@ static int op_fin(id<MTLCommandBuffer> cb, id<MTLComputeCommandEncoder> enc)
 
 static int slot_ok(int s) { return s >= 0 && s < NT_SLOT_MAX && g_slot_tab[s].live; }
 
+static int mul_u64(uint64_t a, uint64_t b, uint64_t *out)
+{
+    if (a != 0 && b > UINT64_MAX / a) return 0;
+    *out = a * b;
+    return 1;
+}
+
+static int add_u64(uint64_t a, uint64_t b, uint64_t *out)
+{
+    if (b > UINT64_MAX - a) return 0;
+    *out = a + b;
+    return 1;
+}
+
+static int float_bytes_u64(uint64_t n, uint64_t *bytes)
+{
+    return mul_u64(n, sizeof(float), bytes);
+}
+
+static int float_bytes_i(int n, uint64_t *bytes)
+{
+    if (n <= 0) return 0;
+    return float_bytes_u64((uint64_t)n, bytes);
+}
+
+static int float_bytes_ii(int a, int b, uint64_t *bytes)
+{
+    uint64_t n;
+    if (a <= 0 || b <= 0) return 0;
+    if (!mul_u64((uint64_t)a, (uint64_t)b, &n)) return 0;
+    return float_bytes_u64(n, bytes);
+}
+
+static int slot_has_bytes(int s, uint64_t bytes, const char *op, const char *arg)
+{
+    if (!slot_ok(s)) {
+        fprintf(stderr, "%s: %s slot %d is not live\n", op, arg, s);
+        return 0;
+    }
+    if (bytes > (uint64_t)g_slot_tab[s].bytes) {
+        fprintf(stderr, "%s: %s slot %d has %llu bytes, needs %llu\n",
+                op, arg, s,
+                (unsigned long long)g_slot_tab[s].bytes,
+                (unsigned long long)bytes);
+        return 0;
+    }
+    return 1;
+}
+
 int nt_metal_rmsnorm(int dst_slot, int src_slot, const float *w, int n, float eps)
 {
     if (!g_initialised) { int rc = nt_metal_init(); if (rc) return rc; }
-    if (!slot_ok(dst_slot) || !slot_ok(src_slot) || n <= 0) return 20;
+    uint64_t nbytes;
+    if (n <= 0 || !float_bytes_i(n, &nbytes) ||
+        !slot_has_bytes(dst_slot, nbytes, __func__, "dst") ||
+        !slot_has_bytes(src_slot, nbytes, __func__, "src")) return 20;
     @autoreleasepool {
         id<MTLBuffer> bw = nil; NSUInteger w_off = 0;
         if (resolve_region(w, (uint64_t)n * sizeof(float), &bw, &w_off) != 0) {
@@ -1445,7 +1503,10 @@ int nt_metal_rmsnorm(int dst_slot, int src_slot, const float *w, int n, float ep
 int nt_metal_rope(int slot, int n_heads, int head_dim, int pos, float theta, int norm_pairs)
 {
     if (!g_initialised) { int rc = nt_metal_init(); if (rc) return rc; }
-    if (!slot_ok(slot) || n_heads <= 0 || head_dim <= 0 || (head_dim & 1)) return 20;
+    uint64_t nbytes;
+    if (n_heads <= 0 || head_dim <= 0 || (head_dim & 1) ||
+        !float_bytes_ii(n_heads, head_dim, &nbytes) ||
+        !slot_has_bytes(slot, nbytes, __func__, "slot")) return 20;
     @autoreleasepool {
         id<MTLCommandBuffer> cb; id<MTLComputeCommandEncoder> enc;
         int rc = op_enc(&cb, &enc); if (rc) return rc;
@@ -1468,7 +1529,11 @@ int nt_metal_rope(int slot, int n_heads, int head_dim, int pos, float theta, int
 static int elementwise2(id<MTLComputePipelineState> pipe, int dst, int a, int b, int n)
 {
     if (!g_initialised) { int rc = nt_metal_init(); if (rc) return rc; }
-    if (!slot_ok(dst) || !slot_ok(a) || !slot_ok(b) || n <= 0) return 20;
+    uint64_t nbytes;
+    if (n <= 0 || !float_bytes_i(n, &nbytes) ||
+        !slot_has_bytes(dst, nbytes, __func__, "dst") ||
+        !slot_has_bytes(a, nbytes, __func__, "a") ||
+        !slot_has_bytes(b, nbytes, __func__, "b")) return 20;
     @autoreleasepool {
         id<MTLCommandBuffer> cb; id<MTLComputeCommandEncoder> enc;
         int rc = op_enc(&cb, &enc); if (rc) return rc;
@@ -1496,12 +1561,15 @@ int nt_metal_attn_decode(int dst_slot, int q_slot, const float *K, const float *
                          uint32_t v_pos_stride, uint32_t v_head_stride, float scale)
 {
     if (!g_initialised) { int rc = nt_metal_init(); if (rc) return rc; }
-    if (!slot_ok(dst_slot) || !slot_ok(q_slot)) return 20;
+    uint64_t q_bytes;
     if (t_len <= 0 || t_len > 4096) {
         fprintf(stderr, "nt_metal_attn_decode: t_len=%d out of range (1..4096)\n", t_len);
         return 20;
     }
-    if (n_kv_heads <= 0 || n_q_heads % n_kv_heads) return 20;
+    if (n_q_heads <= 0 || n_kv_heads <= 0 || head_dim <= 0 || n_q_heads % n_kv_heads ||
+        !float_bytes_ii(n_q_heads, head_dim, &q_bytes) ||
+        !slot_has_bytes(dst_slot, q_bytes, __func__, "dst") ||
+        !slot_has_bytes(q_slot, q_bytes, __func__, "q")) return 20;
     @autoreleasepool {
         /* K/V must live in registered regions — too big to upload per call */
         id<MTLBuffer> bK = nil, bV = nil; NSUInteger K_off = 0, V_off = 0;
@@ -1538,7 +1606,8 @@ int nt_metal_attn_decode(int dst_slot, int q_slot, const float *K, const float *
 int nt_metal_copy_to_region(void *dst, int src_slot, uint64_t bytes)
 {
     if (!g_initialised) { int rc = nt_metal_init(); if (rc) return rc; }
-    if (!slot_ok(src_slot) || bytes == 0 || (bytes & 3)) return 20;
+    if (bytes == 0 || (bytes & 3) || bytes / 4 > UINT32_MAX ||
+        !slot_has_bytes(src_slot, bytes, __func__, "src")) return 20;
     @autoreleasepool {
         id<MTLBuffer> bD = nil; NSUInteger D_off = 0;
         if (resolve_region(dst, bytes, &bD, &D_off) != 0) {
@@ -1568,13 +1637,24 @@ int nt_metal_parliament_inject(int x_slot, int tmp_slot, int gate_slot,
                                const float *layer_base, int D, int rank, int ne, float alpha)
 {
     if (!g_initialised) { int rc = nt_metal_init(); if (rc) return rc; }
-    if (!slot_ok(x_slot) || !slot_ok(tmp_slot) || !slot_ok(gate_slot)) return 20;
+    uint64_t x_bytes, tmp_bytes, gate_bytes;
     if (D <= 0 || rank <= 0 || ne <= 0) return 20;
+    if (!float_bytes_i(D, &x_bytes) ||
+        !float_bytes_ii(ne, rank, &tmp_bytes) ||
+        !float_bytes_i(ne, &gate_bytes) ||
+        !slot_has_bytes(x_slot, x_bytes, __func__, "x") ||
+        !slot_has_bytes(tmp_slot, tmp_bytes, __func__, "tmp") ||
+        !slot_has_bytes(gate_slot, gate_bytes, __func__, "gate")) return 20;
     @autoreleasepool {
-        size_t per_expert   = (size_t)2 * rank * D;
-        size_t layer_floats = (size_t)ne * D + (size_t)ne * per_expert;
+        uint64_t rd, per_expert, ne_d, ne_expert, layer_floats, layer_bytes;
+        if (!mul_u64((uint64_t)rank, (uint64_t)D, &rd) ||
+            !mul_u64(2u, rd, &per_expert) ||
+            !mul_u64((uint64_t)ne, (uint64_t)D, &ne_d) ||
+            !mul_u64((uint64_t)ne, per_expert, &ne_expert) ||
+            !add_u64(ne_d, ne_expert, &layer_floats) ||
+            !float_bytes_u64(layer_floats, &layer_bytes)) return 20;
         id<MTLBuffer> bL = nil; NSUInteger L_off = 0;
-        if (resolve_region(layer_base, (uint64_t)layer_floats * sizeof(float), &bL, &L_off) != 0) {
+        if (resolve_region(layer_base, layer_bytes, &bL, &L_off) != 0) {
             fprintf(stderr, "nt_metal_parliament_inject: layer arena not registered\n");
             return 22;
         }
@@ -1620,10 +1700,16 @@ int nt_metal_parliament_inject(int x_slot, int tmp_slot, int gate_slot,
 int nt_metal_parliament_votes(const float *layer_base, int x_slot, int vdot_slot, int D, int ne)
 {
     if (!g_initialised) { int rc = nt_metal_init(); if (rc) return rc; }
-    if (!slot_ok(x_slot) || !slot_ok(vdot_slot) || D <= 0 || ne <= 0) return 20;
+    uint64_t x_bytes, vote_bytes, layer_bytes;
+    if (D <= 0 || ne <= 0 ||
+        !float_bytes_i(D, &x_bytes) ||
+        !float_bytes_i(ne, &vote_bytes) ||
+        !float_bytes_ii(ne, D, &layer_bytes) ||
+        !slot_has_bytes(x_slot, x_bytes, __func__, "x") ||
+        !slot_has_bytes(vdot_slot, vote_bytes, __func__, "vdot")) return 20;
     @autoreleasepool {
         id<MTLBuffer> bL = nil; NSUInteger L_off = 0;
-        if (resolve_region(layer_base, (uint64_t)ne * D * sizeof(float), &bL, &L_off) != 0) {
+        if (resolve_region(layer_base, layer_bytes, &bL, &L_off) != 0) {
             fprintf(stderr, "nt_metal_parliament_votes: layer arena not registered\n");
             return 22;
         }
@@ -1648,9 +1734,15 @@ int nt_metal_parliament_elect(int vdot_slot, int res_slot, int alive_slot,
                               int cons_slot, int gate_slot, int ne, int layer_idx, int min_experts)
 {
     if (!g_initialised) { int rc = nt_metal_init(); if (rc) return rc; }
-    if (!slot_ok(vdot_slot) || !slot_ok(res_slot) || !slot_ok(alive_slot) ||
-        !slot_ok(cons_slot) || !slot_ok(gate_slot)) return 20;
-    if (ne <= 0 || ne > 16 || layer_idx < 0 || min_experts < 0) return 20;
+    uint64_t vote_bytes, cons_bytes;
+    if (ne <= 0 || ne > 16 || layer_idx < 0 || min_experts < 1 ||
+        !float_bytes_i(ne, &vote_bytes) ||
+        !float_bytes_u64((uint64_t)layer_idx + 1u, &cons_bytes) ||
+        !slot_has_bytes(vdot_slot, vote_bytes, __func__, "vdot") ||
+        !slot_has_bytes(res_slot, vote_bytes, __func__, "res") ||
+        !slot_has_bytes(alive_slot, vote_bytes, __func__, "alive") ||
+        !slot_has_bytes(cons_slot, cons_bytes, __func__, "cons") ||
+        !slot_has_bytes(gate_slot, vote_bytes, __func__, "gate")) return 20;
     @autoreleasepool {
         id<MTLCommandBuffer> cb; id<MTLComputeCommandEncoder> enc;
         int rc = op_enc(&cb, &enc); if (rc) return rc;
@@ -1677,10 +1769,18 @@ static int matvec_slot(id<MTLComputePipelineState> naive_pipe,
                        int dst_slot, const uint8_t *W, int src_slot, int m, int k)
 {
     if (!g_initialised) { int rc = nt_metal_init(); if (rc) return rc; }
-    if (!slot_ok(dst_slot) || !slot_ok(src_slot)) return 20;
     if (k <= 0 || (k % 256) != 0 || m <= 0) return 10;
     @autoreleasepool {
-        const NSUInteger W_bytes = (NSUInteger)m * ((NSUInteger)k / 256u) * block_bytes;
+        uint64_t src_bytes, dst_bytes, nblocks, rows_blocks, W_bytes_u64;
+        if (!float_bytes_i(k, &src_bytes) ||
+            !float_bytes_i(m, &dst_bytes) ||
+            !slot_has_bytes(dst_slot, dst_bytes, __func__, "dst") ||
+            !slot_has_bytes(src_slot, src_bytes, __func__, "src")) return 20;
+        nblocks = (uint64_t)k / 256u;
+        if (!mul_u64((uint64_t)m, nblocks, &rows_blocks) ||
+            !mul_u64(rows_blocks, (uint64_t)block_bytes, &W_bytes_u64) ||
+            W_bytes_u64 > (uint64_t)SIZE_MAX) return 10;
+        const NSUInteger W_bytes = (NSUInteger)W_bytes_u64;
         id<MTLBuffer> bW = nil; NSUInteger W_off = 0;
         if (resolve_region(W, W_bytes, &bW, &W_off) != 0) {
             bW = [g_device newBufferWithBytes:W length:W_bytes
