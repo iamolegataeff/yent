@@ -40,6 +40,7 @@
 #include <stdint.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <limits.h>
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <dirent.h>
@@ -104,6 +105,11 @@
 #define MAX_EXPERTS       16
 #define MIN_EXPERTS       2
 #define MAX_LAYERS        64
+#define DOE_MAX_HOST_DIM  16384
+#define DOE_MAX_HOST_HIDDEN 262144
+#define DOE_MAX_HOST_HEADS 512
+#define DOE_MAX_HOST_HEAD_DIM 512
+#define DOE_MAX_HOST_VOCAB 1000000
 #define LORA_RANK         16
 #define HARMONIC_N        8
 #define NOTORCH_RANK      4
@@ -846,6 +852,11 @@ static void apply_field_to_logits(float *logits, int n) {
     float *H_sig = calloc(n, sizeof(float));
     float *F_sig = calloc(n, sizeof(float));
     float *A_sig = calloc(n, sizeof(float));
+    if (!H_sig || !F_sig || !A_sig) {
+        fprintf(stderr, "[doe] Dario scratch allocation failed for vocab=%d; skipping field overlay\n", n);
+        free(H_sig); free(F_sig); free(A_sig);
+        return;
+    }
 
     for (int c = ctx_start; c < DF.ctx_len; c++) {
         int ctx_id = DF.context[c];
@@ -1630,6 +1641,70 @@ typedef struct {
 
 typedef struct { char name[96]; uint32_t ndim; uint64_t dims[4]; uint32_t dtype; uint64_t offset; } TensorInfo;
 
+static int doe_mul_size(size_t a, size_t b, size_t *out) {
+    if (b != 0 && a > SIZE_MAX / b) return 0;
+    *out = a * b;
+    return 1;
+}
+
+static int doe_mul_u64(uint64_t a, uint64_t b, uint64_t *out) {
+    if (b != 0 && a > UINT64_MAX / b) return 0;
+    *out = a * b;
+    return 1;
+}
+
+static int doe_tensor_elements(const TensorInfo *ti, uint64_t *out) {
+    uint64_t n = 1;
+    for (uint32_t d = 0; d < ti->ndim; d++) {
+        if (ti->dims[d] == 0 || !doe_mul_u64(n, ti->dims[d], &n)) return 0;
+    }
+    *out = n;
+    return 1;
+}
+
+static int doe_validate_host_config(GGUFIndex *ps, int require_vocab) {
+    if (ps->host_dim <= 0 || ps->host_dim > DOE_MAX_HOST_DIM) {
+        fprintf(stderr, "[doe] invalid embedding_length: %d\n", ps->host_dim);
+        return 0;
+    }
+    if (ps->host_n_layers <= 0 || ps->host_n_layers > MAX_LAYERS) {
+        fprintf(stderr, "[doe] invalid block_count: %d (max %d)\n", ps->host_n_layers, MAX_LAYERS);
+        return 0;
+    }
+    if (ps->host_heads == 0) ps->host_heads = ps->host_dim / 64;
+    if (ps->host_heads <= 0 || ps->host_heads > DOE_MAX_HOST_HEADS) {
+        fprintf(stderr, "[doe] invalid head_count: %d\n", ps->host_heads);
+        return 0;
+    }
+    if (ps->host_kv_heads == 0) ps->host_kv_heads = ps->host_heads;
+    if (ps->host_kv_heads <= 0 || ps->host_kv_heads > ps->host_heads ||
+        ps->host_heads % ps->host_kv_heads != 0) {
+        fprintf(stderr, "[doe] invalid head_count_kv: %d for heads=%d\n",
+                ps->host_kv_heads, ps->host_heads);
+        return 0;
+    }
+    if (ps->host_head_dim == 0) ps->host_head_dim = ps->host_dim / ps->host_heads;
+    if (ps->host_head_dim <= 0 || ps->host_head_dim > DOE_MAX_HOST_HEAD_DIM ||
+        ps->host_heads > INT_MAX / ps->host_head_dim ||
+        ps->host_kv_heads > INT_MAX / ps->host_head_dim) {
+        fprintf(stderr, "[doe] invalid attention head_dim: %d\n", ps->host_head_dim);
+        return 0;
+    }
+    if (ps->host_hidden == 0) {
+        if (ps->host_dim > INT_MAX / 4) return 0;
+        ps->host_hidden = ps->host_dim * 4;
+    }
+    if (ps->host_hidden <= 0 || ps->host_hidden > DOE_MAX_HOST_HIDDEN) {
+        fprintf(stderr, "[doe] invalid feed_forward_length: %d\n", ps->host_hidden);
+        return 0;
+    }
+    if ((require_vocab && ps->host_vocab <= 0) || ps->host_vocab > DOE_MAX_HOST_VOCAB) {
+        fprintf(stderr, "[doe] invalid vocab_size: %d\n", ps->host_vocab);
+        return 0;
+    }
+    return 1;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════════
  * ENVIRONMENT SCANNER — DOE opens its eyes
  * ═══════════════════════════════════════════════════════════════════════════════ */
@@ -1734,9 +1809,16 @@ static void env_scan(Environment *env, const char *self_src) {
  * INDEX LOAD — mmap GGUF, wire weight pointers, profile layers, attach LoRA.
  * the weights are substrate. DOE is the architecture.
  * ═══════════════════════════════════════════════════════════════════════════════ */
-static void init_lora_expert(LoraExpert *e, int dim, int rank, float freq) {
+static int init_lora_expert(LoraExpert *e, int dim, int rank, float freq) {
     e->lora_A = calloc(dim * rank, sizeof(float));
     e->lora_B = calloc(rank * dim, sizeof(float));
+    if (!e->lora_A || !e->lora_B) {
+        fprintf(stderr, "[doe] LoRA expert allocation failed (dim=%d rank=%d)\n", dim, rank);
+        free(e->lora_A);
+        free(e->lora_B);
+        memset(e, 0, sizeof(*e));
+        return 0;
+    }
     float scale = 0.02f / sqrtf((float)rank);
     for (int i = 0; i < dim*rank; i++) e->lora_A[i] = rand_normal() * scale;
     for (int i = 0; i < rank*dim; i++) e->lora_B[i] = rand_normal() * scale;
@@ -1746,6 +1828,7 @@ static void init_lora_expert(LoraExpert *e, int dim, int rank, float freq) {
     e->attention_bias = 0.0f;
     e->layer_focus = 1.0f;
     e->low_vitality_count = 0;
+    return 1;
 }
 
 static void free_lora_expert(LoraExpert *e) {
@@ -1834,7 +1917,7 @@ static int index_load(GGUFIndex *ps, const char *path) {
 
     /* Parse GGUF header */
     uint8_t *p = ps->mmap_base, *pend = ps->mmap_base + ps->mmap_size;
-    #define PC(n) do { if (p + (n) > pend) goto bail; } while(0)
+    #define PC(n) do { uint64_t _need = (uint64_t)(n); if (_need > (uint64_t)(pend - p)) goto bail; } while(0)
     PC(4); uint32_t magic = *(uint32_t*)p; p += 4;
     if (magic != 0x46554747) goto bail;
     PC(4); p += 4; /* version */
@@ -1903,10 +1986,10 @@ static int index_load(GGUFIndex *ps, const char *path) {
         } else if (vtype == 0 || vtype == 7) {
             PC(1); uint8_t bval = *p; p += 1;
             if (strstr(key, "add_space_prefix")) ps->add_space_prefix = bval;
-        } else if (vtype == 1) p += 1;                            /* int8 */
-        else if (vtype == 2 || vtype == 3) p += 2;             /* uint16, int16 */
-        else if (vtype == 5) p += 4;                            /* int32 */
-        else if (vtype == 10 || vtype == 11 || vtype == 12) p += 8; /* uint64, int64, float64 */
+        } else if (vtype == 1) { PC(1); p += 1; }              /* int8 */
+        else if (vtype == 2 || vtype == 3) { PC(2); p += 2; }  /* uint16, int16 */
+        else if (vtype == 5) { PC(4); p += 4; }                /* int32 */
+        else if (vtype == 10 || vtype == 11 || vtype == 12) { PC(8); p += 8; } /* uint64, int64, float64 */
         else if (vtype == 9) { /* array */
             PC(4); uint32_t atype = *(uint32_t*)p; p += 4;
             PC(8); uint64_t alen = *(uint64_t*)p; p += 8;
@@ -1952,19 +2035,18 @@ static int index_load(GGUFIndex *ps, const char *path) {
                 }
                 continue;
             }
-            PC(alen * elem_sz); /* D-M2: bound the array payload before skipping past it */
-            p += alen * elem_sz;
-        } else { p += 4; } /* unknown — guess 4 bytes */
+            uint64_t arr_bytes = 0;
+            if (!doe_mul_u64(alen, (uint64_t)elem_sz, &arr_bytes)) goto bail;
+            PC(arr_bytes); /* D-M2: bound the array payload before skipping past it */
+            p += arr_bytes;
+        } else { PC(4); p += 4; } /* unknown — guess 4 bytes */
     }
-    if (ps->host_dim == 0 || ps->host_dim > 16384 || ps->host_n_layers == 0) goto bail; /* D-L8: bound host_dim — lora_out[D] is a stack VLA */
-    if (ps->host_heads == 0) ps->host_heads = ps->host_dim / 64;
-    if (ps->host_kv_heads == 0) ps->host_kv_heads = ps->host_heads;
-    if (ps->host_head_dim == 0) ps->host_head_dim = ps->host_dim / ps->host_heads; /* Y-1b: prefer attention.key_length (Mistral hd=128 ≠ 5120/32=160) */
-    if (ps->host_hidden == 0) ps->host_hidden = ps->host_dim * 4;
+    if (!doe_validate_host_config(ps, 0)) goto bail; /* D-L8/Fable F-1: bound host dimensions before allocation/math */
 
     /* Parse tensor info */
     if (n_tensors > 20000) goto bail;
     TensorInfo *tinfo = calloc(n_tensors, sizeof(TensorInfo));
+    if (!tinfo) goto bail;
     for (uint64_t i = 0; i < n_tensors; i++) {
         PC(8); uint64_t nlen = *(uint64_t*)p; p += 8;
         if (nlen > 256) { free(tinfo); goto bail; }
@@ -1988,15 +2070,26 @@ static int index_load(GGUFIndex *ps, const char *path) {
     for (uint64_t i = 0; i < n_tensors; i++) {
         uint32_t dt = tinfo[i].dtype;
         if (dt != 0 && dt != 1 && dt != 2 && dt != 6 && dt != 8 && dt != 12 && dt != 14) continue;
-        uint64_t n_elems = 1;
-        for (uint32_t d = 0; d < tinfo[i].ndim; d++) n_elems *= tinfo[i].dims[d];
+        uint64_t n_elems = 0;
+        if (!doe_tensor_elements(&tinfo[i], &n_elems)) {
+            printf("[doe] WARNING: tensor %s has invalid dimensions, skipping\n", tinfo[i].name);
+            continue;
+        }
         uint64_t raw_bytes = quant_raw_bytes(dt, n_elems);
-        uint64_t byte_offset = data_start + tinfo[i].offset;
-        if (raw_bytes == 0 || byte_offset + raw_bytes > ps->mmap_size) {
+        if (data_start > ps->mmap_size ||
+            tinfo[i].offset > ps->mmap_size - data_start ||
+            raw_bytes == 0) {
             if (raw_bytes > 0)
-                printf("[doe] WARNING: tensor %s OOB (%lu+%lu > %lu), skipping\n",
-                       tinfo[i].name, (unsigned long)byte_offset, (unsigned long)raw_bytes,
+                printf("[doe] WARNING: tensor %s OOB offset (%lu+%lu > %lu), skipping\n",
+                       tinfo[i].name, (unsigned long)data_start, (unsigned long)tinfo[i].offset,
                        (unsigned long)ps->mmap_size);
+            continue;
+        }
+        uint64_t byte_offset = data_start + tinfo[i].offset;
+        if (raw_bytes > ps->mmap_size - byte_offset) {
+            printf("[doe] WARNING: tensor %s OOB (%lu+%lu > %lu), skipping\n",
+                   tinfo[i].name, (unsigned long)byte_offset, (unsigned long)raw_bytes,
+                   (unsigned long)ps->mmap_size);
             continue;
         }
         float *data; int data_dt = 0;
@@ -2014,7 +2107,15 @@ static int index_load(GGUFIndex *ps, const char *path) {
             data_dt = dt;
         } else {
             /* dequantize to f32 */
+            if (n_elems > SIZE_MAX / sizeof(float)) {
+                printf("[doe] WARNING: tensor %s too large to dequantize, skipping\n", n);
+                continue;
+            }
             data = malloc(n_elems * sizeof(float));
+            if (!data) {
+                printf("[doe] WARNING: tensor %s dequant allocation failed, skipping\n", n);
+                continue;
+            }
             if (dt == 1) { /* f16 */
                 const uint16_t *h = (const uint16_t*)src;
                 for (uint64_t j = 0; j < n_elems; j++) data[j] = f16_to_f32(h[j]);
@@ -2023,7 +2124,13 @@ static int index_load(GGUFIndex *ps, const char *path) {
             else if (dt == 8) dequant_q8_0(src, data, n_elems);
             else if (dt == 12) dequant_q4_k(src, data, n_elems);
             else if (dt == 14) dequant_q6_k(src, data, n_elems);
-            ps->f16_bufs = realloc(ps->f16_bufs, (ps->n_f16_bufs+1)*sizeof(float*));
+            float **new_bufs = realloc(ps->f16_bufs, (ps->n_f16_bufs+1)*sizeof(float*));
+            if (!new_bufs) {
+                free(data);
+                free(tinfo);
+                goto bail;
+            }
+            ps->f16_bufs = new_bufs;
             ps->f16_bufs[ps->n_f16_bufs++] = data;
         }
         /* debug: if (i < 15) printf("[tensor] %s dims=[%lu,%lu]\n", n, (unsigned long)tinfo[i].dims[0], (unsigned long)tinfo[i].dims[1]); */
@@ -2074,6 +2181,7 @@ static int index_load(GGUFIndex *ps, const char *path) {
                ps->host_tok_emb!=NULL, ps->host_output!=NULL, ps->host_norm!=NULL);
         goto bail;
     }
+    if (!doe_validate_host_config(ps, 1)) goto bail;
 
     /* Check for standard FFN (skip MoE hosts for now) */
     int has_ffn = 0;
@@ -2149,6 +2257,10 @@ static int index_load(GGUFIndex *ps, const char *path) {
         fl->host_layer_idx = l;
         fl->n_alive = initial_experts;
         fl->parliament.w_vote = calloc(MAX_EXPERTS * ps->host_dim, sizeof(float));
+        if (!fl->parliament.w_vote) {
+            fprintf(stderr, "[doe] parliament vote allocation failed for layer %d\n", l);
+            goto bail;
+        }
         float vote_std = 0.01f;
         for (int i = 0; i < MAX_EXPERTS * ps->host_dim; i++)
             fl->parliament.w_vote[i] = rand_normal() * vote_std;
@@ -2158,7 +2270,8 @@ static int index_load(GGUFIndex *ps, const char *path) {
         for (int e = 0; e < MAX_EXPERTS; e++) {
             if (e < initial_experts) {
                 float freq = 6.2831853f * e / initial_experts;
-                init_lora_expert(&fl->experts[e], ps->host_dim, ps->lora_rank, freq);
+                if (!init_lora_expert(&fl->experts[e], ps->host_dim, ps->lora_rank, freq))
+                    goto bail;
                 /* Weaker layers get stronger initial LoRA — DOE compensates */
                 if (layer_health < 0.5f) {
                     float boost = (0.5f - layer_health) * 2.0f;
@@ -2200,6 +2313,13 @@ static int index_load(GGUFIndex *ps, const char *path) {
     #undef PC
     return 1;
 bail:
+    for (int l = 0; l < ps->n_field_layers; l++) {
+        free(ps->field_layers[l].parliament.w_vote);
+        ps->field_layers[l].parliament.w_vote = NULL;
+        for (int e = 0; e < MAX_EXPERTS; e++)
+            if (ps->field_layers[l].experts[e].alive)
+                free_lora_expert(&ps->field_layers[l].experts[e]);
+    }
     for (int i = 0; i < ps->n_f16_bufs; i++) free(ps->f16_bufs[i]);
     free(ps->f16_bufs); ps->f16_bufs = NULL; ps->n_f16_bufs = 0;
     if (ps->mmap_base) { munmap(ps->mmap_base, ps->mmap_size); ps->mmap_base = NULL; }
@@ -2374,7 +2494,7 @@ static int try_mitosis(FieldLayer *fl, int dim, int rank) {
     LoraExpert *p = &fl->experts[parent];
     float cf = p->frequency + 3.14159f / (na + 1);
     if (cf > 6.2831853f) cf -= 6.2831853f;
-    init_lora_expert(&fl->experts[child], dim, rank, cf);
+    if (!init_lora_expert(&fl->experts[child], dim, rank, cf)) return 0;
     LoraExpert *ch = &fl->experts[child];
     for (int i = 0; i < dim*rank; i++) ch->lora_A[i] = p->lora_A[i] + rand_normal()*0.01f;
     for (int i = 0; i < rank*dim; i++) ch->lora_B[i] = p->lora_B[i] + rand_normal()*0.01f;
@@ -2666,28 +2786,45 @@ typedef struct {
     int    img_start, img_count;  /* positions [img_start, img_start+img_count) splice img_embeds */
 } InferState;
 
+static void free_infer(InferState *s);
+
 static InferState alloc_infer(GGUFIndex *ps, int max_seq) {
     InferState s = {0};
     int D = ps->host_dim, kd = ps->host_kv_heads * ps->host_head_dim;
     int H = ps->host_hidden;
+    size_t kv_elems = 0, kv_bytes = 0;
+    if (max_seq <= 0 ||
+        !doe_mul_size((size_t)ps->host_n_layers, (size_t)max_seq, &kv_elems) ||
+        !doe_mul_size(kv_elems, (size_t)kd, &kv_elems) ||
+        !doe_mul_size(kv_elems, sizeof(float), &kv_bytes)) {
+        fprintf(stderr, "[doe] invalid inference allocation size\n");
+        return s;
+    }
     s.max_seq = max_seq;
-    s.x = calloc(D, 4); s.xb = calloc(D, 4); s.xb2 = calloc(D, 4);
-    s.q = calloc(ps->host_heads * ps->host_head_dim, 4);
-    s.k = calloc(kd, 4); s.v = calloc(kd, 4);
-    s.att = calloc(ps->host_heads * max_seq, 4);
-    s.logits = calloc(ps->host_vocab, 4);
-    s.hb = calloc(H, 4); s.hb2 = calloc(H * 2, 4); /* *2 for fused gate_up */
-    s.expert_out = calloc(D, 4);
+    s.x = calloc((size_t)D, sizeof(float)); s.xb = calloc((size_t)D, sizeof(float)); s.xb2 = calloc((size_t)D, sizeof(float));
+    s.q = calloc((size_t)ps->host_heads * ps->host_head_dim, sizeof(float));
+    s.k = calloc((size_t)kd, sizeof(float)); s.v = calloc((size_t)kd, sizeof(float));
+    s.att = calloc((size_t)ps->host_heads * max_seq, sizeof(float));
+    s.logits = calloc((size_t)ps->host_vocab, sizeof(float));
+    s.hb = calloc((size_t)H, sizeof(float)); s.hb2 = calloc((size_t)H * 2, sizeof(float)); /* *2 for fused gate_up */
+    s.expert_out = calloc((size_t)D, sizeof(float));
+    if (!s.x || !s.xb || !s.xb2 || !s.q || !s.k || !s.v || !s.att ||
+        !s.logits || !s.hb || !s.hb2 || !s.expert_out) {
+        fprintf(stderr, "[doe] inference activation allocation failed\n");
+        free_infer(&s);
+        return s;
+    }
     /* M4 stage (a): KV-cache on a page-aligned region so the GPU attn_decode
      * kernel can later resolve it by offset (nt_metal_register_region). Apple
      * Silicon page = 16384 (getpagesize()), not 4096. CPU attention still reads
      * it exactly as before — this stage only changes alloc + registration. */
-    size_t kv_bytes = (size_t)ps->host_n_layers * max_seq * kd * 4;
     if (posix_memalign((void**)&s.key_cache,   (size_t)getpagesize(), kv_bytes) ||
         posix_memalign((void**)&s.value_cache, (size_t)getpagesize(), kv_bytes)) {
         fprintf(stderr, "[doe] KV posix_memalign failed — falling back to calloc\n");
-        s.key_cache = calloc(ps->host_n_layers * max_seq * kd, 4);
-        s.value_cache = calloc(ps->host_n_layers * max_seq * kd, 4);
+        free(s.key_cache); s.key_cache = NULL;
+        free(s.value_cache); s.value_cache = NULL;
+        s.key_cache = calloc(kv_elems, sizeof(float));
+        s.value_cache = calloc(kv_elems, sizeof(float));
     } else {
         memset(s.key_cache, 0, kv_bytes);
         memset(s.value_cache, 0, kv_bytes);
@@ -2699,8 +2836,18 @@ static InferState alloc_infer(GGUFIndex *ps, int max_seq) {
 #endif
     }
     int half = ps->host_head_dim / 2;
-    s.cos_cache = calloc(max_seq * half, 4);
-    s.sin_cache = calloc(max_seq * half, 4);
+    if (!s.key_cache || !s.value_cache) {
+        fprintf(stderr, "[doe] KV cache allocation failed\n");
+        free_infer(&s);
+        return s;
+    }
+    s.cos_cache = calloc((size_t)max_seq * half, sizeof(float));
+    s.sin_cache = calloc((size_t)max_seq * half, sizeof(float));
+    if (!s.cos_cache || !s.sin_cache) {
+        fprintf(stderr, "[doe] RoPE cache allocation failed\n");
+        free_infer(&s);
+        return s;
+    }
     float rope_theta = ps->rope_theta;
     for (int p = 0; p < max_seq; p++)
         for (int i = 0; i < half; i++) {
@@ -3532,6 +3679,10 @@ static int doe_snprintf_checked(char *dst, size_t dstsz, const char *what, const
 static void chat(GGUFIndex *ps) {
     int max_seq = 1536;  /* room for ~1022 image tokens / long contexts */
     InferState is = alloc_infer(ps, max_seq);
+    if (!is.x) {
+        fprintf(stderr, "[doe] cannot start chat: inference buffers unavailable\n");
+        return;
+    }
     CalendarDrift cd; drift_init(&cd);
     MetaTrack meta; meta_init(&meta);
     HarmonicState hs = {0};
@@ -3713,6 +3864,10 @@ static void chat(GGUFIndex *ps) {
             if (i == 0 && getenv("DOE_DEBUG_LOGITS")) {
                 int V = ps->host_vocab, nnan = 0, ninf = 0;
                 float *tmp = malloc(V * sizeof(float));
+                if (!tmp) {
+                    fprintf(stderr, "[logitdump] allocation failed for vocab=%d\n", V);
+                    goto skip_logitdump;
+                }
                 for (int v = 0; v < V; v++) {
                     if (isnan(lg[v])) { nnan++; tmp[v] = -1e30f; }
                     else if (isinf(lg[v])) { ninf++; tmp[v] = -1e30f; }
@@ -3728,6 +3883,7 @@ static void chat(GGUFIndex *ps) {
                 fprintf(stderr, "\n");
                 free(tmp);
             }
+skip_logitdump:
 
             /* Field modulation on logits — Dario Equation */
             field_step(1.0f);
@@ -3995,6 +4151,11 @@ static float json_get_float(const char *json, const char *key, float def) {
 static void http_stream_inference(int fd, GGUFIndex *ps, const char *user_msg, float temperature, int max_tokens) {
     int max_seq = 512;
     InferState is = alloc_infer(ps, max_seq);
+    if (!is.x) {
+        const char *err = "data: {\"error\":\"inference allocation failed\"}\n\n";
+        http_send(fd, err, (int)strlen(err));
+        return;
+    }
 
     /* Reset KV cache */
     int kd = ps->host_kv_heads * ps->host_head_dim;
