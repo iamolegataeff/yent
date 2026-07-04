@@ -1850,7 +1850,19 @@ static void free_lora_expert(LoraExpert *e) {
  *   Per layer: [ w_vote MAX_EXPERTS*D | per-expert (B rank*D, A D*rank) x MAX_EXPERTS ]. */
 static void field_repack_arena(GGUFIndex *ps) {
     if (ps->expert_arena_ready) return;
+    if (g_train) {
+        fprintf(stderr, "[doe] parliament arena disabled under --train 1; CPU path keeps live experts fresh\n");
+        return;
+    }
     int D = ps->host_dim, rank = ps->lora_rank, L = ps->n_field_layers;
+    for (int l = 1; l < L; l++) {
+        for (int e = 0; e < MAX_EXPERTS; e++) {
+            if (!!ps->field_layers[l].experts[e].alive != !!ps->field_layers[0].experts[e].alive) {
+                fprintf(stderr, "[doe] parliament arena disabled: alive mask differs at layer %d expert %d\n", l, e);
+                return;
+            }
+        }
+    }
     size_t per_expert  = (size_t)rank * D + (size_t)D * rank;            /* B then A */
     size_t layer_floats = (size_t)MAX_EXPERTS * D + (size_t)MAX_EXPERTS * per_expert;
     size_t total_floats = layer_floats * (size_t)L;
@@ -2903,7 +2915,7 @@ static float *doe_forward(GGUFIndex *ps, InferState *s, int token, int pos) {
      * parliament (election + LoRA inject) runs on the GPU between attn and ffn,
      * so x stays resident and the token is still one command buffer. */
     if (!getenv("DOE_NO_SLOTS") && !getenv("DOE_NO_RESIDENT") && nt_metal_available() &&
-        (ps->lora_alpha == 0.0f || ps->expert_arena_ready)) {
+        (ps->lora_alpha == 0.0f || (!g_train && ps->expert_arena_ready))) {
         int eligible = 1;
         for (int l = 0; l < ps->host_n_layers && l < MAX_LAYERS; l++) {
             if (!ps->host_layers[l].wq) continue;
@@ -2934,7 +2946,7 @@ static float *doe_forward(GGUFIndex *ps, InferState *s, int token, int pos) {
              * alive mask + persistent consensus, all resident so the election runs
              * in-batch. freq[e]=2*pi*e/initial_experts and alive[e] are layer-
              * independent at inference, so layer 0 is representative. */
-            int parl = (ps->lora_alpha != 0.0f) && ps->expert_arena_ready;
+            int parl = (ps->lora_alpha != 0.0f) && !g_train && ps->expert_arena_ready;
             if (parl) {
                 int ne = MAX_EXPERTS;
                 nt_metal_slot_alloc(SLOT_PTMP,  (uint64_t)ne*ps->lora_rank*4);
