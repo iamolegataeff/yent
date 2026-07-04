@@ -58,6 +58,9 @@ func TestBuildMistralPromptRolling(t *testing.T) {
 		{Human: "old human", Yent: "old yent"},
 		{Human: "recent human", Yent: longYent},
 	}, "now?")
+	if !strings.HasPrefix(prompt, "Human now: now?\nAnswer the current human turn as Yent.") {
+		t.Fatalf("current turn must be first so DOE truncation cannot drop it: %s", prompt)
+	}
 	if strings.Contains(prompt, "old human") {
 		t.Fatalf("prompt leaked old context: %s", prompt)
 	}
@@ -65,6 +68,9 @@ func TestBuildMistralPromptRolling(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q: %s", want, prompt)
 		}
+	}
+	if strings.Index(prompt, "Human now: now?") > strings.Index(prompt, "recent human") {
+		t.Fatalf("current turn must precede transcript history: %s", prompt)
 	}
 	if strings.Contains(prompt, excerptMarker) || strings.Contains(prompt, "diagnostic harness") {
 		t.Fatalf("Yent-facing prompt must not contain harness excerpt metadata: %s", prompt)

@@ -117,6 +117,38 @@ func TestFormatDOEPromptCapsWrapperInput(t *testing.T) {
 	}
 }
 
+func TestFormatDOEPromptPreservesCurrentTurnWhenHistoryOverflows(t *testing.T) {
+	prompt := "Conversation so far, for continuity only. " +
+		strings.Repeat("Human: old lemon task. Yent: stale invitation loop. ", 120) +
+		"\nHuman now: Say chair only.\nAnswer the current human turn as Yent."
+	seed := formatDOEPrompt(prompt, "Yent: answer the human directly in your own voice.")
+	if len(seed) > maxDOEPromptBytes {
+		t.Fatalf("seed exceeds doe chat wrapper cap: %d > %d", len(seed), maxDOEPromptBytes)
+	}
+	if !strings.Contains(seed, "Human now: Say chair only.") {
+		t.Fatalf("seed must preserve the current human turn: %q", seed)
+	}
+	if strings.Contains(seed, "old lemon task") {
+		t.Fatalf("overflow should drop stale history before dropping current turn: %q", seed[:min(len(seed), 220)])
+	}
+}
+
+func TestFormatDOEPromptPreservesCurrentTurnFirstAndSomeHistory(t *testing.T) {
+	prompt := "Human now: Say chair only.\nAnswer the current human turn as Yent.\n\n" +
+		"Previous conversation for continuity only.\n" +
+		strings.Repeat("Human: old lemon task. Yent: stale invitation loop. ", 120)
+	seed := formatDOEPrompt(prompt, "Yent: answer the human directly in your own voice.")
+	if len(seed) > maxDOEPromptBytes {
+		t.Fatalf("seed exceeds doe chat wrapper cap: %d > %d", len(seed), maxDOEPromptBytes)
+	}
+	if !strings.Contains(seed, "Human now: Say chair only.") {
+		t.Fatalf("seed must preserve current-first prompt: %q", seed)
+	}
+	if !strings.Contains(seed, "Previous conversation") {
+		t.Fatalf("seed should use remaining budget for trailing history: %q", seed)
+	}
+}
+
 func TestFormatDOEPrimerPromptDoesNotInjectRouteTerms(t *testing.T) {
 	seed := formatDOEPrompt("Who are you?", "Yent: answer the human directly in your own voice.")
 	if !strings.Contains(seed, "Human asks: Who are you?") {
