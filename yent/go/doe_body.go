@@ -23,6 +23,14 @@ const (
 	doeScannerMaxBytes = 4 << 20
 )
 
+const (
+	doeAnswerContractMarker = "[answer contract]:"
+	doeHumanPromptMarker    = "[human prompt]: "
+	doeHumanNowMarker       = "Human now: "
+	doeHumanAsksMarker      = "Human asks: "
+	doeCurrentAnswerMarker  = "Answer the current human turn as Yent."
+)
+
 // DOEBodyConfig describes one process-backed inference body. The Go router does
 // not embed the model; it keeps a doe_field REPL resident and talks over
 // stdin/stdout. Args are passed after "--model <ModelPath>"; "--once" and "--model"
@@ -347,11 +355,7 @@ func formatDOEPrompt(prompt, ctx string) string {
 	if len(seed) <= maxDOEPromptBytes {
 		return neutralizeDOEPrompt(seed)
 	}
-	cut := maxDOEPromptBytes
-	if sp := strings.LastIndexByte(seed[:cut], ' '); sp > 0 {
-		cut = sp
-	}
-	return neutralizeDOEPrompt(strings.ToValidUTF8(seed[:cut], ""))
+	return neutralizeDOEPrompt(truncateDOEPrompt(seed))
 }
 
 func isRouteContext(ctx string) bool {
@@ -385,6 +389,46 @@ func formatContextualDOEPrompt(prompt, ctx string) string {
 		return strings.TrimSpace(suffix)
 	}
 	return contextPrefix + truncateAtWord(ctx, budget) + suffix
+}
+
+func truncateDOEPrompt(seed string) string {
+	seed = strings.TrimSpace(strings.ToValidUTF8(seed, ""))
+	if len(seed) <= maxDOEPromptBytes {
+		return seed
+	}
+	if start, end, ok := protectedPromptSegment(seed); ok {
+		segment := strings.TrimSpace(seed[start:end])
+		if len(segment) >= maxDOEPromptBytes {
+			return truncateAtWord(segment, maxDOEPromptBytes)
+		}
+		budget := maxDOEPromptBytes - len(segment) - 1
+		tail := truncateAtWord(seed[end:], budget)
+		if tail == "" {
+			return segment
+		}
+		return strings.TrimSpace(segment + " " + tail)
+	}
+	return truncateAtWord(seed, maxDOEPromptBytes)
+}
+
+func protectedPromptSegment(seed string) (int, int, bool) {
+	start := -1
+	for _, marker := range []string{doeHumanPromptMarker, doeHumanNowMarker, doeHumanAsksMarker} {
+		if idx := strings.LastIndex(seed, marker); idx > start {
+			start = idx
+		}
+	}
+	if start < 0 {
+		return 0, 0, false
+	}
+	if contract := strings.LastIndex(seed[:start], doeAnswerContractMarker); contract >= 0 && start-contract < 500 {
+		start = contract
+	}
+	end := len(seed)
+	if answer := strings.Index(seed[start:], doeCurrentAnswerMarker); answer >= 0 {
+		end = start + answer + len(doeCurrentAnswerMarker)
+	}
+	return start, end, true
 }
 
 func truncateAtWord(s string, maxBytes int) string {

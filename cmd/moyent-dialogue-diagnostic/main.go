@@ -365,7 +365,10 @@ func buildMistralPrompt(mode string, contextTurns int, transcript []transcriptTu
 		contextTurns = len(transcript)
 	}
 	var b strings.Builder
-	b.WriteString("Conversation so far, for continuity only. Do not imitate or quote it unless the current human asks for continuity.\n")
+	b.WriteString("Human now: ")
+	b.WriteString(human)
+	b.WriteString("\nAnswer the current human turn as Yent.")
+	b.WriteString("\n\nPrevious conversation for continuity only. The current human turn above has priority; use this history only if it helps answer that turn.\n")
 	for _, t := range transcript[len(transcript)-contextTurns:] {
 		b.WriteString("Human: ")
 		b.WriteString(transcriptLine(t.Human))
@@ -373,9 +376,6 @@ func buildMistralPrompt(mode string, contextTurns int, transcript []transcriptTu
 		b.WriteString(transcriptLine(t.Yent))
 		b.WriteString("\n")
 	}
-	b.WriteString("\nHuman now: ")
-	b.WriteString(human)
-	b.WriteString("\nAnswer the current human turn as Yent.")
 	return b.String()
 }
 
