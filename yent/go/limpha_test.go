@@ -110,6 +110,26 @@ func TestLimphaFTS5Search(t *testing.T) {
 	}
 }
 
+func TestLimphaFTS5SearchNaturalPunctuation(t *testing.T) {
+	c := newTestLimpha(t)
+	c.store("I don't trust the weather in Haifa", "Bring an umbrella anyway.", LimphaState{})
+
+	for _, q := range []string{
+		"weather",
+		"don't trust the weather",
+		"(don't trust the weather)",
+		`he said "trust" (really?)`,
+	} {
+		r, err := c.Search(q, 10)
+		if err != nil {
+			t.Fatalf("search %q: %v", q, err)
+		}
+		if len(r) == 0 {
+			t.Fatalf("search %q: want at least one hit", q)
+		}
+	}
+}
+
 func TestLimphaRecent(t *testing.T) {
 	c := newTestLimpha(t)
 	c.store("First", "First response", LimphaState{})
