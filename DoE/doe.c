@@ -39,6 +39,7 @@
 #include <float.h>
 #include <stdint.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <dirent.h>
@@ -3291,6 +3292,11 @@ static void tok_ht_build(GGUFIndex *ps) {
     int cap = 1;
     while (cap < ps->vocab_size * 3) cap <<= 1; /* ~33% load factor */
     ps->tok_ht_ids = malloc(cap * sizeof(int));
+    if (!ps->tok_ht_ids) {
+        ps->tok_ht_cap = 0;
+        fprintf(stderr, "[doe] tokenizer hash table allocation failed; falling back to linear lookup\n");
+        return;
+    }
     ps->tok_ht_cap = cap;
     for (int i = 0; i < cap; i++) ps->tok_ht_ids[i] = -1;
     int mask = cap - 1;
@@ -3406,6 +3412,7 @@ static int try_special_token(GGUFIndex *ps, const char *text, int tlen, int i, i
 }
 
 static int tokenize_input(GGUFIndex *ps, const char *text, int *tokens, int max_tokens) {
+    if (!text || !tokens || max_tokens <= 0) return 0;
     if (!ps->vocab_tokens) {
         int n = 0, len = strlen(text);
         for (int i = 0; i < len && n < max_tokens; i++) tokens[n++] = (unsigned char)text[i];
@@ -3413,12 +3420,21 @@ static int tokenize_input(GGUFIndex *ps, const char *text, int *tokens, int max_
     }
 
     int tlen = strlen(text);
-    int *ids = malloc((tlen + 16) * sizeof(int));
+    if (tlen > (INT32_MAX - 16) / 3) {
+        fprintf(stderr, "[doe] prompt too large to tokenize safely\n");
+        return 0;
+    }
+    int ids_cap = tlen * 3 + 16; /* SentencePiece ▁ fallback can emit up to 3 ids/input byte. */
+    int *ids = malloc((size_t)ids_cap * sizeof(int));
+    if (!ids) {
+        fprintf(stderr, "[doe] tokenizer allocation failed for %d ids\n", ids_cap);
+        return 0;
+    }
     int n = 0;
 
     if (ps->is_gpt2_bpe) {
         /* GPT-2: check special tokens first, then byte-level BPE */
-        for (int i = 0; i < tlen && n < max_tokens; ) {
+        for (int i = 0; i < tlen && n < max_tokens && n < ids_cap; ) {
             int consumed = 0;
             int sid = try_special_token(ps, text, tlen, i, &consumed);
             if (sid >= 0) { ids[n++] = sid; i += consumed; continue; }
@@ -3431,7 +3447,7 @@ static int tokenize_input(GGUFIndex *ps, const char *text, int *tokens, int max_
     } else {
         /* SentencePiece: split on special tokens first, then ▁-encode segments */
         int i = 0;
-        while (i < tlen && n < max_tokens) {
+        while (i < tlen && n < max_tokens && n < ids_cap) {
             /* Check special tokens at raw text level */
             int consumed = 0;
             int sid = try_special_token(ps, text, tlen, i, &consumed);
@@ -3448,6 +3464,11 @@ static int tokenize_input(GGUFIndex *ps, const char *text, int *tokens, int max_
             /* Encode segment [i, seg_end) with SentencePiece ▁ */
             int slen = seg_end - i;
             char *sp = malloc(slen * 3 + 4);
+            if (!sp) {
+                fprintf(stderr, "[doe] tokenizer segment allocation failed\n");
+                free(ids);
+                return 0;
+            }
             int sp_len = 0;
             if (ps->add_space_prefix && i == 0 && text[i] != ' ') {
                 sp[sp_len++] = 0xE2; sp[sp_len++] = 0x96; sp[sp_len++] = 0x81;
@@ -3461,7 +3482,7 @@ static int tokenize_input(GGUFIndex *ps, const char *text, int *tokens, int max_
             }
             sp[sp_len] = '\0';
             int k = 0;
-            while (k < sp_len && n < max_tokens) {
+            while (k < sp_len && n < max_tokens && n < ids_cap) {
                 int clen = 1;
                 unsigned char c = (unsigned char)sp[k];
                 if (c >= 0xC0 && c < 0xE0) clen = 2;
@@ -3486,6 +3507,26 @@ static int tokenize_input(GGUFIndex *ps, const char *text, int *tokens, int max_
     memcpy(tokens, ids, out * sizeof(int));
     free(ids);
     return out;
+}
+
+static int doe_snprintf_checked(char *dst, size_t dstsz, const char *what, const char *fmt, ...) {
+    if (!dst || dstsz == 0) return 0;
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(dst, dstsz, fmt, ap);
+    va_end(ap);
+    if (n < 0) {
+        dst[0] = '\0';
+        fprintf(stderr, "[doe] %s formatting failed\n", what);
+        return 0;
+    }
+    if ((size_t)n >= dstsz) {
+        dst[0] = '\0';
+        fprintf(stderr, "[doe] %s too long (%d bytes, cap %zu); refusing truncated prompt\n",
+                what, n, dstsz - 1);
+        return 0;
+    }
+    return 1;
 }
 
 static void chat(GGUFIndex *ps) {
@@ -3535,51 +3576,58 @@ static void chat(GGUFIndex *ps) {
         memset(is.value_cache, 0, ps->host_n_layers * max_seq * kd * 4);
 
         /* Wrap input in chat template (auto-detected from GGUF chat_template) */
-        char wrapped[2048];
+        char wrapped[sizeof(input) + 128];
         /* Only use chat template if the key special tokens exist in vocab */
         int use_template = 0;
         switch (ps->chat_style) {
         case 1: /* ChatML */
             if (tok_lookup(ps, "<|im_start|>", 12) >= 0) {
-                snprintf(wrapped, sizeof(wrapped),
-                    "<|im_start|>user\n%s<|im_end|>\n<|im_start|>assistant\n", input);
+                if (!doe_snprintf_checked(wrapped, sizeof(wrapped), "ChatML prompt",
+                        "<|im_start|>user\n%s<|im_end|>\n<|im_start|>assistant\n", input))
+                    continue;
                 use_template = 1;
             }
             break;
         case 2: /* [INST] */
             if (tok_lookup(ps, "[INST]", 6) >= 0) {
-                snprintf(wrapped, sizeof(wrapped), "[INST] %s [/INST]", input);
+                if (!doe_snprintf_checked(wrapped, sizeof(wrapped), "INST prompt", "[INST] %s [/INST]", input))
+                    continue;
                 use_template = 1;
             }
             break;
         case 3: /* Zephyr */
             if (tok_lookup(ps, "<|user|>", 8) >= 0) {
-                snprintf(wrapped, sizeof(wrapped),
-                    "<|user|>\n%s\n<|assistant|>\n", input);
+                if (!doe_snprintf_checked(wrapped, sizeof(wrapped), "Zephyr prompt",
+                        "<|user|>\n%s\n<|assistant|>\n", input))
+                    continue;
                 use_template = 1;
             }
             break;
         case 4: /* Phi */
             if (tok_lookup(ps, "<|end|>", 7) >= 0) {
-                snprintf(wrapped, sizeof(wrapped),
-                    "<|user|>\n%s<|end|>\n<|assistant|>\n", input);
+                if (!doe_snprintf_checked(wrapped, sizeof(wrapped), "Phi prompt",
+                        "<|user|>\n%s<|end|>\n<|assistant|>\n", input))
+                    continue;
                 use_template = 1;
             }
             break;
         case 5: /* Gemma */
             if (tok_lookup(ps, "<start_of_turn>", 15) >= 0) {
-                snprintf(wrapped, sizeof(wrapped),
-                    "<start_of_turn>user\n%s<end_of_turn>\n<start_of_turn>model\n", input);
+                if (!doe_snprintf_checked(wrapped, sizeof(wrapped), "Gemma prompt",
+                        "<start_of_turn>user\n%s<end_of_turn>\n<start_of_turn>model\n", input))
+                    continue;
                 use_template = 1;
             }
             break;
         case 6: /* nanollama — <|user_start|>...<|user_end|><|assistant_start|> */
-            snprintf(wrapped, sizeof(wrapped),
-                "<|user_start|>%s<|user_end|><|assistant_start|>", input);
+            if (!doe_snprintf_checked(wrapped, sizeof(wrapped), "nanollama prompt",
+                    "<|user_start|>%s<|user_end|><|assistant_start|>", input))
+                continue;
             use_template = 1;
             break;
         }
-        if (!use_template) snprintf(wrapped, sizeof(wrapped), "%s", input);
+        if (!use_template && !doe_snprintf_checked(wrapped, sizeof(wrapped), "raw prompt", "%s", input))
+            continue;
 
         /* Tokenize wrapped input (buffer enlarged for vision: ~1022 image tokens) */
         int input_tokens[2048];
@@ -3605,19 +3653,29 @@ static void chat(GGUFIndex *ps) {
                 if (!emb) { printf("[doe] image encode failed: %s\n", g_image_path); continue; }
                 printf("[doe] vision: %d image tokens (dim %d) from %s\n", n_img, vdim, g_image_path);
             }
+            char vbuf[sizeof(input) + 2];
+            if (!doe_snprintf_checked(vbuf, sizeof(vbuf), "vision prompt", "%s ", input)) {
+                free(emb);
+                continue;
+            }
             int t;
-            if (ps->bos_id >= 0) input_tokens[n_input++] = ps->bos_id;
-            if ((t = tok_lookup(ps, "[INST]", 6)) >= 0) input_tokens[n_input++] = t;
+            if (ps->bos_id >= 0 && n_input < 2048) input_tokens[n_input++] = ps->bos_id;
+            if ((t = tok_lookup(ps, "[INST]", 6)) >= 0 && n_input < 2048) input_tokens[n_input++] = t;
             n_input += tokenize_input(ps, " ", input_tokens + n_input, 2048 - n_input);
             is.img_embeds = emb; is.img_start = n_input; is.img_count = n_img;
             for (int k = 0; k < n_img && n_input < 2000; k++) input_tokens[n_input++] = (ps->bos_id >= 0 ? ps->bos_id : 0); /* placeholder, spliced by pos */
-            if ((t = tok_lookup(ps, "[IMG_END]", 9)) >= 0) input_tokens[n_input++] = t;
-            char vbuf[1200]; snprintf(vbuf, sizeof vbuf, "%s ", input);
+            if ((t = tok_lookup(ps, "[IMG_END]", 9)) >= 0 && n_input < 2048) input_tokens[n_input++] = t;
             n_input += tokenize_input(ps, vbuf, input_tokens + n_input, 2048 - n_input);
-            if ((t = tok_lookup(ps, "[/INST]", 7)) >= 0) input_tokens[n_input++] = t;
+            if ((t = tok_lookup(ps, "[/INST]", 7)) >= 0 && n_input < 2048) input_tokens[n_input++] = t;
         } else {
-            if (ps->bos_id >= 0) input_tokens[n_input++] = ps->bos_id;
+            if (ps->bos_id >= 0 && n_input < 2048) input_tokens[n_input++] = ps->bos_id;
             n_input += tokenize_input(ps, wrapped, input_tokens + n_input, 2048 - n_input);
+        }
+        if (n_input <= 0) {
+            printf("[doe] prompt tokenization produced no tokens\n");
+            free(is.img_embeds);
+            is.img_embeds = NULL;
+            continue;
         }
 
         /* A12a: input-id dump WITH bos for parity vs llama (env-guarded, diagnostic only) */
@@ -3944,22 +4002,53 @@ static void http_stream_inference(int fd, GGUFIndex *ps, const char *user_msg, f
     memset(is.value_cache, 0, (size_t)ps->host_n_layers * max_seq * kd * 4);
 
     /* Wrap input in chat template */
-    char wrapped[2048];
+    char wrapped[4096];
+    int wrapped_ok = 0;
     switch (ps->chat_style) {
-    case 1: snprintf(wrapped, sizeof(wrapped), "<|im_start|>user\n%s<|im_end|>\n<|im_start|>assistant\n", user_msg); break;
-    case 2: snprintf(wrapped, sizeof(wrapped), "[INST] %s [/INST]", user_msg); break;
-    case 3: snprintf(wrapped, sizeof(wrapped), "<|user|>\n%s\n<|assistant|>\n", user_msg); break;
-    case 4: snprintf(wrapped, sizeof(wrapped), "<|user|>\n%s<|end|>\n<|assistant|>\n", user_msg); break;
-    case 5: snprintf(wrapped, sizeof(wrapped), "<start_of_turn>user\n%s<end_of_turn>\n<start_of_turn>model\n", user_msg); break;
-    case 6: snprintf(wrapped, sizeof(wrapped), "<|user_start|>%s<|user_end|><|assistant_start|>", user_msg); break;
-    default: snprintf(wrapped, sizeof(wrapped), "%s", user_msg); break;
+    case 1:
+        wrapped_ok = doe_snprintf_checked(wrapped, sizeof(wrapped), "HTTP ChatML prompt",
+                                          "<|im_start|>user\n%s<|im_end|>\n<|im_start|>assistant\n", user_msg);
+        break;
+    case 2:
+        wrapped_ok = doe_snprintf_checked(wrapped, sizeof(wrapped), "HTTP INST prompt",
+                                          "[INST] %s [/INST]", user_msg);
+        break;
+    case 3:
+        wrapped_ok = doe_snprintf_checked(wrapped, sizeof(wrapped), "HTTP Zephyr prompt",
+                                          "<|user|>\n%s\n<|assistant|>\n", user_msg);
+        break;
+    case 4:
+        wrapped_ok = doe_snprintf_checked(wrapped, sizeof(wrapped), "HTTP Phi prompt",
+                                          "<|user|>\n%s<|end|>\n<|assistant|>\n", user_msg);
+        break;
+    case 5:
+        wrapped_ok = doe_snprintf_checked(wrapped, sizeof(wrapped), "HTTP Gemma prompt",
+                                          "<start_of_turn>user\n%s<end_of_turn>\n<start_of_turn>model\n", user_msg);
+        break;
+    case 6:
+        wrapped_ok = doe_snprintf_checked(wrapped, sizeof(wrapped), "HTTP nanollama prompt",
+                                          "<|user_start|>%s<|user_end|><|assistant_start|>", user_msg);
+        break;
+    default:
+        wrapped_ok = doe_snprintf_checked(wrapped, sizeof(wrapped), "HTTP raw prompt", "%s", user_msg);
+        break;
+    }
+    if (!wrapped_ok) {
+        const char *err = "data: {\"error\":\"prompt too long\"}\n\n";
+        http_send(fd, err, (int)strlen(err));
+        return;
     }
 
     /* Tokenize */
     int input_tokens[512];
     int n_input = 0;
-    if (ps->bos_id >= 0) input_tokens[n_input++] = ps->bos_id;
+    if (ps->bos_id >= 0 && n_input < 512) input_tokens[n_input++] = ps->bos_id;
     n_input += tokenize_input(ps, wrapped, input_tokens + n_input, 512 - n_input);
+    if (n_input <= 0) {
+        const char *err = "data: {\"error\":\"prompt tokenization failed\"}\n\n";
+        http_send(fd, err, (int)strlen(err));
+        return;
+    }
 
     /* Prefill */
     int pos = 0;
