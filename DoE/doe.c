@@ -138,6 +138,7 @@ static float g_field_gain = 1.0f; /* A11a: scale Dario field overlay on logits; 
 static int g_train = 0; /* A13b/A14: notorch online-learning during inference; DEFAULT 0=off (Oleg+Mythos 2026-06-12: organism must not re-sew its own weights mid-sentence; online learning returns later as async between turns, ogemma vision); 1=on */
 static int g_gen_max_new = 200; /* bounded one-shot validation; default preserves old chat length */
 static int g_gen_top_k = 40;
+static int g_top_k_clamp_warned = 0;
 static float g_gen_temp_override = -1.0f; /* <0 uses field effective temperature */
 static int g_once = 0; /* exit after one generated answer; useful for artifact isolation */
 static int g_load_spore = 1;
@@ -2374,6 +2375,7 @@ static int parliament_elect(Parliament *p, LoraExpert *experts, float *input, in
         for (int j = 0; j < dim; j++) dot += row[j] * input[j];
         float res = expert_resonance(experts[e].frequency, hs);
         votes[e] = dot + 0.1f * res;
+        if (!isfinite(votes[e])) votes[e] = -1e30f;
         if (votes[e] > max_vote) max_vote = votes[e];
     }
     float mean_v = 0;
@@ -2383,6 +2385,8 @@ static int parliament_elect(Parliament *p, LoraExpert *experts, float *input, in
     for (int i = 0; i < n_alive; i++) { float d = votes[alive_idx[i]] - mean_v; var_v += d*d; }
     var_v /= n_alive;
     float consensus = fminf(1.0f, sqrtf(var_v + 1e-8f) / (fabsf(mean_v) + 1.0f));
+    if (!isfinite(consensus)) consensus = 0.5f;
+    if (!isfinite(p->consensus)) p->consensus = 0.5f;
     p->consensus = 0.9f * p->consensus + 0.1f * consensus;
 
     int k = (int)(n_alive * (1.0f - p->consensus));
@@ -3254,6 +3258,17 @@ static float *doe_forward(GGUFIndex *ps, InferState *s, int token, int pos) {
  * SAMPLING + CHAT
  * ═══════════════════════════════════════════════════════════════════════════════ */
 static int sample(float *logits, int V, float temp, int top_k) {
+    if (!logits || V <= 0) return 0;
+    int finite = 0;
+    for (int i = 0; i < V; i++) {
+        if (isfinite(logits[i])) finite++;
+        else logits[i] = -1e30f;
+    }
+    if (finite == 0) {
+        fprintf(stderr, "[doe] sampler saw no finite logits; returning token 0\n");
+        return 0;
+    }
+    if (!isfinite(temp)) temp = 1.0f;
     if (temp <= 0) { int b = 0; for (int i = 1; i < V; i++) if (logits[i] > logits[b]) b = i; return b; }
     for (int i = 0; i < V; i++) logits[i] /= temp;
     if (top_k > 0 && top_k < V) {
@@ -3261,7 +3276,15 @@ static int sample(float *logits, int V, float temp, int top_k) {
          * no per-token malloc. Root holds the smallest of the k kept = same
          * threshold the old O(k*V) selection-sort produced (value is identical
          * regardless of tie-breaking), so the sampled token is bit-identical. */
-        float heap[256]; int hk = top_k > 256 ? 256 : top_k; int n = 0;
+        int hk = top_k;
+        if (hk > 256) {
+            if (!g_top_k_clamp_warned) {
+                fprintf(stderr, "[doe] WARNING: --top-k %d exceeds sampler heap cap 256; clamping\n", top_k);
+                g_top_k_clamp_warned = 1;
+            }
+            hk = 256;
+        }
+        float heap[256]; int n = 0;
         for (int i = 0; i < V; i++) {
             float v = logits[i];
             if (n < hk) {
