@@ -2733,12 +2733,19 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
 
     FILE *f = fopen(best_path, "rb");
     if (!f) return 0;
-    uint64_t fp; fread(&fp, 8, 1, f);
+    #define SPORE_READ(ptr, size, count) do { \
+        if (fread((ptr), (size), (count), f) != (size_t)(count)) { \
+            printf("[mycelium] truncated spore: %s\n", best_path); \
+            fclose(f); \
+            return 0; \
+        } \
+    } while (0)
+    uint64_t fp; SPORE_READ(&fp, 8, 1);
     if (fp != target_fp) { fclose(f); return 0; }
     int step; float fitness;
-    fread(&step, 4, 1, f); fread(&fitness, 4, 1, f);
+    SPORE_READ(&step, 4, 1); SPORE_READ(&fitness, 4, 1);
     int nl, dim, rank;
-    fread(&nl, 4, 1, f); fread(&dim, 4, 1, f); fread(&rank, 4, 1, f);
+    SPORE_READ(&nl, 4, 1); SPORE_READ(&dim, 4, 1); SPORE_READ(&rank, 4, 1);
     if (nl != ps->n_field_layers || dim != ps->host_dim || rank != ps->lora_rank) {
         printf("[mycelium] spore mismatch (layers=%d/%d dim=%d/%d rank=%d/%d)\n",
                nl, ps->n_field_layers, dim, ps->host_dim, rank, ps->lora_rank);
@@ -2746,29 +2753,34 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
     }
     for (int l = 0; l < nl; l++) {
         FieldLayer *fl = &ps->field_layers[l];
-        fread(&fl->n_alive, 4, 1, f);
-        fread(fl->parliament.w_vote, sizeof(float), MAX_EXPERTS * dim, f);
-        fread(&fl->parliament.consensus, 4, 1, f);
+        if (!fl->parliament.w_vote) { fclose(f); return 0; }
+        SPORE_READ(&fl->n_alive, 4, 1);
+        SPORE_READ(fl->parliament.w_vote, sizeof(float), MAX_EXPERTS * dim);
+        SPORE_READ(&fl->parliament.consensus, 4, 1);
         for (int e = 0; e < MAX_EXPERTS; e++) {
             LoraExpert *ex = &fl->experts[e];
-            int alive; fread(&alive, 4, 1, f);
+            int alive; SPORE_READ(&alive, 4, 1);
             if (alive) {
+                float vitality, frequency;
+                SPORE_READ(&vitality, 4, 1);
+                SPORE_READ(&frequency, 4, 1);
                 if (!ex->alive) {
-                    ex->lora_A = calloc(dim * rank, sizeof(float));
-                    ex->lora_B = calloc(rank * dim, sizeof(float));
+                    if (!init_lora_expert(ex, dim, rank, frequency)) {
+                        fclose(f);
+                        return 0;
+                    }
                 }
                 ex->alive = 1;
-                fread(&ex->vitality, 4, 1, f);
-                fread(&ex->frequency, 4, 1, f);
-                if (fread(ex->lora_A, sizeof(float), dim * rank, f) != (size_t)(dim * rank) ||
-                    fread(ex->lora_B, sizeof(float), rank * dim, f) != (size_t)(rank * dim)) {
-                    fclose(f); return 0; /* D-L3: truncated spore — bail, don't load garbage experts */
-                }
+                ex->vitality = vitality;
+                ex->frequency = frequency;
+                SPORE_READ(ex->lora_A, sizeof(float), dim * rank);
+                SPORE_READ(ex->lora_B, sizeof(float), rank * dim);
             } else if (ex->alive) {
                 free_lora_expert(ex);
             }
         }
     }
+    #undef SPORE_READ
     fclose(f);
     printf("[mycelium] spore loaded: %s (step=%d fitness=%.3f)\n", best_path, step, fitness);
     return 1;
