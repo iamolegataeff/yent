@@ -261,7 +261,7 @@ void sartre_sample_load(void);
 /* Reciprocal seam: the field/innerworld pushes its inner weather back into the hub.
  * Parses a small JSON object for known keys (debt, coherence, entropy, valence,
  * arousal, trauma, warmth, flow, memory_field_score, memory_field_prophecy,
- * memory_field_step, schumann_coherence) and updates the matching fields. The
+ * memory_field_step, schumann_coherence, schumann_phase) and updates the matching fields. The
  * sender lives on the field side; this is only the receiver. Malformed input is
  * ignored, non-finite values are dropped. */
 void sartre_ingest_metrics_json(const char *json);
