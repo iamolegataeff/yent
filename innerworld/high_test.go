@@ -36,6 +36,52 @@ func TestFeelResonance(t *testing.T) {
 	}
 }
 
+type stubFeelMath struct {
+	entropy   float32
+	resonance float32
+}
+
+func (s stubFeelMath) Entropy(string) float32 { return s.entropy }
+
+func (s stubFeelMath) Resonance(string, string) float32 { return s.resonance }
+
+func TestFeelMathBackendInvalidValuesFallbackToLexical(t *testing.T) {
+	text := "a a b c"
+	a := "light meets shadow"
+	b := "light meets cold"
+	wantEntropy := feelEntropy(text)
+	wantResonance := feelResonance(a, b)
+	cases := []struct {
+		name      string
+		entropy   float32
+		resonance float32
+	}{
+		{name: "julia sentinels", entropy: -1, resonance: -2},
+		{name: "nan", entropy: float32(math.NaN()), resonance: float32(math.NaN())},
+		{name: "inf", entropy: float32(math.Inf(1)), resonance: float32(math.Inf(1))},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			iw := NewInnerWorld(nil, nil, nil)
+			iw.SetFeelMath(stubFeelMath{entropy: tc.entropy, resonance: tc.resonance})
+			if got := iw.entropyOf(text); math.Abs(float64(got-wantEntropy)) > 1e-6 {
+				t.Fatalf("invalid backend entropy should fall back to lexical proxy: got %.6f want %.6f", got, wantEntropy)
+			}
+			if got := iw.resonanceOf(a, b); math.Abs(float64(got-wantResonance)) > 1e-6 {
+				t.Fatalf("invalid backend resonance should fall back to lexical proxy: got %.6f want %.6f", got, wantResonance)
+			}
+		})
+	}
+}
+
+func TestFeelMathBackendResonanceClampedToUnitRange(t *testing.T) {
+	iw := NewInnerWorld(nil, nil, nil)
+	iw.SetFeelMath(stubFeelMath{entropy: 0.5, resonance: 3})
+	if got := iw.resonanceOf("light", "light"); got != 1 {
+		t.Fatalf("backend resonance above 1 should clamp to 1, got %.3f", got)
+	}
+}
+
 func TestFeelTextLean(t *testing.T) {
 	if v, a := feelText("i love this wonderful beautiful joy"); v <= 0 || a <= 0 {
 		t.Errorf("a warm thought should lean positive, got v=%.2f a=%.2f", v, a)
