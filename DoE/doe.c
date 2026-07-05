@@ -2897,6 +2897,21 @@ static void free_infer(InferState *s) {
     memset(s, 0, sizeof(InferState));
 }
 
+#ifdef USE_METAL
+static void doe_metal_slot_fail(GGUFIndex *ps, int *disabled, const char *scope, const char *op, int rc) {
+    fprintf(stderr, "[doe] Metal slot path failed in %s at %s (rc=%d); aborting batch and falling back to CPU\n",
+            scope, op ? op : "(unknown)", rc);
+    nt_metal_shutdown(); /* drops any uncommitted batch without applying partial slot/KV writes */
+    if (ps) ps->cons_slot_init = 0;
+    if (disabled) *disabled = 1;
+}
+
+#define DOE_METAL_TRY(label, call) do { \
+    int _rc = (call); \
+    if (_rc != 0) { metal_rc = _rc; metal_op = #call; goto label; } \
+} while (0)
+#endif
+
 static float *doe_forward(GGUFIndex *ps, InferState *s, int token, int pos) {
     int D = ps->host_dim, hd = ps->host_head_dim;
     int kd = ps->host_kv_heads * hd;
@@ -2923,10 +2938,11 @@ static float *doe_forward(GGUFIndex *ps, InferState *s, int token, int pos) {
      * per-layer slot path. DOE_NO_RESIDENT falls back. */
     int resident_done = 0, head_done = 0;
 #ifdef USE_METAL
+    int metal_slots_disabled = 0;
     /* alpha==0: pure fast path. alpha!=0 with a registered expert arena: the
      * parliament (election + LoRA inject) runs on the GPU between attn and ffn,
      * so x stays resident and the token is still one command buffer. */
-    if (!getenv("DOE_NO_SLOTS") && !getenv("DOE_NO_RESIDENT") && nt_metal_available() &&
+    if (!metal_slots_disabled && !getenv("DOE_NO_SLOTS") && !getenv("DOE_NO_RESIDENT") && nt_metal_available() &&
         (ps->lora_alpha == 0.0f || (!g_train && ps->expert_arena_ready))) {
         int eligible = 1;
         for (int l = 0; l < ps->host_n_layers && l < MAX_LAYERS; l++) {
@@ -2945,15 +2961,22 @@ static float *doe_forward(GGUFIndex *ps, InferState *s, int token, int pos) {
                   (gdt==12||gdt==14)&&(udt==12||udt==14)&&(ddt==12||ddt==14))) { eligible = 0; break; }
         }
         if (eligible) {
+            int metal_rc = 0;
+            const char *metal_op = NULL;
             struct timespec _r0; clock_gettime(CLOCK_MONOTONIC, &_r0);
             int qn = ps->host_heads * hd;
-            nt_metal_slot_alloc(SLOT_X, D*4);  nt_metal_slot_alloc(SLOT_FN, D*4);
-            nt_metal_slot_alloc(SLOT_Q, qn*4); nt_metal_slot_alloc(SLOT_K, kd*4);
-            nt_metal_slot_alloc(SLOT_V, kd*4); nt_metal_slot_alloc(SLOT_O, qn*4);
-            nt_metal_slot_alloc(SLOT_XB, D*4); nt_metal_slot_alloc(SLOT_G, H*4);
-            nt_metal_slot_alloc(SLOT_U, H*4);  nt_metal_slot_alloc(SLOT_HB, H*4);
-            nt_metal_slot_alloc(SLOT_DN, D*4);
-            nt_metal_slot_upload(SLOT_X, s->x, D*4);
+            DOE_METAL_TRY(resident_fail, nt_metal_slot_alloc(SLOT_X, D*4));
+            DOE_METAL_TRY(resident_fail, nt_metal_slot_alloc(SLOT_FN, D*4));
+            DOE_METAL_TRY(resident_fail, nt_metal_slot_alloc(SLOT_Q, qn*4));
+            DOE_METAL_TRY(resident_fail, nt_metal_slot_alloc(SLOT_K, kd*4));
+            DOE_METAL_TRY(resident_fail, nt_metal_slot_alloc(SLOT_V, kd*4));
+            DOE_METAL_TRY(resident_fail, nt_metal_slot_alloc(SLOT_O, qn*4));
+            DOE_METAL_TRY(resident_fail, nt_metal_slot_alloc(SLOT_XB, D*4));
+            DOE_METAL_TRY(resident_fail, nt_metal_slot_alloc(SLOT_G, H*4));
+            DOE_METAL_TRY(resident_fail, nt_metal_slot_alloc(SLOT_U, H*4));
+            DOE_METAL_TRY(resident_fail, nt_metal_slot_alloc(SLOT_HB, H*4));
+            DOE_METAL_TRY(resident_fail, nt_metal_slot_alloc(SLOT_DN, D*4));
+            DOE_METAL_TRY(resident_fail, nt_metal_slot_upload(SLOT_X, s->x, D*4));
             /* parliament-on-GPU setup (alpha != 0): per-token resonance + frozen
              * alive mask + persistent consensus, all resident so the election runs
              * in-batch. freq[e]=2*pi*e/initial_experts and alive[e] are layer-
@@ -2961,29 +2984,29 @@ static float *doe_forward(GGUFIndex *ps, InferState *s, int token, int pos) {
             int parl = (ps->lora_alpha != 0.0f) && !g_train && ps->expert_arena_ready;
             if (parl) {
                 int ne = MAX_EXPERTS;
-                nt_metal_slot_alloc(SLOT_PTMP,  (uint64_t)ne*ps->lora_rank*4);
-                nt_metal_slot_alloc(SLOT_PGATE, (uint64_t)ne*4);
-                nt_metal_slot_alloc(SLOT_PVOTES,(uint64_t)ne*4);
-                nt_metal_slot_alloc(SLOT_PRES,  (uint64_t)ne*4);
-                nt_metal_slot_alloc(SLOT_PALIVE,(uint64_t)ne*4);
-                nt_metal_slot_alloc(SLOT_PCONS, (uint64_t)MAX_LAYERS*4);
+                DOE_METAL_TRY(resident_fail, nt_metal_slot_alloc(SLOT_PTMP,  (uint64_t)ne*ps->lora_rank*4));
+                DOE_METAL_TRY(resident_fail, nt_metal_slot_alloc(SLOT_PGATE, (uint64_t)ne*4));
+                DOE_METAL_TRY(resident_fail, nt_metal_slot_alloc(SLOT_PVOTES,(uint64_t)ne*4));
+                DOE_METAL_TRY(resident_fail, nt_metal_slot_alloc(SLOT_PRES,  (uint64_t)ne*4));
+                DOE_METAL_TRY(resident_fail, nt_metal_slot_alloc(SLOT_PALIVE,(uint64_t)ne*4));
+                DOE_METAL_TRY(resident_fail, nt_metal_slot_alloc(SLOT_PCONS, (uint64_t)MAX_LAYERS*4));
                 float res[MAX_EXPERTS], alv[MAX_EXPERTS];
                 FieldLayer *fl0 = &ps->field_layers[0];
                 for (int e = 0; e < ne; e++) {
                     res[e] = 0.1f * expert_resonance(fl0->experts[e].frequency, &s->hs);
                     alv[e] = fl0->experts[e].alive ? 1.0f : 0.0f;
                 }
-                nt_metal_slot_upload(SLOT_PRES,   res, (uint64_t)ne*4);
-                nt_metal_slot_upload(SLOT_PALIVE, alv, (uint64_t)ne*4);
+                DOE_METAL_TRY(resident_fail, nt_metal_slot_upload(SLOT_PRES,   res, (uint64_t)ne*4));
+                DOE_METAL_TRY(resident_fail, nt_metal_slot_upload(SLOT_PALIVE, alv, (uint64_t)ne*4));
                 if (!ps->cons_slot_init) {
                     float cons[MAX_LAYERS];
                     for (int l = 0; l < MAX_LAYERS; l++)
                         cons[l] = (l < ps->n_field_layers) ? ps->field_layers[l].parliament.consensus : 0.5f;
-                    nt_metal_slot_upload(SLOT_PCONS, cons, (uint64_t)MAX_LAYERS*4);
+                    DOE_METAL_TRY(resident_fail, nt_metal_slot_upload(SLOT_PCONS, cons, (uint64_t)MAX_LAYERS*4));
                     ps->cons_slot_init = 1;
                 }
             }
-            nt_metal_batch_begin();
+            DOE_METAL_TRY(resident_fail, nt_metal_batch_begin());
             for (int l = 0; l < ps->host_n_layers && l < MAX_LAYERS; l++) {
                 if (!ps->host_layers[l].wq) continue;
                 int qd=ps->host_layers[l].wq_dt, kdt=ps->host_layers[l].wk_dt,
@@ -2994,57 +3017,57 @@ static float *doe_forward(GGUFIndex *ps, InferState *s, int token, int pos) {
                 float *Vbase = s->value_cache + (size_t)l * s->max_seq * kd;
                 const uint8_t *Wdn = (const uint8_t*)ps->host_layers[l].ffn_down;
                 /* attention half-layer */
-                nt_metal_rmsnorm(SLOT_FN, SLOT_X, ps->host_layers[l].attn_norm, D, ps->rms_norm_eps);
-                if (qd==14)  nt_metal_q6k_matvec_slot(SLOT_Q,(const uint8_t*)ps->host_layers[l].wq,SLOT_FN,qn,D);
-                else         nt_metal_q4k_matvec_slot(SLOT_Q,(const uint8_t*)ps->host_layers[l].wq,SLOT_FN,qn,D);
-                if (kdt==14) nt_metal_q6k_matvec_slot(SLOT_K,(const uint8_t*)ps->host_layers[l].wk,SLOT_FN,kd,D);
-                else         nt_metal_q4k_matvec_slot(SLOT_K,(const uint8_t*)ps->host_layers[l].wk,SLOT_FN,kd,D);
-                if (vd==14)  nt_metal_q6k_matvec_slot(SLOT_V,(const uint8_t*)ps->host_layers[l].wv,SLOT_FN,kd,D);
-                else         nt_metal_q4k_matvec_slot(SLOT_V,(const uint8_t*)ps->host_layers[l].wv,SLOT_FN,kd,D);
+                DOE_METAL_TRY(resident_fail, nt_metal_rmsnorm(SLOT_FN, SLOT_X, ps->host_layers[l].attn_norm, D, ps->rms_norm_eps));
+                if (qd==14)  { DOE_METAL_TRY(resident_fail, nt_metal_q6k_matvec_slot(SLOT_Q,(const uint8_t*)ps->host_layers[l].wq,SLOT_FN,qn,D)); }
+                else         { DOE_METAL_TRY(resident_fail, nt_metal_q4k_matvec_slot(SLOT_Q,(const uint8_t*)ps->host_layers[l].wq,SLOT_FN,qn,D)); }
+                if (kdt==14) { DOE_METAL_TRY(resident_fail, nt_metal_q6k_matvec_slot(SLOT_K,(const uint8_t*)ps->host_layers[l].wk,SLOT_FN,kd,D)); }
+                else         { DOE_METAL_TRY(resident_fail, nt_metal_q4k_matvec_slot(SLOT_K,(const uint8_t*)ps->host_layers[l].wk,SLOT_FN,kd,D)); }
+                if (vd==14)  { DOE_METAL_TRY(resident_fail, nt_metal_q6k_matvec_slot(SLOT_V,(const uint8_t*)ps->host_layers[l].wv,SLOT_FN,kd,D)); }
+                else         { DOE_METAL_TRY(resident_fail, nt_metal_q4k_matvec_slot(SLOT_V,(const uint8_t*)ps->host_layers[l].wv,SLOT_FN,kd,D)); }
                 int rope_norm = g_rope_norm || arch_rope_norm(ps->host_arch);
-                nt_metal_rope(SLOT_Q, ps->host_heads,    hd, pos, ps->rope_theta, rope_norm);
-                nt_metal_rope(SLOT_K, ps->host_kv_heads, hd, pos, ps->rope_theta, rope_norm);
-                nt_metal_copy_to_region(s->key_cache   + co2, SLOT_K, kd*4);
-                nt_metal_copy_to_region(s->value_cache + co2, SLOT_V, kd*4);
-                nt_metal_attn_decode(SLOT_O, SLOT_Q, Kbase, Vbase, pos+1,
-                                     ps->host_heads, ps->host_kv_heads, hd,
-                                     (uint32_t)kd, (uint32_t)hd, (uint32_t)kd, (uint32_t)hd, sc);
-                if (od==14)  nt_metal_q6k_matvec_slot(SLOT_XB,(const uint8_t*)ps->host_layers[l].wo,SLOT_O,D,qn);
-                else         nt_metal_q4k_matvec_slot(SLOT_XB,(const uint8_t*)ps->host_layers[l].wo,SLOT_O,D,qn);
-                nt_metal_add(SLOT_X, SLOT_X, SLOT_XB, D);
+                DOE_METAL_TRY(resident_fail, nt_metal_rope(SLOT_Q, ps->host_heads,    hd, pos, ps->rope_theta, rope_norm));
+                DOE_METAL_TRY(resident_fail, nt_metal_rope(SLOT_K, ps->host_kv_heads, hd, pos, ps->rope_theta, rope_norm));
+                DOE_METAL_TRY(resident_fail, nt_metal_copy_to_region(s->key_cache   + co2, SLOT_K, kd*4));
+                DOE_METAL_TRY(resident_fail, nt_metal_copy_to_region(s->value_cache + co2, SLOT_V, kd*4));
+                DOE_METAL_TRY(resident_fail, nt_metal_attn_decode(SLOT_O, SLOT_Q, Kbase, Vbase, pos+1,
+                                                                  ps->host_heads, ps->host_kv_heads, hd,
+                                                                  (uint32_t)kd, (uint32_t)hd, (uint32_t)kd, (uint32_t)hd, sc));
+                if (od==14)  { DOE_METAL_TRY(resident_fail, nt_metal_q6k_matvec_slot(SLOT_XB,(const uint8_t*)ps->host_layers[l].wo,SLOT_O,D,qn)); }
+                else         { DOE_METAL_TRY(resident_fail, nt_metal_q4k_matvec_slot(SLOT_XB,(const uint8_t*)ps->host_layers[l].wo,SLOT_O,D,qn)); }
+                DOE_METAL_TRY(resident_fail, nt_metal_add(SLOT_X, SLOT_X, SLOT_XB, D));
                 /* parliament: election (w_vote@x -> variable-k gate) + LoRA inject,
                  * x += alpha * sum_k w_k * A_k @ (B_k @ x), all on the resident x. */
                 if (parl) {
                     const float *lb = ps->expert_arena + (size_t)l * ps->expert_layer_floats;
-                    nt_metal_parliament_votes(lb, SLOT_X, SLOT_PVOTES, D, MAX_EXPERTS);
-                    nt_metal_parliament_elect(SLOT_PVOTES, SLOT_PRES, SLOT_PALIVE, SLOT_PCONS,
-                                              SLOT_PGATE, MAX_EXPERTS, l, MIN_EXPERTS);
-                    nt_metal_parliament_inject(SLOT_X, SLOT_PTMP, SLOT_PGATE, lb,
-                                               D, ps->lora_rank, MAX_EXPERTS, ps->lora_alpha);
+                    DOE_METAL_TRY(resident_fail, nt_metal_parliament_votes(lb, SLOT_X, SLOT_PVOTES, D, MAX_EXPERTS));
+                    DOE_METAL_TRY(resident_fail, nt_metal_parliament_elect(SLOT_PVOTES, SLOT_PRES, SLOT_PALIVE, SLOT_PCONS,
+                                                                           SLOT_PGATE, MAX_EXPERTS, l, MIN_EXPERTS));
+                    DOE_METAL_TRY(resident_fail, nt_metal_parliament_inject(SLOT_X, SLOT_PTMP, SLOT_PGATE, lb,
+                                                                            D, ps->lora_rank, MAX_EXPERTS, ps->lora_alpha));
                 }
                 /* ffn half-layer (fused gate_up or separate gate + up) */
-                nt_metal_rmsnorm(SLOT_FN, SLOT_X, ps->host_layers[l].ffn_norm, D, ps->rms_norm_eps);
+                DOE_METAL_TRY(resident_fail, nt_metal_rmsnorm(SLOT_FN, SLOT_X, ps->host_layers[l].ffn_norm, D, ps->rms_norm_eps));
                 if (ps->host_layers[l].ffn_gate_up) {
                     int gdt = ps->host_layers[l].ffn_gate_up_dt;
                     size_t gu_row = quant_raw_bytes(gdt, D);
                     const uint8_t *Wgu = (const uint8_t*)ps->host_layers[l].ffn_gate_up;
-                    if (gdt==14) { nt_metal_q6k_matvec_slot(SLOT_G, Wgu, SLOT_FN, H, D);
-                                   nt_metal_q6k_matvec_slot(SLOT_U, Wgu+(size_t)H*gu_row, SLOT_FN, H, D); }
-                    else         { nt_metal_q4k_matvec_slot(SLOT_G, Wgu, SLOT_FN, H, D);
-                                   nt_metal_q4k_matvec_slot(SLOT_U, Wgu+(size_t)H*gu_row, SLOT_FN, H, D); }
+                    if (gdt==14) { DOE_METAL_TRY(resident_fail, nt_metal_q6k_matvec_slot(SLOT_G, Wgu, SLOT_FN, H, D));
+                                   DOE_METAL_TRY(resident_fail, nt_metal_q6k_matvec_slot(SLOT_U, Wgu+(size_t)H*gu_row, SLOT_FN, H, D)); }
+                    else         { DOE_METAL_TRY(resident_fail, nt_metal_q4k_matvec_slot(SLOT_G, Wgu, SLOT_FN, H, D));
+                                   DOE_METAL_TRY(resident_fail, nt_metal_q4k_matvec_slot(SLOT_U, Wgu+(size_t)H*gu_row, SLOT_FN, H, D)); }
                 } else {
                     const uint8_t *Wg = (const uint8_t*)ps->host_layers[l].ffn_gate;
                     const uint8_t *Wu = (const uint8_t*)ps->host_layers[l].ffn_up;
                     int g2 = ps->host_layers[l].ffn_gate_dt, u2 = ps->host_layers[l].ffn_up_dt;
-                    if (g2==14) nt_metal_q6k_matvec_slot(SLOT_G, Wg, SLOT_FN, H, D);
-                    else        nt_metal_q4k_matvec_slot(SLOT_G, Wg, SLOT_FN, H, D);
-                    if (u2==14) nt_metal_q6k_matvec_slot(SLOT_U, Wu, SLOT_FN, H, D);
-                    else        nt_metal_q4k_matvec_slot(SLOT_U, Wu, SLOT_FN, H, D);
+                    if (g2==14) { DOE_METAL_TRY(resident_fail, nt_metal_q6k_matvec_slot(SLOT_G, Wg, SLOT_FN, H, D)); }
+                    else        { DOE_METAL_TRY(resident_fail, nt_metal_q4k_matvec_slot(SLOT_G, Wg, SLOT_FN, H, D)); }
+                    if (u2==14) { DOE_METAL_TRY(resident_fail, nt_metal_q6k_matvec_slot(SLOT_U, Wu, SLOT_FN, H, D)); }
+                    else        { DOE_METAL_TRY(resident_fail, nt_metal_q4k_matvec_slot(SLOT_U, Wu, SLOT_FN, H, D)); }
                 }
-                nt_metal_silu_mul(SLOT_HB, SLOT_G, SLOT_U, H);
-                if (ddt==14) nt_metal_q6k_matvec_slot(SLOT_DN, Wdn, SLOT_HB, D, H);
-                else         nt_metal_q4k_matvec_slot(SLOT_DN, Wdn, SLOT_HB, D, H);
-                nt_metal_add(SLOT_X, SLOT_X, SLOT_DN, D);
+                DOE_METAL_TRY(resident_fail, nt_metal_silu_mul(SLOT_HB, SLOT_G, SLOT_U, H));
+                if (ddt==14) { DOE_METAL_TRY(resident_fail, nt_metal_q6k_matvec_slot(SLOT_DN, Wdn, SLOT_HB, D, H)); }
+                else         { DOE_METAL_TRY(resident_fail, nt_metal_q4k_matvec_slot(SLOT_DN, Wdn, SLOT_HB, D, H)); }
+                DOE_METAL_TRY(resident_fail, nt_metal_add(SLOT_X, SLOT_X, SLOT_DN, D));
             }
             /* fold final norm + lm_head into the same command buffer when the
              * output weight is slot-matvec-able: norm -> lm_head on the GPU,
@@ -3053,22 +3076,24 @@ static float *doe_forward(GGUFIndex *ps, InferState *s, int token, int pos) {
             int hf = ps->host_norm && ps->host_output && !getenv("DOE_NO_HEADFOLD") &&
                      (ps->host_output_dt==12 || ps->host_output_dt==14);
             if (hf) {
-                nt_metal_slot_alloc(SLOT_LOGITS, (uint64_t)ps->host_vocab*4);
-                nt_metal_rmsnorm(SLOT_FN, SLOT_X, ps->host_norm, D, ps->rms_norm_eps);
+                DOE_METAL_TRY(resident_fail, nt_metal_slot_alloc(SLOT_LOGITS, (uint64_t)ps->host_vocab*4));
+                DOE_METAL_TRY(resident_fail, nt_metal_rmsnorm(SLOT_FN, SLOT_X, ps->host_norm, D, ps->rms_norm_eps));
                 if (ps->host_output_dt==14)
-                    nt_metal_q6k_matvec_slot(SLOT_LOGITS, (const uint8_t*)ps->host_output, SLOT_FN, ps->host_vocab, D);
+                    { DOE_METAL_TRY(resident_fail, nt_metal_q6k_matvec_slot(SLOT_LOGITS, (const uint8_t*)ps->host_output, SLOT_FN, ps->host_vocab, D)); }
                 else
-                    nt_metal_q4k_matvec_slot(SLOT_LOGITS, (const uint8_t*)ps->host_output, SLOT_FN, ps->host_vocab, D);
+                    { DOE_METAL_TRY(resident_fail, nt_metal_q4k_matvec_slot(SLOT_LOGITS, (const uint8_t*)ps->host_output, SLOT_FN, ps->host_vocab, D)); }
             }
-            nt_metal_batch_commit();
-            if (hf) { nt_metal_slot_download(SLOT_LOGITS, s->logits, (uint64_t)ps->host_vocab*4); head_done = 1; }
-            else      nt_metal_slot_download(SLOT_X, s->x, D*4);
+            DOE_METAL_TRY(resident_fail, nt_metal_batch_commit());
+            if (hf) { DOE_METAL_TRY(resident_fail, nt_metal_slot_download(SLOT_LOGITS, s->logits, (uint64_t)ps->host_vocab*4)); head_done = 1; }
+            else      { DOE_METAL_TRY(resident_fail, nt_metal_slot_download(SLOT_X, s->x, D*4)); }
             resident_done = 1;
             struct timespec _r1; clock_gettime(CLOCK_MONOTONIC, &_r1);
             g_resident_ns += (_r1.tv_sec-_r0.tv_sec)*1e9 + (_r1.tv_nsec-_r0.tv_nsec);
             if (getenv("DOE_DEBUG_TIMING") && pos == 0)
                 fprintf(stderr, "[resident] engaged: whole token in 1 command buffer (%d layers, parliament=%s)\n",
                         ps->host_n_layers, parl ? "on" : "off");
+resident_fail:
+            if (metal_rc) doe_metal_slot_fail(ps, &metal_slots_disabled, "resident decode", metal_op, metal_rc);
         }
     }
 #endif
@@ -3086,40 +3111,47 @@ static float *doe_forward(GGUFIndex *ps, InferState *s, int token, int pos) {
         {
             int qd=ps->host_layers[l].wq_dt, kdt=ps->host_layers[l].wk_dt,
                 vd=ps->host_layers[l].wv_dt, od=ps->host_layers[l].wo_dt;
-            if (!getenv("DOE_NO_SLOTS") && nt_metal_available() && ps->host_layers[l].attn_norm &&
+            if (!metal_slots_disabled && !getenv("DOE_NO_SLOTS") && nt_metal_available() && ps->host_layers[l].attn_norm &&
                 !ps->host_layers[l].bq && !ps->host_layers[l].bk && !ps->host_layers[l].bv &&
                 (qd==12||qd==14)&&(kdt==12||kdt==14)&&(vd==12||vd==14)&&(od==12||od==14)) {
+                int metal_rc = 0;
+                const char *metal_op = NULL;
                 int co2 = l * s->max_seq * kd + pos * kd;
                 float *Kbase = s->key_cache   + (size_t)l * s->max_seq * kd;
                 float *Vbase = s->value_cache + (size_t)l * s->max_seq * kd;
                 int qn = ps->host_heads * hd;
-                nt_metal_slot_alloc(SLOT_X, D*4);   nt_metal_slot_alloc(SLOT_FN, D*4);
-                nt_metal_slot_alloc(SLOT_Q, qn*4);  nt_metal_slot_alloc(SLOT_K, kd*4);
-                nt_metal_slot_alloc(SLOT_V, kd*4);  nt_metal_slot_alloc(SLOT_O, qn*4);
-                nt_metal_slot_alloc(SLOT_XB, D*4);
-                nt_metal_slot_upload(SLOT_X, s->x, D*4);
-                nt_metal_batch_begin();
-                nt_metal_rmsnorm(SLOT_FN, SLOT_X, ps->host_layers[l].attn_norm, D, ps->rms_norm_eps);
-                if (qd==14)  nt_metal_q6k_matvec_slot(SLOT_Q,(const uint8_t*)ps->host_layers[l].wq,SLOT_FN,qn,D);
-                else         nt_metal_q4k_matvec_slot(SLOT_Q,(const uint8_t*)ps->host_layers[l].wq,SLOT_FN,qn,D);
-                if (kdt==14) nt_metal_q6k_matvec_slot(SLOT_K,(const uint8_t*)ps->host_layers[l].wk,SLOT_FN,kd,D);
-                else         nt_metal_q4k_matvec_slot(SLOT_K,(const uint8_t*)ps->host_layers[l].wk,SLOT_FN,kd,D);
-                if (vd==14)  nt_metal_q6k_matvec_slot(SLOT_V,(const uint8_t*)ps->host_layers[l].wv,SLOT_FN,kd,D);
-                else         nt_metal_q4k_matvec_slot(SLOT_V,(const uint8_t*)ps->host_layers[l].wv,SLOT_FN,kd,D);
+                DOE_METAL_TRY(attn_slot_fail, nt_metal_slot_alloc(SLOT_X, D*4));
+                DOE_METAL_TRY(attn_slot_fail, nt_metal_slot_alloc(SLOT_FN, D*4));
+                DOE_METAL_TRY(attn_slot_fail, nt_metal_slot_alloc(SLOT_Q, qn*4));
+                DOE_METAL_TRY(attn_slot_fail, nt_metal_slot_alloc(SLOT_K, kd*4));
+                DOE_METAL_TRY(attn_slot_fail, nt_metal_slot_alloc(SLOT_V, kd*4));
+                DOE_METAL_TRY(attn_slot_fail, nt_metal_slot_alloc(SLOT_O, qn*4));
+                DOE_METAL_TRY(attn_slot_fail, nt_metal_slot_alloc(SLOT_XB, D*4));
+                DOE_METAL_TRY(attn_slot_fail, nt_metal_slot_upload(SLOT_X, s->x, D*4));
+                DOE_METAL_TRY(attn_slot_fail, nt_metal_batch_begin());
+                DOE_METAL_TRY(attn_slot_fail, nt_metal_rmsnorm(SLOT_FN, SLOT_X, ps->host_layers[l].attn_norm, D, ps->rms_norm_eps));
+                if (qd==14)  { DOE_METAL_TRY(attn_slot_fail, nt_metal_q6k_matvec_slot(SLOT_Q,(const uint8_t*)ps->host_layers[l].wq,SLOT_FN,qn,D)); }
+                else         { DOE_METAL_TRY(attn_slot_fail, nt_metal_q4k_matvec_slot(SLOT_Q,(const uint8_t*)ps->host_layers[l].wq,SLOT_FN,qn,D)); }
+                if (kdt==14) { DOE_METAL_TRY(attn_slot_fail, nt_metal_q6k_matvec_slot(SLOT_K,(const uint8_t*)ps->host_layers[l].wk,SLOT_FN,kd,D)); }
+                else         { DOE_METAL_TRY(attn_slot_fail, nt_metal_q4k_matvec_slot(SLOT_K,(const uint8_t*)ps->host_layers[l].wk,SLOT_FN,kd,D)); }
+                if (vd==14)  { DOE_METAL_TRY(attn_slot_fail, nt_metal_q6k_matvec_slot(SLOT_V,(const uint8_t*)ps->host_layers[l].wv,SLOT_FN,kd,D)); }
+                else         { DOE_METAL_TRY(attn_slot_fail, nt_metal_q4k_matvec_slot(SLOT_V,(const uint8_t*)ps->host_layers[l].wv,SLOT_FN,kd,D)); }
                 int rope_norm = g_rope_norm || arch_rope_norm(ps->host_arch);
-                nt_metal_rope(SLOT_Q, ps->host_heads,    hd, pos, ps->rope_theta, rope_norm);
-                nt_metal_rope(SLOT_K, ps->host_kv_heads, hd, pos, ps->rope_theta, rope_norm);
-                nt_metal_copy_to_region(s->key_cache   + co2, SLOT_K, kd*4);
-                nt_metal_copy_to_region(s->value_cache + co2, SLOT_V, kd*4);
-                nt_metal_attn_decode(SLOT_O, SLOT_Q, Kbase, Vbase, pos+1,
-                                     ps->host_heads, ps->host_kv_heads, hd,
-                                     (uint32_t)kd, (uint32_t)hd, (uint32_t)kd, (uint32_t)hd, sc);
-                if (od==14)  nt_metal_q6k_matvec_slot(SLOT_XB,(const uint8_t*)ps->host_layers[l].wo,SLOT_O,D,qn);
-                else         nt_metal_q4k_matvec_slot(SLOT_XB,(const uint8_t*)ps->host_layers[l].wo,SLOT_O,D,qn);
-                nt_metal_add(SLOT_X, SLOT_X, SLOT_XB, D);
-                nt_metal_batch_commit();
-                nt_metal_slot_download(SLOT_X, s->x, D*4);
+                DOE_METAL_TRY(attn_slot_fail, nt_metal_rope(SLOT_Q, ps->host_heads,    hd, pos, ps->rope_theta, rope_norm));
+                DOE_METAL_TRY(attn_slot_fail, nt_metal_rope(SLOT_K, ps->host_kv_heads, hd, pos, ps->rope_theta, rope_norm));
+                DOE_METAL_TRY(attn_slot_fail, nt_metal_copy_to_region(s->key_cache   + co2, SLOT_K, kd*4));
+                DOE_METAL_TRY(attn_slot_fail, nt_metal_copy_to_region(s->value_cache + co2, SLOT_V, kd*4));
+                DOE_METAL_TRY(attn_slot_fail, nt_metal_attn_decode(SLOT_O, SLOT_Q, Kbase, Vbase, pos+1,
+                                                                   ps->host_heads, ps->host_kv_heads, hd,
+                                                                   (uint32_t)kd, (uint32_t)hd, (uint32_t)kd, (uint32_t)hd, sc));
+                if (od==14)  { DOE_METAL_TRY(attn_slot_fail, nt_metal_q6k_matvec_slot(SLOT_XB,(const uint8_t*)ps->host_layers[l].wo,SLOT_O,D,qn)); }
+                else         { DOE_METAL_TRY(attn_slot_fail, nt_metal_q4k_matvec_slot(SLOT_XB,(const uint8_t*)ps->host_layers[l].wo,SLOT_O,D,qn)); }
+                DOE_METAL_TRY(attn_slot_fail, nt_metal_add(SLOT_X, SLOT_X, SLOT_XB, D));
+                DOE_METAL_TRY(attn_slot_fail, nt_metal_batch_commit());
+                DOE_METAL_TRY(attn_slot_fail, nt_metal_slot_download(SLOT_X, s->x, D*4));
                 attn_done = 1;
+attn_slot_fail:
+                if (metal_rc) doe_metal_slot_fail(ps, &metal_slots_disabled, "attention slot path", metal_op, metal_rc);
             }
         }
 #endif
@@ -3211,29 +3243,36 @@ static float *doe_forward(GGUFIndex *ps, InferState *s, int token, int pos) {
              * CPU path when Metal is off or a dt is unsupported by the slot matvec. */
             {
                 int gdt = ps->host_layers[l].ffn_gate_up_dt, ddt = ps->host_layers[l].ffn_down_dt;
-                if (!getenv("DOE_NO_SLOTS") && nt_metal_available() && ps->host_layers[l].ffn_norm &&
+                if (!metal_slots_disabled && !getenv("DOE_NO_SLOTS") && nt_metal_available() && ps->host_layers[l].ffn_norm &&
                     ps->host_layers[l].ffn_gate_up && ps->host_layers[l].ffn_down &&
                     (gdt==12||gdt==14) && (ddt==12||ddt==14)) {
+                    int metal_rc = 0;
+                    const char *metal_op = NULL;
                     const uint8_t *Wgu = (const uint8_t*)ps->host_layers[l].ffn_gate_up;
                     const uint8_t *Wdn = (const uint8_t*)ps->host_layers[l].ffn_down;
                     size_t gu_row = quant_raw_bytes(gdt, D);
-                    nt_metal_slot_alloc(SLOT_X, D*4);  nt_metal_slot_alloc(SLOT_FN, D*4);
-                    nt_metal_slot_alloc(SLOT_G, H*4);  nt_metal_slot_alloc(SLOT_U, H*4);
-                    nt_metal_slot_alloc(SLOT_HB, H*4); nt_metal_slot_alloc(SLOT_DN, D*4);
-                    nt_metal_slot_upload(SLOT_X, s->x, D*4);
-                    nt_metal_batch_begin();
-                    nt_metal_rmsnorm(SLOT_FN, SLOT_X, ps->host_layers[l].ffn_norm, D, ps->rms_norm_eps);
-                    if (gdt==14) { nt_metal_q6k_matvec_slot(SLOT_G, Wgu, SLOT_FN, H, D);
-                                   nt_metal_q6k_matvec_slot(SLOT_U, Wgu+(size_t)H*gu_row, SLOT_FN, H, D); }
-                    else         { nt_metal_q4k_matvec_slot(SLOT_G, Wgu, SLOT_FN, H, D);
-                                   nt_metal_q4k_matvec_slot(SLOT_U, Wgu+(size_t)H*gu_row, SLOT_FN, H, D); }
-                    nt_metal_silu_mul(SLOT_HB, SLOT_G, SLOT_U, H);
-                    if (ddt==14) nt_metal_q6k_matvec_slot(SLOT_DN, Wdn, SLOT_HB, D, H);
-                    else         nt_metal_q4k_matvec_slot(SLOT_DN, Wdn, SLOT_HB, D, H);
-                    nt_metal_add(SLOT_X, SLOT_X, SLOT_DN, D);
-                    nt_metal_batch_commit();
-                    nt_metal_slot_download(SLOT_X, s->x, D*4);
+                    DOE_METAL_TRY(ffn_slot_fail, nt_metal_slot_alloc(SLOT_X, D*4));
+                    DOE_METAL_TRY(ffn_slot_fail, nt_metal_slot_alloc(SLOT_FN, D*4));
+                    DOE_METAL_TRY(ffn_slot_fail, nt_metal_slot_alloc(SLOT_G, H*4));
+                    DOE_METAL_TRY(ffn_slot_fail, nt_metal_slot_alloc(SLOT_U, H*4));
+                    DOE_METAL_TRY(ffn_slot_fail, nt_metal_slot_alloc(SLOT_HB, H*4));
+                    DOE_METAL_TRY(ffn_slot_fail, nt_metal_slot_alloc(SLOT_DN, D*4));
+                    DOE_METAL_TRY(ffn_slot_fail, nt_metal_slot_upload(SLOT_X, s->x, D*4));
+                    DOE_METAL_TRY(ffn_slot_fail, nt_metal_batch_begin());
+                    DOE_METAL_TRY(ffn_slot_fail, nt_metal_rmsnorm(SLOT_FN, SLOT_X, ps->host_layers[l].ffn_norm, D, ps->rms_norm_eps));
+                    if (gdt==14) { DOE_METAL_TRY(ffn_slot_fail, nt_metal_q6k_matvec_slot(SLOT_G, Wgu, SLOT_FN, H, D));
+                                   DOE_METAL_TRY(ffn_slot_fail, nt_metal_q6k_matvec_slot(SLOT_U, Wgu+(size_t)H*gu_row, SLOT_FN, H, D)); }
+                    else         { DOE_METAL_TRY(ffn_slot_fail, nt_metal_q4k_matvec_slot(SLOT_G, Wgu, SLOT_FN, H, D));
+                                   DOE_METAL_TRY(ffn_slot_fail, nt_metal_q4k_matvec_slot(SLOT_U, Wgu+(size_t)H*gu_row, SLOT_FN, H, D)); }
+                    DOE_METAL_TRY(ffn_slot_fail, nt_metal_silu_mul(SLOT_HB, SLOT_G, SLOT_U, H));
+                    if (ddt==14) { DOE_METAL_TRY(ffn_slot_fail, nt_metal_q6k_matvec_slot(SLOT_DN, Wdn, SLOT_HB, D, H)); }
+                    else         { DOE_METAL_TRY(ffn_slot_fail, nt_metal_q4k_matvec_slot(SLOT_DN, Wdn, SLOT_HB, D, H)); }
+                    DOE_METAL_TRY(ffn_slot_fail, nt_metal_add(SLOT_X, SLOT_X, SLOT_DN, D));
+                    DOE_METAL_TRY(ffn_slot_fail, nt_metal_batch_commit());
+                    DOE_METAL_TRY(ffn_slot_fail, nt_metal_slot_download(SLOT_X, s->x, D*4));
                     ffn_done = 1;
+ffn_slot_fail:
+                    if (metal_rc) doe_metal_slot_fail(ps, &metal_slots_disabled, "FFN slot path", metal_op, metal_rc);
                 }
             }
 #endif
