@@ -249,6 +249,8 @@ static pid_t sartre_waitpid(pid_t pid, int *status, int flags) {
     return r;
 }
 
+int sartre_ns_alive(int ns_id);
+
 /* Real process-slot. fork+setrlimit+execve — the limit must be set on the child
  * between fork and exec, so this is not posix_spawn. The child path uses only
  * execve (async-signal-safe) + a bare setrlimit syscall, so it is safe even when
@@ -261,11 +263,14 @@ static pid_t sartre_waitpid(pid_t pid, int *status, int flags) {
 int sartre_ns_spawn_piped(const char *name, char *const argv[], float mem_limit_mb, int *out_read_fd) {
     if (!name || !argv || !argv[0]) return -1;
 
-    /* slot: reuse a dead (reaped) spawned slot before growing, so a long-lived
-     * supervisor does not exhaust SARTRE_MAX_NS across spawn/kill cycles */
+    /* slot: refresh spawned slots before growing, so a long-lived supervisor
+     * reclaims children that exited even if the host never called alive/kill. */
     int id = -1, grew = 0;
-    for (int i = 0; i < sys.ns_count; i++)
+    for (int i = 0; i < sys.ns_count; i++) {
+        if (sys.namespaces[i].spawned && sys.namespaces[i].active)
+            (void)sartre_ns_alive(i);
         if (sys.namespaces[i].spawned && !sys.namespaces[i].active) { id = i; break; }
+    }
     if (id < 0) {
         if (sys.ns_count >= SARTRE_MAX_NS) return -1;
         id = sys.ns_count++;
@@ -1150,7 +1155,7 @@ int main(int argc, char **argv) {
 
     /* === real process-slot smoke (brick #1) — self-verifying lifecycle === */
     {
-        int pass = 0, total = 4;
+        int pass = 0, total = 5;
 
         char *sargv[] = { "/bin/sh", "-c", "sleep 30", NULL };
         int s = sartre_ns_spawn("smoke_sleeper", sargv, 64.0f);
@@ -1172,6 +1177,18 @@ int main(int argc, char **argv) {
         printf("[smoke] self-exit -> alive=%d  %s\n", e >= 0 ? sartre_ns_alive(e) : -1,
                reaped ? "PASS" : "FAIL");
         pass += reaped;
+
+        char *rargv[] = { "/bin/sh", "-c", "exit 0", NULL };
+        int r1 = sartre_ns_spawn("smoke_reuse_exiter", rargv, 64.0f);
+        nanosleep(&ts, NULL);                /* do NOT call alive(r1); spawn must reap it */
+        int count_before = sys.ns_count;
+        int r2 = sartre_ns_spawn("smoke_reuse_next", rargv, 64.0f);
+        int reused = (r1 >= 0 && r2 == r1 && sys.ns_count == count_before);
+        nanosleep(&ts, NULL);
+        if (r2 >= 0) (void)sartre_ns_alive(r2);
+        printf("[smoke] reuse     -> slot=%d/%d count=%d  %s\n", r1, r2, sys.ns_count,
+               reused ? "PASS" : "FAIL");
+        pass += reused;
 
         char *dargv[] = { "/bin/sh", "-c", "sleep 30", NULL };
         int d = sartre_ns_spawn("smoke_destroy", dargv, 64.0f);
