@@ -63,6 +63,7 @@ type request struct {
 
 var (
 	initOnce sync.Once
+	initErr  error
 	reqCh    chan request
 	ready    bool
 )
@@ -72,7 +73,6 @@ var (
 // sysimage, ~seconds) but amortized over the resident process. Returns an error if Julia or the
 // file fails to load — the caller then falls back to the Go lexical proxy.
 func Init(jlPath string) error {
-	var initErr error
 	initOnce.Do(func() {
 		reqCh = make(chan request)
 		started := make(chan error, 1)

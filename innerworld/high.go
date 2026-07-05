@@ -3,7 +3,9 @@ package innerworld
 import (
 	"fmt"
 	"math"
+	"os"
 	"strings"
+	"sync"
 )
 
 // high.go — the High Mathematical Brain (ported from arianna.c legacy inner_world/high.go,
@@ -126,16 +128,42 @@ func (iw *InnerWorld) SetFeelMath(fm FeelMath) {
 	iw.genMu.Unlock()
 }
 
+var feelMathBackendWarnOnce sync.Once
+
+func validFeelingNumber(v float32) bool {
+	f := float64(v)
+	return !math.IsNaN(f) && !math.IsInf(f, 0)
+}
+
+func warnFeelingMathBackend(metric string, value float32) {
+	feelMathBackendWarnOnce.Do(func() {
+		fmt.Fprintf(os.Stderr, "[innerworld] feeling-math backend returned invalid %s=%g; using safe lexical fallback/clamp\n", metric, value)
+	})
+}
+
 func (iw *InnerWorld) entropyOf(text string) float32 {
 	if iw.feelMath != nil {
-		return iw.feelMath.Entropy(text)
+		v := iw.feelMath.Entropy(text)
+		if validFeelingNumber(v) && v >= 0 {
+			return v
+		}
+		warnFeelingMathBackend("entropy", v)
 	}
 	return feelEntropy(text)
 }
 
 func (iw *InnerWorld) resonanceOf(a, b string) float32 {
 	if iw.feelMath != nil {
-		return iw.feelMath.Resonance(a, b)
+		v := iw.feelMath.Resonance(a, b)
+		switch {
+		case !validFeelingNumber(v) || v < 0:
+			warnFeelingMathBackend("resonance", v)
+		case v > 1:
+			warnFeelingMathBackend("resonance", v)
+			return 1
+		default:
+			return v
+		}
 	}
 	return feelResonance(a, b)
 }
