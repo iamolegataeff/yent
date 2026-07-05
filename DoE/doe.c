@@ -307,6 +307,7 @@ static FieldMLP   F_mlp;
 #define DARIO_BETA      0.10f   /* Prophecy weight */
 #define DARIO_GAMMA     0.12f   /* Destiny weight */
 #define DARIO_DIM       32      /* embedding dimension for field (smaller than host) */
+#define DARIO_EMBED_SLOTS 2048  /* hashed semantic projection slots */
 
 /* Co-occurrence field (sparse, token-level) */
 #define DARIO_MAX_COOC  32768
@@ -346,9 +347,9 @@ typedef struct {
     float chamber[DARIO_NUM_CH];
     float alpha_mod, beta_mod, gamma_mod, tau_mod;
 
-    /* Token embeddings (hash-based, lazy init) */
-    float embeds[2048][DARIO_DIM];  /* max 2048 tokens tracked */
-    int   embed_init[2048];
+    /* Token embeddings (hash-based slot projection, lazy init) */
+    float embeds[DARIO_EMBED_SLOTS][DARIO_DIM];
+    int   embed_init[DARIO_EMBED_SLOTS];
 
     /* Trauma level */
     float trauma;
@@ -365,8 +366,13 @@ static float dario_clampf(float x, float lo, float hi) {
     return x < lo ? lo : (x > hi ? hi : x);
 }
 
-static float *dario_get_embed(int id) {
-    if (id < 0 || id >= 2048) return NULL;
+static int dario_embed_slot(int token_id) {
+    return token_id < 0 ? -1 : token_id % DARIO_EMBED_SLOTS;
+}
+
+static float *dario_get_embed(int token_id) {
+    int id = dario_embed_slot(token_id);
+    if (id < 0) return NULL;
     if (!DF.embed_init[id]) {
         uint32_t h = 2166136261u;
         for (int i = 0; i < 4; i++) { h ^= (id >> (i*8)) & 0xFF; h *= 16777619u; }
@@ -477,27 +483,26 @@ static void dario_chamber_update(void) {
 /* ── Dario ingest: learn from generated token ── */
 static void dario_ingest(int token_id) {
     if (token_id < 0) return;
-    int tid = token_id % 2048; /* wrap for embedding table */
 
     /* co-occurrence with recent context */
     for (int c = 0; c < DF.ctx_len; c++) {
         float w = 1.0f / (float)(DF.ctx_len - c);
-        dario_cooc_update(DF.context[c], tid, w * 0.3f);
+        dario_cooc_update(DF.context[c], token_id, w * 0.3f);
     }
 
     /* prophecy update */
-    dario_prophecy_update(tid);
+    dario_prophecy_update(token_id);
 
     /* prophecy: predict next based on strongest co-occurrence */
     float best_cooc = -1; int best_pred = -1;
     for (int i = 0; i < DF.cooc_n; i++)
-        if (DF.cooc_src[i] == tid && DF.cooc_val[i] > best_cooc) {
+        if (DF.cooc_src[i] == token_id && DF.cooc_val[i] > best_cooc) {
             best_cooc = DF.cooc_val[i]; best_pred = DF.cooc_dst[i];
         }
     if (best_pred >= 0) dario_prophecy_add(best_pred, 0.3f);
 
     /* destiny: EMA of token embeddings */
-    float *e = dario_get_embed(tid);
+    float *e = dario_get_embed(token_id);
     if (e) {
         for (int d = 0; d < DARIO_DIM; d++)
             DF.destiny[d] = 0.1f * e[d] + 0.9f * DF.destiny[d];
@@ -508,10 +513,10 @@ static void dario_ingest(int token_id) {
 
     /* update context window */
     if (DF.ctx_len < DARIO_MAX_CTX)
-        DF.context[DF.ctx_len++] = tid;
+        DF.context[DF.ctx_len++] = token_id;
     else {
         memmove(DF.context, DF.context + 1, (DARIO_MAX_CTX - 1) * sizeof(int));
-        DF.context[DARIO_MAX_CTX - 1] = tid;
+        DF.context[DARIO_MAX_CTX - 1] = token_id;
     }
 
     /* trauma from dissonance */
@@ -865,8 +870,7 @@ static void apply_field_to_logits(float *logits, int n) {
         for (int i = 0; i < DF.cooc_n; i++) {
             if (DF.cooc_src[i] == ctx_id) {
                 int dst = DF.cooc_dst[i];
-                /* map co-occurrence dst back to vocab range */
-                if (dst < n)
+                if (dst >= 0 && dst < n)
                     H_sig[dst] += DF.cooc_val[i] * decay;
             }
         }
@@ -875,8 +879,11 @@ static void apply_field_to_logits(float *logits, int n) {
     if (h_max > 1e-6f) for (int i = 0; i < n; i++) H_sig[i] /= h_max;
 
     /* ── F: Prophecy Fulfillment (unfulfilled predictions create pressure) ── */
+    /* Semantic F/A channels are computed over the compact slot projection to keep
+     * per-token cost bounded; H above uses real token IDs because it writes to
+     * concrete logits. */
     float f_max = 0;
-    for (int i = 0; i < n && i < 2048; i++) {
+    for (int i = 0; i < n && i < DARIO_EMBED_SLOTS; i++) {
         float *te = dario_get_embed(i);
         if (!te) continue;
         float score = 0;
@@ -898,7 +905,7 @@ static void apply_field_to_logits(float *logits, int n) {
     /* ── A: Destiny Attraction (EMA semantic direction) ── */
     if (DF.dest_magnitude > 1e-6f) {
         float a_max = 0;
-        for (int i = 0; i < n && i < 2048; i++) {
+        for (int i = 0; i < n && i < DARIO_EMBED_SLOTS; i++) {
             float *te = dario_get_embed(i);
             if (te) A_sig[i] = dario_cosine(te, DF.destiny) * DF.dest_magnitude;
         }
