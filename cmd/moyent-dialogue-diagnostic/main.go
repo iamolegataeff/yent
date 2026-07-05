@@ -366,7 +366,7 @@ func buildMistralPrompt(mode string, contextTurns int, transcript []transcriptTu
 	}
 	var b strings.Builder
 	b.WriteString("Human now: ")
-	b.WriteString(human)
+	b.WriteString(neutralizePromptMarkers(human))
 	b.WriteString("\nAnswer the current human turn as Yent.")
 	b.WriteString("\n\nPrevious conversation for continuity only. The current human turn above has priority; use this history only if it helps answer that turn.\n")
 	for _, t := range transcript[len(transcript)-contextTurns:] {
@@ -456,7 +456,22 @@ func compactLine(s string, maxRunes int) string {
 }
 
 func transcriptLine(s string) string {
-	return strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+	return neutralizePromptMarkers(strings.Join(strings.Fields(strings.TrimSpace(s)), " "))
+}
+
+func neutralizePromptMarkers(s string) string {
+	replacements := []struct {
+		old string
+		new string
+	}{
+		{"Human now:", "Human now -"},
+		{"Human asks:", "Human asks -"},
+		{"[human prompt]:", "[human prompt] -"},
+	}
+	for _, r := range replacements {
+		s = strings.ReplaceAll(s, r.old, r.new)
+	}
+	return s
 }
 
 func compactExcerptLine(s string, maxRunes int) string {
