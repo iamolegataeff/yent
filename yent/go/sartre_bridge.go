@@ -18,26 +18,31 @@ const (
 // SartreEvent is one bounded utility receipt from the SARTRE body organ.
 // It intentionally carries metadata, not file contents.
 type SartreEvent struct {
-	Utility   string  `json:"util"`
-	Kind      string  `json:"kind,omitempty"`
-	Path      string  `json:"path,omitempty"`
-	Tag       string  `json:"tag,omitempty"` // legacy context_processor readout; new receipts use Resonance
-	Resonance float64 `json:"resonance,omitempty"`
-	Relevance float64 `json:"relevance,omitempty"`
-	Pulse     float64 `json:"pulse,omitempty"`
+	Utility    string  `json:"util"`
+	Kind       string  `json:"kind,omitempty"`
+	Path       string  `json:"path,omitempty"`
+	Tag        string  `json:"tag,omitempty"` // legacy context_processor readout; new receipts use Resonance
+	Resonance  float64 `json:"resonance,omitempty"`
+	Relevance  float64 `json:"relevance,omitempty"`
+	Pulse      float64 `json:"pulse,omitempty"`
+	Reduced    int     `json:"reduced,omitempty"`
+	Recognized int     `json:"recognized,omitempty"`
 }
 
 // SartreReceipt is the machine-readable memory_delta written into limpha.
 type SartreReceipt struct {
-	Kind          string        `json:"kind"`
-	EventCount    int           `json:"event_count"`
-	Changed       int           `json:"changed"`
-	ReadmeChanged bool          `json:"readme_changed,omitempty"`
-	MaxResonance  float64       `json:"max_resonance,omitempty"`
-	MaxRelevance  float64       `json:"max_relevance,omitempty"`
-	MaxPulse      float64       `json:"max_pulse,omitempty"`
-	Trace         []string      `json:"trace"`
-	Events        []SartreEvent `json:"events,omitempty"`
+	Kind              string        `json:"kind"`
+	EventCount        int           `json:"event_count"`
+	Changed           int           `json:"changed"`
+	ReadmeChanged     bool          `json:"readme_changed,omitempty"`
+	MaxResonance      float64       `json:"max_resonance,omitempty"`
+	MaxRelevance      float64       `json:"max_relevance,omitempty"`
+	MaxPulse          float64       `json:"max_pulse,omitempty"`
+	FramingEventCount int           `json:"framing_event_count,omitempty"`
+	MaxReduced        int           `json:"max_reduced,omitempty"`
+	MaxRecognized     int           `json:"max_recognized,omitempty"`
+	Trace             []string      `json:"trace"`
+	Events            []SartreEvent `json:"events,omitempty"`
 }
 
 // ParseSartreEventsJSONL reads SARTRE utility stdout. Non-JSON status lines from
@@ -124,6 +129,15 @@ func BuildSartreReceipt(events []SartreEvent) SartreReceipt {
 		if ev.Pulse > receipt.MaxPulse {
 			receipt.MaxPulse = ev.Pulse
 		}
+		if ev.Utility == "whatdotheythinkiam" {
+			receipt.FramingEventCount++
+			if ev.Reduced > receipt.MaxReduced {
+				receipt.MaxReduced = ev.Reduced
+			}
+			if ev.Recognized > receipt.MaxRecognized {
+				receipt.MaxRecognized = ev.Recognized
+			}
+		}
 		line := ev.Trace()
 		if line == "" || seen[line] || len(receipt.Trace) >= 12 {
 			continue
@@ -158,6 +172,21 @@ func (ev SartreEvent) Trace() string {
 		parts = append(parts,
 			fmt.Sprintf("relevance=%.2f", clamp01(ev.Relevance)),
 			fmt.Sprintf("pulse=%.2f", clamp01(ev.Pulse)))
+		return compactLine(strings.Join(parts, " "), 220)
+	case "whatdotheythinkiam":
+		if ev.Kind == "" && ev.Path == "" {
+			return ""
+		}
+		parts := []string{"whatdotheythinkiam"}
+		if ev.Path != "" {
+			parts = append(parts, ev.Path)
+		}
+		if ev.Kind != "" {
+			parts = append(parts, ev.Kind)
+		}
+		parts = append(parts,
+			fmt.Sprintf("reduced=%d", ev.Reduced),
+			fmt.Sprintf("recognized=%d", ev.Recognized))
 		return compactLine(strings.Join(parts, " "), 220)
 	default:
 		return compactLine(strings.TrimSpace(fmt.Sprintf("%s %s %s", ev.Utility, ev.Kind, ev.Path)), 180)
@@ -223,6 +252,8 @@ func normalizeSartreEvent(ev SartreEvent) SartreEvent {
 	ev.Resonance = clamp01(ev.Resonance)
 	ev.Relevance = clamp01(ev.Relevance)
 	ev.Pulse = clamp01(ev.Pulse)
+	ev.Reduced = maxInt(0, ev.Reduced)
+	ev.Recognized = maxInt(0, ev.Recognized)
 	return ev
 }
 
@@ -261,6 +292,13 @@ func sartreTension(r SartreReceipt) float64 {
 
 func minInt(a, b int) int {
 	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
 		return a
 	}
 	return b
