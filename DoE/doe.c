@@ -2901,7 +2901,7 @@ static void free_infer(InferState *s) {
 static void doe_metal_slot_fail(GGUFIndex *ps, int *disabled, const char *scope, const char *op, int rc) {
     fprintf(stderr, "[doe] Metal slot path failed in %s at %s (rc=%d); aborting batch and falling back to CPU\n",
             scope, op ? op : "(unknown)", rc);
-    nt_metal_shutdown(); /* drops any uncommitted batch without applying partial slot/KV writes */
+    nt_metal_abort_slots(); /* drops the active slot batch/table without tearing down registered Metal regions */
     if (ps) ps->cons_slot_init = 0;
     if (disabled) *disabled = 1;
 }
