@@ -114,6 +114,10 @@ int nt_metal_batch_active(void);
  * without resetting the weight base; page-aligned base and length).
  * All reductions use fixed trees: bit-identical run-to-run. */
 int nt_metal_register_region(const void *base, uint64_t nbytes);
+/* Abort any active slot batch and forget live slots without tearing down the
+ * Metal backend. Registered weight/KV regions and compiled pipelines remain
+ * valid; the next slot_alloc reuses the slot arena from offset 0. */
+void nt_metal_abort_slots(void);
 int nt_metal_slot_alloc(int slot, uint64_t bytes);
 int nt_metal_slot_upload(int slot, const void *src, uint64_t bytes);
 int nt_metal_slot_download(int slot, void *dst, uint64_t bytes);

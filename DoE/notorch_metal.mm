@@ -951,13 +951,20 @@ int nt_metal_init(void)
     return 0;
 }
 
-void nt_metal_shutdown(void)
+static void batch_abort(void)
 {
-    if (g_batch_enc) [g_batch_enc endEncoding];   /* abort any open batch */
+    if (g_batch_enc) [g_batch_enc endEncoding];
     g_batch_cb     = nil;
     g_batch_enc    = nil;
     g_batch_active = 0;
     g_npending     = 0;
+    g_in_off       = 0;
+    g_out_off      = 0;
+}
+
+void nt_metal_shutdown(void)
+{
+    batch_abort();
     g_arena_in  = nil; g_in_cap  = 0; g_in_off  = 0;
     g_arena_out = nil; g_out_cap = 0; g_out_off = 0;
     for (int s = 0; s < g_nseg; s++) g_seg_buf[s] = nil;
@@ -1375,6 +1382,10 @@ int nt_metal_slot_alloc(int slot, uint64_t bytes)
 
 int nt_metal_slot_upload(int slot, const void *src, uint64_t bytes)
 {
+    if (g_batch_active) {
+        fprintf(stderr, "nt_metal_slot_upload: cannot upload while a batch is active\n");
+        return 23;
+    }
     if (slot < 0 || slot >= NT_SLOT_MAX || !g_slot_tab[slot].live ||
         bytes > g_slot_tab[slot].bytes) return 20;
     memcpy((uint8_t *)[g_slot_buf contents] + g_slot_tab[slot].off, src, (size_t)bytes);
@@ -1385,6 +1396,10 @@ int nt_metal_slot_upload(int slot, const void *src, uint64_t bytes)
  * GPU writes to the slot land only at commit. */
 int nt_metal_slot_download(int slot, void *dst, uint64_t bytes)
 {
+    if (g_batch_active) {
+        fprintf(stderr, "nt_metal_slot_download: commit or abort the active batch before download\n");
+        return 23;
+    }
     if (slot < 0 || slot >= NT_SLOT_MAX || !g_slot_tab[slot].live ||
         bytes > g_slot_tab[slot].bytes) return 20;
     memcpy(dst, (const uint8_t *)[g_slot_buf contents] + g_slot_tab[slot].off, (size_t)bytes);
@@ -1421,6 +1436,13 @@ static int op_fin(id<MTLCommandBuffer> cb, id<MTLComputeCommandEncoder> enc)
 }
 
 static int slot_ok(int s) { return s >= 0 && s < NT_SLOT_MAX && g_slot_tab[s].live; }
+
+void nt_metal_abort_slots(void)
+{
+    batch_abort();
+    g_slot_used = 0;
+    memset(g_slot_tab, 0, sizeof(g_slot_tab));
+}
 
 static int mul_u64(uint64_t a, uint64_t b, uint64_t *out)
 {
