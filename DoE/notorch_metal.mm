@@ -794,6 +794,18 @@ static const uint8_t *g_seg_ptr[NT_MAX_SEG] = { NULL };
 static uint64_t       g_seg_len[NT_MAX_SEG] = { 0 };
 static int            g_nseg = 0;
 
+static void clear_registered_segments_from(int start)
+{
+    if (start < 0) start = 0;
+    if (start > g_nseg) start = g_nseg;
+    for (int s = start; s < g_nseg; s++) {
+        g_seg_buf[s] = nil;
+        g_seg_ptr[s] = NULL;
+        g_seg_len[s] = 0;
+    }
+    g_nseg = start;
+}
+
 /* M1 — persistent Shared arenas, bump-allocated: `in` holds x uploads (GPU
  * reads), `out` holds matvec results (GPU writes, host copies back after
  * the wait). Kills the per-call newBufferWithBytes / newBufferWithLength
@@ -967,8 +979,7 @@ void nt_metal_shutdown(void)
     batch_abort();
     g_arena_in  = nil; g_in_cap  = 0; g_in_off  = 0;
     g_arena_out = nil; g_out_cap = 0; g_out_off = 0;
-    for (int s = 0; s < g_nseg; s++) g_seg_buf[s] = nil;
-    g_nseg        = 0;
+    clear_registered_segments_from(0);
     g_q4k_pipe    = nil;
     g_q6k_pipe    = nil;
     g_q4k_sg_pipe = nil;
@@ -995,7 +1006,7 @@ int nt_metal_register_base(const void *base, uint64_t nbytes)
     uint64_t pg    = (uint64_t)getpagesize();
     uint64_t chunk = (uint64_t)g_device.maxBufferLength & ~(pg - 1);  /* page-floored cap */
     if (chunk == 0) return 12;
-    g_nseg = 0;
+    clear_registered_segments_from(0);
     @autoreleasepool {
         uint64_t off = 0;
         while (off < nbytes && g_nseg < NT_MAX_SEG) {
@@ -1010,7 +1021,7 @@ int nt_metal_register_base(const void *base, uint64_t nbytes)
                                 "(off=%llu len=%llu maxBufferLength=%llu)\n",
                         (unsigned long long)off, (unsigned long long)len,
                         (unsigned long long)g_device.maxBufferLength);
-                g_nseg = 0;
+                clear_registered_segments_from(0);
                 return 12;
             }
             g_seg_buf[g_nseg] = b;
@@ -1019,7 +1030,7 @@ int nt_metal_register_base(const void *base, uint64_t nbytes)
             g_nseg++;
             off += len;
         }
-        if (off < nbytes) { g_nseg = 0; return 13; }  /* exceeded NT_MAX_SEG */
+        if (off < nbytes) { clear_registered_segments_from(0); return 13; }  /* exceeded NT_MAX_SEG */
     }
     return 0;
 }
@@ -1307,6 +1318,8 @@ int nt_metal_register_region(const void *base, uint64_t nbytes)
         return 12;
     }
     uint64_t chunk = (uint64_t)g_device.maxBufferLength & ~(pg - 1);
+    if (chunk == 0) return 12;
+    int start_nseg = g_nseg;
     @autoreleasepool {
         uint64_t off = 0;
         while (off < nbytes && g_nseg < NT_MAX_SEG) {
@@ -1316,14 +1329,21 @@ int nt_metal_register_region(const void *base, uint64_t nbytes)
                                                          length:(NSUInteger)len
                                                         options:MTLResourceStorageModeShared
                                                     deallocator:nil];
-            if (!b) { fprintf(stderr, "nt_metal_register_region: NoCopy failed\n"); return 12; }
+            if (!b) {
+                fprintf(stderr, "nt_metal_register_region: NoCopy failed\n");
+                clear_registered_segments_from(start_nseg);
+                return 12;
+            }
             g_seg_buf[g_nseg] = b;
             g_seg_ptr[g_nseg] = (const uint8_t *)base + off;
             g_seg_len[g_nseg] = len;
             g_nseg++;
             off += len;
         }
-        if (off < nbytes) return 13;
+        if (off < nbytes) {
+            clear_registered_segments_from(start_nseg);
+            return 13;
+        }
     }
     return 0;
 }
