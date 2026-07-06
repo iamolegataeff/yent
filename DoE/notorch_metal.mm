@@ -1003,15 +1003,25 @@ int nt_metal_register_base(const void *base, uint64_t nbytes)
         int rc = nt_metal_init();
         if (rc != 0) return rc;
     }
-    uint64_t pg    = (uint64_t)getpagesize();
-    uint64_t chunk = (uint64_t)g_device.maxBufferLength & ~(pg - 1);  /* page-floored cap */
-    if (chunk == 0) return 12;
     clear_registered_segments_from(0);
+    uint64_t pg = (uint64_t)getpagesize();
+    uint64_t page_mask = pg - 1;
+    if (!base || nbytes == 0 || (((uintptr_t)base & page_mask) != 0)) {
+        fprintf(stderr, "nt_metal_register_base: base/len invalid or base not page-aligned\n");
+        return 12;
+    }
+    if (nbytes > UINT64_MAX - page_mask) {
+        fprintf(stderr, "nt_metal_register_base: length overflow while page-rounding\n");
+        return 12;
+    }
+    uint64_t registered_nbytes = (nbytes + page_mask) & ~page_mask;
+    uint64_t chunk = (uint64_t)g_device.maxBufferLength & ~page_mask;  /* page-floored cap */
+    if (chunk == 0) return 12;
     @autoreleasepool {
         uint64_t off = 0;
-        while (off < nbytes && g_nseg < NT_MAX_SEG) {
-            uint64_t len = nbytes - off;
-            if (len > chunk) len = chunk;   /* len stays a page multiple: nbytes,off,chunk all are */
+        while (off < registered_nbytes && g_nseg < NT_MAX_SEG) {
+            uint64_t len = registered_nbytes - off;
+            if (len > chunk) len = chunk;   /* len stays a page multiple */
             id<MTLBuffer> b = [g_device newBufferWithBytesNoCopy:(void *)((const uint8_t *)base + off)
                                                          length:(NSUInteger)len
                                                         options:MTLResourceStorageModeShared
@@ -1030,7 +1040,7 @@ int nt_metal_register_base(const void *base, uint64_t nbytes)
             g_nseg++;
             off += len;
         }
-        if (off < nbytes) { clear_registered_segments_from(0); return 13; }  /* exceeded NT_MAX_SEG */
+        if (off < registered_nbytes) { clear_registered_segments_from(0); return 13; }  /* exceeded NT_MAX_SEG */
     }
     return 0;
 }
