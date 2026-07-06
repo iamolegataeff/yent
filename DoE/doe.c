@@ -2895,6 +2895,7 @@ static InferState alloc_infer(GGUFIndex *ps, int max_seq) {
 }
 
 static void free_infer(InferState *s) {
+    free(s->img_embeds);
     free(s->x); free(s->xb); free(s->xb2);
     free(s->q); free(s->k); free(s->v);
     free(s->att); free(s->logits);
@@ -2902,6 +2903,13 @@ static void free_infer(InferState *s) {
     free(s->key_cache); free(s->value_cache);
     free(s->cos_cache); free(s->sin_cache);
     memset(s, 0, sizeof(InferState));
+}
+
+static void infer_clear_image_embeds(InferState *s) {
+    free(s->img_embeds);
+    s->img_embeds = NULL;
+    s->img_start = 0;
+    s->img_count = 0;
 }
 
 #ifdef USE_METAL
@@ -3913,7 +3921,7 @@ static void chat(GGUFIndex *ps) {
         /* Tokenize wrapped input (buffer enlarged for vision: ~1022 image tokens) */
         int input_tokens[2048];
         int n_input = 0;
-        is.img_embeds = NULL; is.img_start = 0; is.img_count = 0;
+        infer_clear_image_embeds(&is);
         if (g_image_path[0] || g_img_embeds_bin[0]) {
             /* native pixtral vision — replicate mtmd layout:
              * <s> [INST] ▁ <img_count image embeds> [IMG_END] {prompt} ▁ [/INST] */
@@ -3957,8 +3965,7 @@ static void chat(GGUFIndex *ps) {
             for (int k = 0; k < n_img; k++) input_tokens[n_input++] = (ps->bos_id >= 0 ? ps->bos_id : 0); /* placeholder, spliced by pos */
             if ((t = tok_lookup(ps, "[IMG_END]", 9)) >= 0 && n_input < 2048) input_tokens[n_input++] = t;
             if (!tokenize_append_checked(ps, vbuf, input_tokens, 2048, &n_input, "vision prompt")) {
-                free(is.img_embeds);
-                is.img_embeds = NULL;
+                infer_clear_image_embeds(&is);
                 continue;
             }
             if ((t = tok_lookup(ps, "[/INST]", 7)) >= 0 && n_input < 2048) input_tokens[n_input++] = t;
@@ -3969,8 +3976,7 @@ static void chat(GGUFIndex *ps) {
         }
         if (n_input <= 0) {
             printf("[doe] prompt tokenization produced no tokens\n");
-            free(is.img_embeds);
-            is.img_embeds = NULL;
+            infer_clear_image_embeds(&is);
             continue;
         }
 
