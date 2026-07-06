@@ -194,18 +194,21 @@ gguf_file* gguf_open(const char* path) {
             goto fail;
         }
     }
-    // Page-align the tensor block so the Metal backend can wrap it as one
-    // zero-copy NoCopy MTLBuffer (resident weights). free() stays valid.
+    // Page-align the allocation, but keep data_size as the file-backed byte
+    // count. Tensor bounds must not be allowed to read into padded tail bytes.
     size_t pg = (size_t)getpagesize();
+    if ((uint64_t)data_size > (uint64_t)SIZE_MAX - (uint64_t)(pg - 1)) goto fail;
     size_t alloc = ((size_t)data_size + pg - 1) & ~(pg - 1);
     gf->data = NULL;
     if (posix_memalign((void**)&gf->data, pg, alloc) != 0 || !gf->data) { fclose(f); free(gf); return NULL; }
-    gf->data_size = (uint64_t)alloc;
+    gf->data_size = raw_data_size;
+    gf->data_alloc_size = (uint64_t)alloc;
     if (fseek(f, (long)gf->data_offset, SEEK_SET) != 0) goto fail;
     if (fread(gf->data, 1, (size_t)data_size, f) != (size_t)data_size) {
         fprintf(stderr, "gguf: truncated tensor data (%s)\n", path);
         goto fail;
     }
+    if (alloc > (size_t)data_size) memset(gf->data + (size_t)data_size, 0, alloc - (size_t)data_size);
     fclose(f);
 
     return gf;

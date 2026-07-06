@@ -60,7 +60,8 @@ typedef struct {
     // Data section
     uint8_t*       data;          // page-aligned (posix_memalign) raw tensor bytes
     uint64_t       data_offset;   // file offset where tensor data starts
-    uint64_t       data_size;     // page-rounded byte size of `data` (for Metal NoCopy)
+    uint64_t       data_size;     // actual tensor data bytes present in the file
+    uint64_t       data_alloc_size; // page-rounded allocation size of `data`
 
     // Architecture params (extracted from metadata)
     int  n_layers;
