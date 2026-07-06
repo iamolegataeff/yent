@@ -1765,13 +1765,29 @@ static int gguf_sniff(const char *path, DiscoveredGGUF *out) {
             else if (atype == 10 || atype == 11 || atype == 12) esz = 8;
             else if (atype == 8) {
                 for (uint64_t ai = 0; ai < alen; ai++) {
-                    uint64_t sl; if (fread(&sl, 8, 1, f) != 1) break;
-                    fseek(f, sl, SEEK_CUR);
+                    uint64_t sl;
+                    if (fread(&sl, 8, 1, f) != 1 || sl > (uint64_t)LONG_MAX ||
+                        fseek(f, (long)sl, SEEK_CUR) != 0) {
+                        fclose(f);
+                        return 0;
+                    }
                 }
                 continue;
             }
-            fseek(f, alen * esz, SEEK_CUR);
-        } else fseek(f, 4, SEEK_CUR); /* unknown — guess 4 */
+            if (esz == 0) {
+                fclose(f);
+                return 0;
+            }
+            uint64_t skip = 0;
+            if (!doe_mul_u64(alen, (uint64_t)esz, &skip) || skip > (uint64_t)LONG_MAX ||
+                fseek(f, (long)skip, SEEK_CUR) != 0) {
+                fclose(f);
+                return 0;
+            }
+        } else {
+            fclose(f);
+            return 0;
+        }
     }
     fclose(f);
     return (out->arch[0] != '\0' && out->dim > 0);
@@ -2041,14 +2057,16 @@ static int index_load(GGUFIndex *ps, const char *path) {
                 }
                 for (uint64_t ai = 0; ai < alen && p < pend; ai++) {
                     PC(8); uint64_t slen = *(uint64_t*)p; p += 8;
-                    if (slen > 1000000 || p + slen > pend) break; /* sanity */
+                    if (slen > 1000000 || (uint64_t)(pend - p) < slen) goto bail; /* sanity */
                     if (is_vocab && ps->vocab_tokens && ai < (uint64_t)ps->vocab_size) {
                         ps->vocab_tokens[ai] = malloc(slen + 1);
+                        if (!ps->vocab_tokens[ai]) goto bail;
                         memcpy(ps->vocab_tokens[ai], p, slen);
                         ps->vocab_tokens[ai][slen] = '\0';
                     }
                     if (is_merges && ps->bpe_merges && ai < (uint64_t)ps->n_bpe_merges) {
                         ps->bpe_merges[ai] = malloc(slen + 1);
+                        if (!ps->bpe_merges[ai]) goto bail;
                         memcpy(ps->bpe_merges[ai], p, slen);
                         ps->bpe_merges[ai][slen] = '\0';
                     }
@@ -2056,11 +2074,18 @@ static int index_load(GGUFIndex *ps, const char *path) {
                 }
                 continue;
             }
+            else {
+                fprintf(stderr, "[doe] unknown GGUF array metadata type %u for key %s\n", atype, key);
+                goto bail;
+            }
             uint64_t arr_bytes = 0;
             if (!doe_mul_u64(alen, (uint64_t)elem_sz, &arr_bytes)) goto bail;
             PC(arr_bytes); /* D-M2: bound the array payload before skipping past it */
             p += arr_bytes;
-        } else { PC(4); p += 4; } /* unknown — guess 4 bytes */
+        } else {
+            fprintf(stderr, "[doe] unknown GGUF metadata value type %u for key %s\n", vtype, key);
+            goto bail;
+        }
     }
     if (!doe_validate_host_config(ps, 0)) goto bail; /* D-L8/Fable F-1: bound host dimensions before allocation/math */
 
