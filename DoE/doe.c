@@ -3794,6 +3794,69 @@ static int tokenize_append_checked(GGUFIndex *ps, const char *text, int *tokens,
     return 1;
 }
 
+static float *load_img_embeds_bin(const char *path, int host_dim, int *o_ntok) {
+    if (o_ntok) *o_ntok = 0;
+    if (!path || host_dim <= 0 || !o_ntok) return NULL;
+    FILE *ef = fopen(path, "rb");
+    if (!ef) {
+        printf("[doe] cannot open img-embeds-bin: %s\n", path);
+        return NULL;
+    }
+    if (fseek(ef, 0, SEEK_END) != 0) {
+        printf("[doe] cannot seek img-embeds-bin: %s\n", path);
+        fclose(ef);
+        return NULL;
+    }
+    long sz = ftell(ef);
+    if (sz < 0) {
+        printf("[doe] cannot size img-embeds-bin: %s\n", path);
+        fclose(ef);
+        return NULL;
+    }
+    if (fseek(ef, 0, SEEK_SET) != 0) {
+        printf("[doe] cannot rewind img-embeds-bin: %s\n", path);
+        fclose(ef);
+        return NULL;
+    }
+    if (sz == 0 || (sz % (long)sizeof(float)) != 0) {
+        printf("[doe] invalid img-embeds-bin byte size: %ld\n", sz);
+        fclose(ef);
+        return NULL;
+    }
+    long ne = sz / (long)sizeof(float);
+    if ((ne % host_dim) != 0 || ne / host_dim > INT_MAX) {
+        printf("[doe] img-embeds-bin shape mismatch: %ld floats for host_dim=%d\n", ne, host_dim);
+        fclose(ef);
+        return NULL;
+    }
+    int n_img = (int)(ne / host_dim);
+    if (n_img <= 0) {
+        printf("[doe] img-embeds-bin contains no image tokens\n");
+        fclose(ef);
+        return NULL;
+    }
+    if ((unsigned long)ne > SIZE_MAX / sizeof(float)) {
+        printf("[doe] img-embeds-bin too large: %ld floats\n", ne);
+        fclose(ef);
+        return NULL;
+    }
+    float *emb = malloc((size_t)ne * sizeof(float));
+    if (!emb) {
+        printf("[doe] img-embeds-bin allocation failed: %ld floats\n", ne);
+        fclose(ef);
+        return NULL;
+    }
+    if (fread(emb, sizeof(float), (size_t)ne, ef) != (size_t)ne) {
+        printf("[doe] short read from img-embeds-bin: %s\n", path);
+        free(emb);
+        fclose(ef);
+        return NULL;
+    }
+    fclose(ef);
+    *o_ntok = n_img;
+    return emb;
+}
+
 static int doe_snprintf_checked(char *dst, size_t dstsz, const char *what, const char *fmt, ...) {
     if (!dst || dstsz == 0) return 0;
     va_list ap;
@@ -3929,13 +3992,8 @@ static void chat(GGUFIndex *ps) {
             float *emb = NULL;
             if (g_img_embeds_bin[0]) {
                 /* diagnostic: load image embeds [n_tok * host_dim] f32 from file (clip ground-truth) */
-                FILE *ef = fopen(g_img_embeds_bin, "rb");
-                if (!ef) { printf("[doe] cannot open img-embeds-bin: %s\n", g_img_embeds_bin); continue; }
-                fseek(ef, 0, SEEK_END); long ne = ftell(ef) / 4; fseek(ef, 0, SEEK_SET);
-                n_img = (int)(ne / ps->host_dim);
-                emb = malloc((size_t)ne * 4);
-                if (fread(emb, 4, ne, ef) != (size_t)ne) { fclose(ef); free(emb); continue; }
-                fclose(ef);
+                emb = load_img_embeds_bin(g_img_embeds_bin, ps->host_dim, &n_img);
+                if (!emb) continue;
                 printf("[doe] vision: %d image tokens from BIN %s\n", n_img, g_img_embeds_bin);
             } else {
                 emb = pv_encode_image(g_image_path, g_mmproj_path, &n_img, &vdim);
