@@ -1931,7 +1931,8 @@ static int index_load(GGUFIndex *ps, const char *path) {
     if (ps->mmap_base == MAP_FAILED) { ps->mmap_base = NULL; return 0; }
 #ifdef USE_METAL
     /* Metal: register the whole packed GGUF block as a resident zero-copy GPU buffer (Phase 2 —
-     * weights bind by offset, no per-token upload). mmap base is page-aligned. */
+     * weights bind by offset, no per-token upload). mmap base is page-aligned;
+     * register_base page-rounds the exact file length for Metal NoCopy. */
     if (nt_metal_available()) nt_metal_register_base(ps->mmap_base, ps->mmap_size);
 #endif
 
