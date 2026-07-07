@@ -1728,66 +1728,92 @@ typedef struct {
     char self_path[256];
 } Environment;
 
+static int gguf_sniff_skip(FILE *f, uint64_t n) {
+    return n <= (uint64_t)LONG_MAX && fseek(f, (long)n, SEEK_CUR) == 0;
+}
+
+static int gguf_sniff_skip_value(FILE *f, uint32_t vtype) {
+    switch (vtype) {
+    case 0: case 1: case 7:
+        return gguf_sniff_skip(f, 1);
+    case 2: case 3:
+        return gguf_sniff_skip(f, 2);
+    case 4: case 5: case 6:
+        return gguf_sniff_skip(f, 4);
+    case 10: case 11: case 12:
+        return gguf_sniff_skip(f, 8);
+    case 8: {
+        uint64_t vlen;
+        return fread(&vlen, 8, 1, f) == 1 && gguf_sniff_skip(f, vlen);
+    }
+    case 9: {
+        uint32_t atype;
+        uint64_t alen;
+        if (fread(&atype, 4, 1, f) != 1 || fread(&alen, 8, 1, f) != 1) return 0;
+        size_t esz = 0;
+        if (atype == 0 || atype == 1 || atype == 7) esz = 1;
+        else if (atype == 2 || atype == 3) esz = 2;
+        else if (atype == 4 || atype == 5 || atype == 6) esz = 4;
+        else if (atype == 10 || atype == 11 || atype == 12) esz = 8;
+        else if (atype == 8) {
+            for (uint64_t ai = 0; ai < alen; ai++) {
+                uint64_t slen;
+                if (fread(&slen, 8, 1, f) != 1 || !gguf_sniff_skip(f, slen)) return 0;
+            }
+            return 1;
+        } else {
+            return 0;
+        }
+        uint64_t bytes = 0;
+        return doe_mul_u64(alen, (uint64_t)esz, &bytes) && gguf_sniff_skip(f, bytes);
+    }
+    default:
+        return 0;
+    }
+}
+
 static int gguf_sniff(const char *path, DiscoveredGGUF *out) {
     FILE *f = fopen(path, "rb");
     if (!f) return 0;
-    struct stat st; fstat(fileno(f), &st); out->file_size = st.st_size;
+    struct stat st;
+    if (fstat(fileno(f), &st) != 0) { fclose(f); return 0; }
+    out->file_size = st.st_size;
     snprintf(out->path, 256, "%s", path);
     memset(out->arch, 0, 64); out->n_layers = 0; out->dim = 0; out->n_heads = 0;
     uint32_t magic; if (fread(&magic, 4, 1, f) != 1 || magic != 0x46554747) { fclose(f); return 0; }
-    uint32_t version; fread(&version, 4, 1, f);
-    uint64_t n_tensors, n_kv; fread(&n_tensors, 8, 1, f); fread(&n_kv, 8, 1, f);
+    uint32_t version;
+    uint64_t n_tensors, n_kv;
+    if (fread(&version, 4, 1, f) != 1 ||
+        fread(&n_tensors, 8, 1, f) != 1 ||
+        fread(&n_kv, 8, 1, f) != 1) { fclose(f); return 0; }
     for (uint64_t i = 0; i < n_kv; i++) {
-        uint64_t klen; if (fread(&klen, 8, 1, f) != 1) break;
-        if (klen > 255) { fseek(f, klen + 4, SEEK_CUR); continue; }
-        char key[256]; if (fread(key, 1, klen, f) != klen) break; key[klen] = '\0';
-        uint32_t vtype; if (fread(&vtype, 4, 1, f) != 1) break;
+        uint64_t klen; if (fread(&klen, 8, 1, f) != 1) { fclose(f); return 0; }
+        if (klen > 255) {
+            uint32_t vtype;
+            if (!gguf_sniff_skip(f, klen) || fread(&vtype, 4, 1, f) != 1 ||
+                !gguf_sniff_skip_value(f, vtype)) { fclose(f); return 0; }
+            continue;
+        }
+        char key[256];
+        if (fread(key, 1, klen, f) != klen) { fclose(f); return 0; }
+        key[klen] = '\0';
+        uint32_t vtype; if (fread(&vtype, 4, 1, f) != 1) { fclose(f); return 0; }
         if (vtype == 8) { /* string */
-            uint64_t vlen; fread(&vlen, 8, 1, f); char val[256];
-            int rl = vlen < 255 ? (int)vlen : 255; fread(val, 1, rl, f); val[rl] = '\0';
-            if (vlen > 255) fseek(f, vlen-255, SEEK_CUR);
+            uint64_t vlen;
+            char val[256];
+            if (fread(&vlen, 8, 1, f) != 1) { fclose(f); return 0; }
+            int rl = vlen < 255 ? (int)vlen : 255;
+            if (fread(val, 1, rl, f) != (size_t)rl) { fclose(f); return 0; }
+            val[rl] = '\0';
+            if (vlen > 255 && !gguf_sniff_skip(f, vlen - 255)) { fclose(f); return 0; }
             if (strstr(key, "general.architecture")) snprintf(out->arch, 64, "%s", val);
-        } else if (vtype == 4) { uint32_t val; fread(&val, 4, 1, f);
+        } else if (vtype == 4) {
+            uint32_t val;
+            if (fread(&val, 4, 1, f) != 1) { fclose(f); return 0; }
             if (strstr(key, "embedding_length")) out->dim = (int)val;
             else if (strstr(key, "block_count")) out->n_layers = (int)val;
             else if (strstr(key, "head_count") && !strstr(key, "kv")) out->n_heads = (int)val;
-        } else if (vtype == 0 || vtype == 1 || vtype == 7) fseek(f, 1, SEEK_CUR);
-        else if (vtype == 2 || vtype == 3) fseek(f, 2, SEEK_CUR);
-        else if (vtype == 5 || vtype == 6) fseek(f, 4, SEEK_CUR);
-        else if (vtype == 10 || vtype == 11 || vtype == 12) fseek(f, 8, SEEK_CUR);
-        else if (vtype == 9) { /* array */
-            uint32_t atype; fread(&atype, 4, 1, f);
-            uint64_t alen; fread(&alen, 8, 1, f);
-            size_t esz = 0;
-            if (atype == 0 || atype == 1 || atype == 7) esz = 1;
-            else if (atype == 2 || atype == 3) esz = 2;
-            else if (atype == 4 || atype == 5 || atype == 6) esz = 4;
-            else if (atype == 10 || atype == 11 || atype == 12) esz = 8;
-            else if (atype == 8) {
-                for (uint64_t ai = 0; ai < alen; ai++) {
-                    uint64_t sl;
-                    if (fread(&sl, 8, 1, f) != 1 || sl > (uint64_t)LONG_MAX ||
-                        fseek(f, (long)sl, SEEK_CUR) != 0) {
-                        fclose(f);
-                        return 0;
-                    }
-                }
-                continue;
-            }
-            if (esz == 0) {
-                fclose(f);
-                return 0;
-            }
-            uint64_t skip = 0;
-            if (!doe_mul_u64(alen, (uint64_t)esz, &skip) || skip > (uint64_t)LONG_MAX ||
-                fseek(f, (long)skip, SEEK_CUR) != 0) {
-                fclose(f);
-                return 0;
-            }
-        } else {
-            fclose(f);
-            return 0;
-        }
+        } else if (!gguf_sniff_skip_value(f, vtype)) { fclose(f); return 0; }
     }
     fclose(f);
     return (out->arch[0] != '\0' && out->dim > 0);
