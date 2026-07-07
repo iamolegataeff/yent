@@ -1713,6 +1713,26 @@ static int doe_validate_host_config(GGUFIndex *ps, int require_vocab) {
     return 1;
 }
 
+static void doe_free_tokenizer_metadata(GGUFIndex *ps) {
+    if (ps->vocab_tokens) {
+        for (int i = 0; i < ps->vocab_size; i++) free(ps->vocab_tokens[i]);
+        free(ps->vocab_tokens);
+        ps->vocab_tokens = NULL;
+    }
+    ps->vocab_size = 0;
+    free(ps->vocab_scores);
+    ps->vocab_scores = NULL;
+    if (ps->bpe_merges) {
+        for (int i = 0; i < ps->n_bpe_merges; i++) free(ps->bpe_merges[i]);
+        free(ps->bpe_merges);
+        ps->bpe_merges = NULL;
+    }
+    ps->n_bpe_merges = 0;
+    free(ps->tok_ht_ids);
+    ps->tok_ht_ids = NULL;
+    ps->tok_ht_cap = 0;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════════
  * ENVIRONMENT SCANNER — DOE opens its eyes
  * ═══════════════════════════════════════════════════════════════════════════════ */
@@ -2062,10 +2082,20 @@ static int index_load(GGUFIndex *ps, const char *path) {
             else if (atype == 4 || atype == 5 || atype == 6) {
                 elem_sz = 4;
                 /* float32 array: tokenizer.ggml.scores */
-                if (atype == 6 && strstr(key, "tokenizer.ggml.scores") && alen < 200000) {
-                    PC(alen * 4); /* D-M2: bound the scores payload (else up to ~800KB OOB read) */
-                    ps->vocab_scores = malloc(alen * sizeof(float));
-                    memcpy(ps->vocab_scores, p, alen * 4);
+                if (atype == 6 && strstr(key, "tokenizer.ggml.scores")) {
+                    uint64_t score_bytes = 0;
+                    if (alen > DOE_MAX_HOST_VOCAB ||
+                        alen > (uint64_t)SIZE_MAX / sizeof(float) ||
+                        ps->vocab_scores ||
+                        !doe_mul_u64(alen, 4, &score_bytes)) {
+                        fprintf(stderr, "[doe] malformed tokenizer scores array len=%llu key=%s\n",
+                                (unsigned long long)alen, key);
+                        goto bail;
+                    }
+                    PC(score_bytes); /* D-M2: bound the scores payload before memcpy */
+                    ps->vocab_scores = malloc((alen ? (size_t)alen : 1) * sizeof(float));
+                    if (!ps->vocab_scores) goto bail;
+                    memcpy(ps->vocab_scores, p, (size_t)score_bytes);
                 }
             }
             else if (atype == 10 || atype == 11 || atype == 12) elem_sz = 8;
@@ -2073,15 +2103,33 @@ static int index_load(GGUFIndex *ps, const char *path) {
                 /* array of strings */
                 int is_vocab = strstr(key, "tokenizer.ggml.tokens") != NULL;
                 int is_merges = strstr(key, "tokenizer.ggml.merges") != NULL;
-                if (is_vocab && alen < 1000000) {
-                    ps->vocab_tokens = calloc(alen, sizeof(char*));
+                if (is_vocab) {
+                    if (alen > DOE_MAX_HOST_VOCAB ||
+                        alen > (uint64_t)INT_MAX ||
+                        alen > (uint64_t)SIZE_MAX / sizeof(char*) ||
+                        ps->vocab_tokens) {
+                        fprintf(stderr, "[doe] malformed tokenizer vocab array len=%llu key=%s\n",
+                                (unsigned long long)alen, key);
+                        goto bail;
+                    }
+                    ps->vocab_tokens = calloc(alen ? (size_t)alen : 1, sizeof(char*));
+                    if (!ps->vocab_tokens) goto bail;
                     ps->vocab_size = (int)alen;
                 }
-                if (is_merges && alen < 500000) {
-                    ps->bpe_merges = calloc(alen, sizeof(char*));
+                if (is_merges) {
+                    if (alen > 500000 ||
+                        alen > (uint64_t)INT_MAX ||
+                        alen > (uint64_t)SIZE_MAX / sizeof(char*) ||
+                        ps->bpe_merges) {
+                        fprintf(stderr, "[doe] malformed tokenizer merges array len=%llu key=%s\n",
+                                (unsigned long long)alen, key);
+                        goto bail;
+                    }
+                    ps->bpe_merges = calloc(alen ? (size_t)alen : 1, sizeof(char*));
+                    if (!ps->bpe_merges) goto bail;
                     ps->n_bpe_merges = (int)alen;
                 }
-                for (uint64_t ai = 0; ai < alen && p < pend; ai++) {
+                for (uint64_t ai = 0; ai < alen; ai++) {
                     PC(8); uint64_t slen = *(uint64_t*)p; p += 8;
                     if (slen > 1000000 || (uint64_t)(pend - p) < slen) goto bail; /* sanity */
                     if (is_vocab && ps->vocab_tokens && ai < (uint64_t)ps->vocab_size) {
@@ -2394,6 +2442,7 @@ bail:
     }
     for (int i = 0; i < ps->n_f16_bufs; i++) free(ps->f16_bufs[i]);
     free(ps->f16_bufs); ps->f16_bufs = NULL; ps->n_f16_bufs = 0;
+    doe_free_tokenizer_metadata(ps);
     if (ps->mmap_base) { munmap(ps->mmap_base, ps->mmap_size); ps->mmap_base = NULL; }
     printf("[doe] GGUF parse failed.\n");
     return 0;
@@ -2408,15 +2457,7 @@ static void index_free(GGUFIndex *ps) {
     }
     for (int i = 0; i < ps->n_f16_bufs; i++) free(ps->f16_bufs[i]);
     free(ps->f16_bufs);
-    if (ps->vocab_tokens) {
-        for (int i = 0; i < ps->vocab_size; i++) free(ps->vocab_tokens[i]);
-        free(ps->vocab_tokens);
-    }
-    free(ps->vocab_scores);
-    if (ps->bpe_merges) {
-        for (int i = 0; i < ps->n_bpe_merges; i++) free(ps->bpe_merges[i]);
-        free(ps->bpe_merges);
-    }
+    doe_free_tokenizer_metadata(ps);
     if (ps->mmap_base) munmap(ps->mmap_base, ps->mmap_size);
 #ifdef USE_METAL
     /* expert_arena is wrapped by a NoCopy MTLBuffer (deallocator:nil) in notorch's
