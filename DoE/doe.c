@@ -2164,6 +2164,10 @@ static int index_load(GGUFIndex *ps, const char *path) {
             goto bail;
         }
     }
+    if (ps->vocab_tokens && ps->vocab_size <= 0) {
+        fprintf(stderr, "[doe] tokenizer vocab is empty\n");
+        goto bail;
+    }
     if (ps->vocab_scores && ps->vocab_tokens && ps->vocab_scores_size != ps->vocab_size) {
         fprintf(stderr, "[doe] tokenizer scores length %d does not match vocab length %d\n",
                 ps->vocab_scores_size, ps->vocab_size);
@@ -3608,7 +3612,8 @@ static int tok_lookup(GGUFIndex *ps, const char *s, int len); /* forward decl */
 
 /* Build GPT-2 BPE scores from merges (called after index_load if needed) */
 static void build_gpt2_scores(GGUFIndex *ps) {
-    if (!ps->is_gpt2_bpe || !ps->bpe_merges || ps->n_bpe_merges == 0 || ps->vocab_scores || !ps->vocab_tokens) return;
+    if (!ps || !ps->is_gpt2_bpe || !ps->bpe_merges || ps->n_bpe_merges <= 0 ||
+        ps->vocab_scores || !ps->vocab_tokens || ps->vocab_size <= 0) return;
     ps->vocab_scores = calloc(ps->vocab_size, sizeof(float));
     if (!ps->vocab_scores) return;
     ps->vocab_scores_size = ps->vocab_size;
@@ -3624,7 +3629,10 @@ static void build_gpt2_scores(GGUFIndex *ps) {
         memcpy(merged, merge, la);
         memcpy(merged + la, sp + 1, lb);
         int mid = tok_lookup(ps, merged, la + lb);
-        if (mid >= 0) { ps->vocab_scores[mid] = (float)(ps->n_bpe_merges - m); built++; }
+        if (mid >= 0 && mid < ps->vocab_scores_size) {
+            ps->vocab_scores[mid] = (float)(ps->n_bpe_merges - m);
+            built++;
+        }
     }
     printf("[doe] GPT-2 BPE: built %d merge scores from %d merges\n", built, ps->n_bpe_merges);
     ps->add_space_prefix = 0;
@@ -3639,7 +3647,7 @@ static uint32_t tok_hash(const char *s, int len) {
 
 /* Build hash table for O(1) token lookup */
 static void tok_ht_build(GGUFIndex *ps) {
-    if (!ps->vocab_tokens || ps->vocab_size == 0) return;
+    if (!ps || !ps->vocab_tokens || ps->vocab_size <= 0) return;
     int cap = 1;
     while (cap < ps->vocab_size * 3) cap <<= 1; /* ~33% load factor */
     ps->tok_ht_ids = malloc(cap * sizeof(int));
@@ -3662,6 +3670,7 @@ static void tok_ht_build(GGUFIndex *ps) {
 
 /* Find token ID by string. Returns -1 if not found. O(1) average. */
 static int tok_lookup(GGUFIndex *ps, const char *s, int len) {
+    if (!ps || !s || len <= 0 || !ps->vocab_tokens || ps->vocab_size <= 0) return -1;
     if (!ps->tok_ht_ids) {
         /* fallback linear scan */
         for (int i = 0; i < ps->vocab_size; i++) {
@@ -3671,10 +3680,12 @@ static int tok_lookup(GGUFIndex *ps, const char *s, int len) {
         }
         return -1;
     }
+    if (ps->tok_ht_cap <= 0) return -1;
     int mask = ps->tok_ht_cap - 1;
     uint32_t idx = tok_hash(s, len) & mask;
     while (ps->tok_ht_ids[idx] != -1) {
         int id = ps->tok_ht_ids[idx];
+        if (id < 0 || id >= ps->vocab_size) return -1;
         const char *t = ps->vocab_tokens[id];
         if (t && strlen(t) == (size_t)len && memcmp(t, s, len) == 0) return id;
         idx = (idx + 1) & mask;
@@ -3684,14 +3695,18 @@ static int tok_lookup(GGUFIndex *ps, const char *s, int len) {
 
 /* Score-based BPE merge on an array of token IDs */
 static int bpe_merge(GGUFIndex *ps, int *ids, int n) {
-    if (!ps->vocab_scores) return n;
+    if (!ps || !ids || n <= 1 || !ps->vocab_scores || !ps->vocab_tokens ||
+        ps->vocab_size <= 0 || ps->vocab_scores_size <= 0) return n;
     while (n > 1) {
         float best_score = -1e30f;
         int best_idx = -1, best_id = -1;
         for (int i = 0; i < n - 1; i++) {
             /* Concatenate token strings */
-            const char *a = ps->vocab_tokens[ids[i]];
-            const char *b = ps->vocab_tokens[ids[i+1]];
+            int a_id = ids[i], b_id = ids[i+1];
+            if (a_id < 0 || a_id >= ps->vocab_size ||
+                b_id < 0 || b_id >= ps->vocab_size) continue;
+            const char *a = ps->vocab_tokens[a_id];
+            const char *b = ps->vocab_tokens[b_id];
             if (!a || !b) continue;
             int la = strlen(a), lb = strlen(b);
             if (la + lb > 128) continue;
@@ -3699,7 +3714,8 @@ static int bpe_merge(GGUFIndex *ps, int *ids, int n) {
             memcpy(merged, a, la);
             memcpy(merged + la, b, lb);
             int mid = tok_lookup(ps, merged, la + lb);
-            if (mid >= 0 && mid < ps->vocab_scores_size && ps->vocab_scores[mid] > best_score) {
+            if (mid >= 0 && mid < ps->vocab_size && mid < ps->vocab_scores_size &&
+                ps->vocab_scores[mid] > best_score) {
                 best_score = ps->vocab_scores[mid];
                 best_idx = i;
                 best_id = mid;
