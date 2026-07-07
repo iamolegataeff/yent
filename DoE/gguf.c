@@ -32,6 +32,20 @@ static int read_string(FILE* f, char* buf, int max) {
     return 1;
 }
 
+static char* read_string_alloc(FILE* f) {
+    uint64_t len;
+    if (!read_u64(f, &len)) return NULL;
+    if (len > (uint64_t)SIZE_MAX - 1) return NULL;
+    char* s = (char*)malloc((size_t)len + 1);
+    if (!s) return NULL;
+    if (len > 0 && fread(s, 1, (size_t)len, f) != (size_t)len) {
+        free(s);
+        return NULL;
+    }
+    s[len] = 0;
+    return s;
+}
+
 static int skip_value(FILE* f, uint32_t type);
 static float f16_to_f32(uint16_t h);   /* defined below, used by gguf_load_f16 helpers */
 static uint64_t gguf_dtype_nbytes(uint32_t dtype, uint64_t n);
@@ -241,39 +255,74 @@ const gguf_kv* gguf_get_kv(const gguf_file* gf, const char* key) {
     return NULL;
 }
 
+static void gguf_free_str_array(char** arr, uint64_t n) {
+    if (!arr) return;
+    for (uint64_t i = 0; i < n; i++) free(arr[i]);
+    free(arr);
+}
+
 // Read a GGUF type-9 array of strings (e.g. tokenizer.ggml.tokens / .merges) by key.
 // Arrays are skipped during gguf_open, so this re-scans the file. Returns a malloc'd
-// char** of *out_n strdup'd strings, or NULL if the key/array is absent. Caller frees
+// char** with *out_n malloc'd strings, or NULL if the key/array is absent. Caller frees
 // each string and the array.
 char** gguf_read_str_array(const char* path, const char* key, int* out_n) {
     if (out_n) *out_n = 0;
+    if (!path || !key) return NULL;
     FILE* f = fopen(path, "rb");
     if (!f) return NULL;
     uint32_t magic;
     if (!read_u32(f, &magic) || magic != GGUF_MAGIC) { fclose(f); return NULL; }
     uint32_t version; uint64_t n_tensors, n_kv;
-    read_u32(f, &version); read_u64(f, &n_tensors); read_u64(f, &n_kv);
-    char** result = NULL;
+    if (!read_u32(f, &version) || !read_u64(f, &n_tensors) || !read_u64(f, &n_kv)) {
+        fprintf(stderr, "gguf: truncated header while reading string array %s (%s)\n", key, path);
+        fclose(f);
+        return NULL;
+    }
     for (uint64_t i = 0; i < n_kv; i++) {
         char k[512] = {0};
         uint32_t vtype;
-        if (!read_string(f, k, sizeof(k)) || !read_u32(f, &vtype)) break;
-        if (strcmp(k, key) == 0 && vtype == 9) {
+        if (!read_string(f, k, sizeof(k)) || !read_u32(f, &vtype)) {
+            fprintf(stderr, "gguf: truncated metadata while reading string array %s (%s)\n", key, path);
+            fclose(f);
+            return NULL;
+        }
+        if (strcmp(k, key) == 0) {
+            if (vtype != 9) {
+                fprintf(stderr, "gguf: metadata %s is type %u, expected string array (%s)\n", key, vtype, path);
+                fclose(f);
+                return NULL;
+            }
             uint32_t atype; uint64_t alen;
-            if (!read_u32(f, &atype) || !read_u64(f, &alen) || atype != 8) break;
-            result = (char**)calloc(alen ? alen : 1, sizeof(char*));
+            if (!read_u32(f, &atype) || !read_u64(f, &alen) || atype != 8 ||
+                alen > (uint64_t)INT_MAX || alen > SIZE_MAX / sizeof(char*)) {
+                fprintf(stderr, "gguf: malformed string array %s (%s)\n", key, path);
+                fclose(f);
+                return NULL;
+            }
+            char** result = (char**)calloc(alen ? (size_t)alen : 1, sizeof(char*));
+            if (!result) { fclose(f); return NULL; }
             for (uint64_t j = 0; j < alen; j++) {
-                char buf[2048] = {0};
-                if (!read_string(f, buf, sizeof(buf))) break;
-                result[j] = strdup(buf);
+                result[j] = read_string_alloc(f);
+                if (!result[j]) {
+                    fprintf(stderr, "gguf: truncated string array %s at item %llu/%llu (%s)\n",
+                            key, (unsigned long long)j, (unsigned long long)alen, path);
+                    gguf_free_str_array(result, j);
+                    fclose(f);
+                    return NULL;
+                }
             }
             if (out_n) *out_n = (int)alen;
-            break;
+            fclose(f);
+            return result;
         }
-        if (!skip_value(f, vtype)) break;
+        if (!skip_value(f, vtype)) {
+            fprintf(stderr, "gguf: malformed metadata before string array %s (%s)\n", key, path);
+            fclose(f);
+            return NULL;
+        }
     }
     fclose(f);
-    return result;
+    return NULL;
 }
 
 // Load an F16 tensor as raw uint16_t (exact, half the RAM of gguf_dequant->f32).
@@ -301,35 +350,63 @@ void gguf_f16_to_f32_n(const uint16_t* src, float* dst, long n) {
 // Mirrors gguf_read_str_array (arrays are skipped during gguf_open). Caller frees.
 int32_t* gguf_read_i32_array(const char* path, const char* key, int* out_n) {
     if (out_n) *out_n = 0;
+    if (!path || !key) return NULL;
     FILE* f = fopen(path, "rb");
     if (!f) return NULL;
     uint32_t magic;
     if (!read_u32(f, &magic) || magic != GGUF_MAGIC) { fclose(f); return NULL; }
     uint32_t version; uint64_t n_tensors, n_kv;
-    read_u32(f, &version); read_u64(f, &n_tensors); read_u64(f, &n_kv);
-    int32_t* result = NULL;
+    if (!read_u32(f, &version) || !read_u64(f, &n_tensors) || !read_u64(f, &n_kv)) {
+        fprintf(stderr, "gguf: truncated header while reading i32 array %s (%s)\n", key, path);
+        fclose(f);
+        return NULL;
+    }
     for (uint64_t i = 0; i < n_kv; i++) {
         char k[512] = {0};
         uint32_t vtype;
-        if (!read_string(f, k, sizeof(k)) || !read_u32(f, &vtype)) break;
-        if (strcmp(k, key) == 0 && vtype == 9) {
-            uint32_t atype; uint64_t alen;
-            if (!read_u32(f, &atype) || !read_u64(f, &alen) || (atype != 5 && atype != 4)) break; // int32/uint32
-            if (alen > (uint64_t)INT_MAX || alen > SIZE_MAX / sizeof(int32_t)) break;  // malformed/overflow
-            result = (int32_t*)calloc(alen ? alen : 1, sizeof(int32_t));
-            if (!result) break;
-            uint64_t got = 0;
-            for (uint64_t j = 0; j < alen; j++) {
-                uint32_t v; if (!read_u32(f, &v)) break;
-                result[j] = (int32_t)v; got++;
-            }
-            if (out_n) *out_n = (int)got;   // actual count read (robust to truncation)
-            break;
+        if (!read_string(f, k, sizeof(k)) || !read_u32(f, &vtype)) {
+            fprintf(stderr, "gguf: truncated metadata while reading i32 array %s (%s)\n", key, path);
+            fclose(f);
+            return NULL;
         }
-        if (!skip_value(f, vtype)) break;
+        if (strcmp(k, key) == 0) {
+            if (vtype != 9) {
+                fprintf(stderr, "gguf: metadata %s is type %u, expected i32 array (%s)\n", key, vtype, path);
+                fclose(f);
+                return NULL;
+            }
+            uint32_t atype; uint64_t alen;
+            if (!read_u32(f, &atype) || !read_u64(f, &alen) || (atype != 5 && atype != 4) ||
+                alen > (uint64_t)INT_MAX || alen > SIZE_MAX / sizeof(int32_t)) {
+                fprintf(stderr, "gguf: malformed i32 array %s (%s)\n", key, path);
+                fclose(f);
+                return NULL;
+            }
+            int32_t* result = (int32_t*)calloc(alen ? (size_t)alen : 1, sizeof(int32_t));
+            if (!result) { fclose(f); return NULL; }
+            for (uint64_t j = 0; j < alen; j++) {
+                uint32_t v;
+                if (!read_u32(f, &v)) {
+                    fprintf(stderr, "gguf: truncated i32 array %s at item %llu/%llu (%s)\n",
+                            key, (unsigned long long)j, (unsigned long long)alen, path);
+                    free(result);
+                    fclose(f);
+                    return NULL;
+                }
+                result[j] = (int32_t)v;
+            }
+            if (out_n) *out_n = (int)alen;
+            fclose(f);
+            return result;
+        }
+        if (!skip_value(f, vtype)) {
+            fprintf(stderr, "gguf: malformed metadata before i32 array %s (%s)\n", key, path);
+            fclose(f);
+            return NULL;
+        }
     }
     fclose(f);
-    return result;
+    return NULL;
 }
 
 // ── Dequantization ───────────────────────────────────────────────────────────
