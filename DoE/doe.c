@@ -4421,12 +4421,35 @@ static void http_send_header(int fd, int status, const char *content_type, int c
 static int http_serve_file(int fd, const char *filepath) {
     FILE *f = fopen(filepath, "rb");
     if (!f) return 0;
-    fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
-    char *data = malloc(sz);
-    if (!data) { fclose(f); return 0; }
-    fread(data, 1, sz, f); fclose(f);
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fprintf(stderr, "[serve] cannot seek static file: %s\n", filepath);
+        fclose(f);
+        return 0;
+    }
+    long sz = ftell(f);
+    if (sz < 0 || sz > INT_MAX || fseek(f, 0, SEEK_SET) != 0) {
+        fprintf(stderr, "[serve] invalid static file size for %s\n", filepath);
+        fclose(f);
+        return 0;
+    }
+    char *data = NULL;
+    if (sz > 0) {
+        data = malloc((size_t)sz);
+        if (!data) {
+            fprintf(stderr, "[serve] allocation failed for static file %s (%ld bytes)\n", filepath, sz);
+            fclose(f);
+            return 0;
+        }
+        if (fread(data, 1, (size_t)sz, f) != (size_t)sz) {
+            fprintf(stderr, "[serve] short read while serving static file: %s\n", filepath);
+            free(data);
+            fclose(f);
+            return 0;
+        }
+    }
+    fclose(f);
     http_send_header(fd, 200, "text/html; charset=utf-8", (int)sz);
-    http_send(fd, data, (int)sz);
+    if (sz > 0) http_send(fd, data, (int)sz);
     free(data);
     return 1;
 }
@@ -4525,6 +4548,7 @@ static void http_stream_inference(int fd, GGUFIndex *ps, const char *user_msg, f
     if (!wrapped_ok) {
         const char *err = "data: {\"error\":\"prompt too long\"}\n\n";
         http_send(fd, err, (int)strlen(err));
+        free_infer(&is);
         return;
     }
 
@@ -4535,11 +4559,13 @@ static void http_stream_inference(int fd, GGUFIndex *ps, const char *user_msg, f
     if (!tokenize_append_checked(ps, wrapped, input_tokens, 512, &n_input, "HTTP prompt")) {
         const char *err = "data: {\"error\":\"prompt token budget exceeded\"}\n\n";
         http_send(fd, err, (int)strlen(err));
+        free_infer(&is);
         return;
     }
     if (n_input <= 0) {
         const char *err = "data: {\"error\":\"prompt tokenization failed\"}\n\n";
         http_send(fd, err, (int)strlen(err));
+        free_infer(&is);
         return;
     }
 
