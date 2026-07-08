@@ -2962,6 +2962,12 @@ static int mycelium_spore_step(const char *name, uint64_t target_fp, int *out_st
     return 1;
 }
 
+static int lora_spore_step_desc_cmp(const void *a, const void *b) {
+    const LoraSpore *sa = (const LoraSpore *)a;
+    const LoraSpore *sb = (const LoraSpore *)b;
+    return (sb->step > sa->step) - (sb->step < sa->step);
+}
+
 static int mycelium_load_file(GGUFIndex *ps, uint64_t target_fp, const char *spore_path, int filename_step) {
     FILE *f = fopen(spore_path, "rb");
     if (!f) {
@@ -3089,8 +3095,8 @@ done:
 }
 
 static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
-    LoraSpore candidates[MYCELIUM_MAX];
-    int n_candidates = 0;
+    LoraSpore *candidates = NULL;
+    int n_candidates = 0, cap_candidates = 0;
     DIR *dir = opendir(MYCELIUM_DIR);
     if (!dir) return 0;
     struct dirent *ent;
@@ -3104,40 +3110,49 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
             printf("[mycelium] spore path too long, skipping: %s\n", name);
             continue;
         }
-        int slot = n_candidates;
-        if (n_candidates < MYCELIUM_MAX) {
-            n_candidates++;
-        } else {
-            int min_i = 0;
-            for (int i = 1; i < n_candidates; i++)
-                if (candidates[i].step < candidates[min_i].step) min_i = i;
-            if (s <= candidates[min_i].step) continue;
-            slot = min_i;
+        if (n_candidates == cap_candidates) {
+            if (cap_candidates > INT_MAX / 2 ||
+                (cap_candidates > 0 && (size_t)cap_candidates * 2 > SIZE_MAX / sizeof(*candidates))) {
+                printf("[mycelium] too many spore candidates; refusing partial fallback list\n");
+                closedir(dir);
+                free(candidates);
+                return 0;
+            }
+            int new_cap = cap_candidates ? cap_candidates * 2 : 16;
+            LoraSpore *grown = realloc(candidates, (size_t)new_cap * sizeof(*candidates));
+            if (!grown) {
+                printf("[mycelium] cannot allocate spore candidate list (%d entries): %s\n",
+                       new_cap, strerror(errno));
+                closedir(dir);
+                free(candidates);
+                return 0;
+            }
+            candidates = grown;
+            cap_candidates = new_cap;
         }
-        memset(&candidates[slot], 0, sizeof(candidates[slot]));
-        snprintf(candidates[slot].path, sizeof(candidates[slot].path), "%s", path);
-        candidates[slot].host_fingerprint = target_fp;
-        candidates[slot].step = s;
+        LoraSpore *cand = &candidates[n_candidates++];
+        memset(cand, 0, sizeof(*cand));
+        snprintf(cand->path, sizeof(cand->path), "%s", path);
+        cand->host_fingerprint = target_fp;
+        cand->step = s;
     }
     closedir(dir);
-    if (n_candidates == 0) return 0;
-
-    for (int i = 0; i < n_candidates - 1; i++) {
-        for (int j = i + 1; j < n_candidates; j++) {
-            if (candidates[j].step > candidates[i].step) {
-                LoraSpore tmp = candidates[i];
-                candidates[i] = candidates[j];
-                candidates[j] = tmp;
-            }
-        }
+    if (n_candidates == 0) {
+        free(candidates);
+        return 0;
     }
 
+    qsort(candidates, (size_t)n_candidates, sizeof(*candidates), lora_spore_step_desc_cmp);
+
     for (int i = 0; i < n_candidates; i++) {
-        if (mycelium_load_file(ps, target_fp, candidates[i].path, candidates[i].step))
+        if (mycelium_load_file(ps, target_fp, candidates[i].path, candidates[i].step)) {
+            free(candidates);
             return 1;
+        }
         if (i + 1 < n_candidates)
             printf("[mycelium] trying older spore after rejecting %s\n", candidates[i].path);
     }
+    free(candidates);
     return 0;
 }
 
