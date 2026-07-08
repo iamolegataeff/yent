@@ -2851,24 +2851,23 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
     /* simple scan: find newest (highest step) spore for this fingerprint */
     char best_path[256] = {0};
     int best_step = -1;
-    FILE *p = popen("ls " MYCELIUM_DIR "/ 2>/dev/null", "r");
-    if (!p) return 0;
-    char line[256];
-    while (fgets(line, sizeof(line), p)) {
-        int len = strlen(line);
-        while (len > 0 && (line[len-1]=='\n'||line[len-1]=='\r')) line[--len] = '\0';
+    DIR *dir = opendir(MYCELIUM_DIR);
+    if (!dir) return 0;
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL) {
+        const char *name = ent->d_name;
         int s = -1;
-        if (!mycelium_spore_step(line, target_fp, &s)) continue;
+        if (!mycelium_spore_step(name, target_fp, &s)) continue;
         if (s > best_step) {
-            int npath = snprintf(best_path, sizeof(best_path), "%s/%s", MYCELIUM_DIR, line);
+            int npath = snprintf(best_path, sizeof(best_path), "%s/%s", MYCELIUM_DIR, name);
             if (npath < 0 || npath >= (int)sizeof(best_path)) {
-                printf("[mycelium] spore path too long, skipping: %s\n", line);
+                printf("[mycelium] spore path too long, skipping: %s\n", name);
                 continue;
             }
             best_step = s;
         }
     }
-    pclose(p);
+    closedir(dir);
     if (best_step < 0) return 0;
 
     FILE *f = fopen(best_path, "rb");
