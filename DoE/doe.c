@@ -4795,15 +4795,23 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
                 }
             } else if (strcmp(path, "/health") == 0) {
                 char body[512];
+                char host_path_json[512], host_arch_json[128];
+                json_escape(ps->host_path, host_path_json, sizeof(host_path_json));
+                json_escape(ps->host_arch, host_arch_json, sizeof(host_arch_json));
                 int blen = snprintf(body, sizeof(body),
                     "{\"status\":\"ok\",\"model\":\"%s\",\"arch\":\"%s\","
                     "\"params\":\"%dM\",\"vocab\":%d,\"layers\":%d,"
                     "\"experts\":%d,\"debt\":%.4f,\"health\":%.4f}",
-                    ps->host_path, ps->host_arch,
+                    host_path_json, host_arch_json,
                     (int)(ps->host_vocab * ps->host_dim * 2 / 1000000),
                     ps->host_vocab, ps->host_n_layers,
                     ps->n_field_layers > 0 ? ps->field_layers[0].n_alive : 0,
                     F.debt, F.field_health);
+                if (blen < 0 || blen >= (int)sizeof(body)) {
+                    http_send_text(client, 500, "health response too large");
+                    close(client);
+                    continue;
+                }
                 http_send_header(client, 200, "application/json", blen);
                 http_send(client, body, blen);
             } else {
