@@ -443,8 +443,8 @@ static int dario_cooc_weakest_index(void) {
 }
 
 static int dario_cooc_compact_due(void) {
-    int elapsed = DF.dstep - DF.cooc_last_compact_step;
-    return elapsed < 0 || elapsed >= DARIO_COOC_COMPACT_PERIOD;
+    int64_t elapsed = (int64_t)DF.dstep - (int64_t)DF.cooc_last_compact_step;
+    return elapsed < 0 || elapsed >= (int64_t)DARIO_COOC_COMPACT_PERIOD;
 }
 
 static void dario_cooc_update(int src, int dst, float delta) {
