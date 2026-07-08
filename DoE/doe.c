@@ -2889,10 +2889,16 @@ static void mycelium_save(GGUFIndex *ps, int step, float fitness) {
         return;
     }
     FILE *f = fopen(tmp_path, "wb");
-    if (!f) { printf("[mycelium] cannot write %s\n", tmp_path); return; }
+    if (!f) {
+        printf("[mycelium] cannot write %s: %s\n", tmp_path, strerror(errno));
+        return;
+    }
     #define SPORE_WRITE(ptr, size, count) do { \
+        errno = 0; \
         if (fwrite((ptr), (size), (count), f) != (size_t)(count)) { \
-            printf("[mycelium] failed writing spore: %s\n", tmp_path); \
+            int saved_errno = errno; \
+            printf("[mycelium] failed writing spore: %s%s%s\n", tmp_path, \
+                   saved_errno ? ": " : "", saved_errno ? strerror(saved_errno) : ""); \
             fclose(f); \
             remove(tmp_path); \
             return; \
@@ -2925,12 +2931,12 @@ static void mycelium_save(GGUFIndex *ps, int step, float fitness) {
     }
     #undef SPORE_WRITE
     if (fclose(f) != 0) {
-        printf("[mycelium] failed closing spore: %s\n", tmp_path);
+        printf("[mycelium] failed closing spore: %s: %s\n", tmp_path, strerror(errno));
         remove(tmp_path);
         return;
     }
     if (rename(tmp_path, path) != 0) {
-        printf("[mycelium] failed publishing spore %s -> %s\n", tmp_path, path);
+        printf("[mycelium] failed publishing spore %s -> %s: %s\n", tmp_path, path, strerror(errno));
         remove(tmp_path);
         return;
     }
@@ -2956,37 +2962,18 @@ static int mycelium_spore_step(const char *name, uint64_t target_fp, int *out_st
     return 1;
 }
 
-static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
-    /* simple scan: find newest (highest step) spore for this fingerprint */
-    char best_path[256] = {0};
-    int best_step = -1;
-    DIR *dir = opendir(MYCELIUM_DIR);
-    if (!dir) return 0;
-    struct dirent *ent;
-    while ((ent = readdir(dir)) != NULL) {
-        const char *name = ent->d_name;
-        int s = -1;
-        if (!mycelium_spore_step(name, target_fp, &s)) continue;
-        if (s > best_step) {
-            int npath = snprintf(best_path, sizeof(best_path), "%s/%s", MYCELIUM_DIR, name);
-            if (npath < 0 || npath >= (int)sizeof(best_path)) {
-                printf("[mycelium] spore path too long, skipping: %s\n", name);
-                continue;
-            }
-            best_step = s;
-        }
+static int mycelium_load_file(GGUFIndex *ps, uint64_t target_fp, const char *spore_path, int filename_step) {
+    FILE *f = fopen(spore_path, "rb");
+    if (!f) {
+        printf("[mycelium] cannot read spore %s: %s\n", spore_path, strerror(errno));
+        return 0;
     }
-    closedir(dir);
-    if (best_step < 0) return 0;
-
-    FILE *f = fopen(best_path, "rb");
-    if (!f) return 0;
     FieldLayer tmp_layers[MAX_LAYERS];
     memset(tmp_layers, 0, sizeof(tmp_layers));
     int loaded = 0;
     #define SPORE_READ(ptr, size, count) do { \
         if (fread((ptr), (size), (count), f) != (size_t)(count)) { \
-            printf("[mycelium] truncated spore: %s\n", best_path); \
+            printf("[mycelium] truncated spore: %s\n", spore_path); \
             goto done; \
         } \
     } while (0)
@@ -2994,6 +2981,15 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
     if (fp != target_fp) goto done;
     int step; float fitness;
     SPORE_READ(&step, 4, 1); SPORE_READ(&fitness, 4, 1);
+    if (step != filename_step) {
+        printf("[mycelium] spore step mismatch (%d filename, %d header): %s\n",
+               filename_step, step, spore_path);
+        goto done;
+    }
+    if (!isfinite(fitness)) {
+        printf("[mycelium] invalid spore fitness in %s; refusing load\n", spore_path);
+        goto done;
+    }
     int nl, dim, rank;
     SPORE_READ(&nl, 4, 1); SPORE_READ(&dim, 4, 1); SPORE_READ(&rank, 4, 1);
     if (nl != ps->n_field_layers || dim != ps->host_dim || rank != ps->lora_rank) {
@@ -3061,9 +3057,19 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
             goto done;
         }
     }
+    errno = 0;
+    int extra = fgetc(f);
+    if (extra != EOF) {
+        printf("[mycelium] trailing data after spore payload: %s\n", spore_path);
+        goto done;
+    }
+    if (ferror(f)) {
+        printf("[mycelium] read error at spore end %s: %s\n", spore_path, strerror(errno));
+        goto done;
+    }
     if (fclose(f) != 0) {
         f = NULL;
-        printf("[mycelium] failed closing spore after read: %s\n", best_path);
+        printf("[mycelium] failed closing spore after read: %s: %s\n", spore_path, strerror(errno));
         goto done;
     }
     f = NULL;
@@ -3072,7 +3078,7 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
         ps->field_layers[l] = tmp_layers[l];
         memset(&tmp_layers[l], 0, sizeof(tmp_layers[l]));
     }
-    printf("[mycelium] spore loaded: %s (step=%d fitness=%.3f)\n", best_path, step, fitness);
+    printf("[mycelium] spore loaded: %s (step=%d fitness=%.3f)\n", spore_path, step, fitness);
     loaded = 1;
 done:
     #undef SPORE_READ
@@ -3080,6 +3086,59 @@ done:
     for (int l = 0; l < MAX_LAYERS; l++)
         field_release_resources(&tmp_layers[l]);
     return loaded;
+}
+
+static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
+    LoraSpore candidates[MYCELIUM_MAX];
+    int n_candidates = 0;
+    DIR *dir = opendir(MYCELIUM_DIR);
+    if (!dir) return 0;
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL) {
+        const char *name = ent->d_name;
+        int s = -1;
+        if (!mycelium_spore_step(name, target_fp, &s)) continue;
+        char path[256];
+        int npath = snprintf(path, sizeof(path), "%s/%s", MYCELIUM_DIR, name);
+        if (npath < 0 || npath >= (int)sizeof(path)) {
+            printf("[mycelium] spore path too long, skipping: %s\n", name);
+            continue;
+        }
+        int slot = n_candidates;
+        if (n_candidates < MYCELIUM_MAX) {
+            n_candidates++;
+        } else {
+            int min_i = 0;
+            for (int i = 1; i < n_candidates; i++)
+                if (candidates[i].step < candidates[min_i].step) min_i = i;
+            if (s <= candidates[min_i].step) continue;
+            slot = min_i;
+        }
+        memset(&candidates[slot], 0, sizeof(candidates[slot]));
+        snprintf(candidates[slot].path, sizeof(candidates[slot].path), "%s", path);
+        candidates[slot].host_fingerprint = target_fp;
+        candidates[slot].step = s;
+    }
+    closedir(dir);
+    if (n_candidates == 0) return 0;
+
+    for (int i = 0; i < n_candidates - 1; i++) {
+        for (int j = i + 1; j < n_candidates; j++) {
+            if (candidates[j].step > candidates[i].step) {
+                LoraSpore tmp = candidates[i];
+                candidates[i] = candidates[j];
+                candidates[j] = tmp;
+            }
+        }
+    }
+
+    for (int i = 0; i < n_candidates; i++) {
+        if (mycelium_load_file(ps, target_fp, candidates[i].path, candidates[i].step))
+            return 1;
+        if (i + 1 < n_candidates)
+            printf("[mycelium] trying older spore after rejecting %s\n", candidates[i].path);
+    }
+    return 0;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
