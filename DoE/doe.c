@@ -4351,18 +4351,27 @@ skip_logitdump:
 static int g_serve_port = 0; /* 0 = disabled */
 static int g_serve_public = 0; /* D-M4: 0 = bind 127.0.0.1 (default), 1 = 0.0.0.0 (--serve-public) */
 
-/* JSON-escape a string into buf. Returns bytes written (not counting NUL). */
+/* JSON-escape a string into buf. Returns bytes written (not counting NUL), or -1 on truncation/error. */
 static int json_escape(const char *src, char *buf, int bufsz) {
+    if (!src || !buf || bufsz <= 0) return -1;
     int p = 0;
-    for (; *src && p < bufsz - 2; src++) {
+    for (; *src; src++) {
+        const char *emit = src;
+        int emit_len = 1;
+        char esc[2];
         switch (*src) {
-        case '"':  if(p+2<bufsz){buf[p++]='\\';buf[p++]='"';}  break;
-        case '\\': if(p+2<bufsz){buf[p++]='\\';buf[p++]='\\';} break;
-        case '\n': if(p+2<bufsz){buf[p++]='\\';buf[p++]='n';}  break;
-        case '\r': if(p+2<bufsz){buf[p++]='\\';buf[p++]='r';}  break;
-        case '\t': if(p+2<bufsz){buf[p++]='\\';buf[p++]='t';}  break;
-        default:   buf[p++] = *src; break;
+        case '"':  esc[0] = '\\'; esc[1] = '"';  emit = esc; emit_len = 2; break;
+        case '\\': esc[0] = '\\'; esc[1] = '\\'; emit = esc; emit_len = 2; break;
+        case '\n': esc[0] = '\\'; esc[1] = 'n';  emit = esc; emit_len = 2; break;
+        case '\r': esc[0] = '\\'; esc[1] = 'r';  emit = esc; emit_len = 2; break;
+        case '\t': esc[0] = '\\'; esc[1] = 't';  emit = esc; emit_len = 2; break;
         }
+        if (p > bufsz - emit_len - 1) {
+            buf[0] = '\0';
+            return -1;
+        }
+        memcpy(buf + p, emit, (size_t)emit_len);
+        p += emit_len;
     }
     buf[p] = '\0';
     return p;
@@ -4445,7 +4454,7 @@ static void http_send(int fd, const char *data, int len) {
 }
 
 /* Send HTTP response header */
-static void http_send_header(int fd, int status, const char *content_type, int content_length) {
+static int http_send_header(int fd, int status, const char *content_type, int content_length) {
     char hdr[512];
     const char *status_text = status == 200 ? "OK" :
                               status == 404 ? "Not Found" :
@@ -4471,12 +4480,17 @@ static void http_send_header(int fd, int status, const char *content_type, int c
             "Connection: keep-alive\r\n\r\n",
             status, status_text, content_type);
     }
+    if (hlen < 0 || hlen >= (int)sizeof(hdr)) {
+        fprintf(stderr, "[serve] HTTP response header too large\n");
+        return 0;
+    }
     http_send(fd, hdr, hlen);
+    return 1;
 }
 
 static void http_send_text(int fd, int status, const char *msg) {
     int len = msg ? (int)strlen(msg) : 0;
-    http_send_header(fd, status, "text/plain; charset=utf-8", len);
+    if (!http_send_header(fd, status, "text/plain; charset=utf-8", len)) return;
     if (len > 0) http_send(fd, msg, len);
 }
 
@@ -4515,7 +4529,10 @@ static int http_serve_file(int fd, const char *filepath) {
         }
     }
     fclose(f);
-    http_send_header(fd, 200, "text/html; charset=utf-8", (int)sz);
+    if (!http_send_header(fd, 200, "text/html; charset=utf-8", (int)sz)) {
+        free(data);
+        return 1;
+    }
     if (sz > 0) http_send(fd, data, (int)sz);
     free(data);
     return 1;
@@ -4710,11 +4727,20 @@ static void http_stream_inference(int fd, GGUFIndex *ps, const char *user_msg, f
         /* Decode token to buffer */
         char tokbuf[256], escaped[512];
         token_decode_buf(ps, next, tokbuf, sizeof(tokbuf));
-        json_escape(tokbuf, escaped, sizeof(escaped));
+        if (json_escape(tokbuf, escaped, sizeof(escaped)) < 0) {
+            const char *err = "data: {\"error\":\"token escape overflow\"}\n\n";
+            http_send(fd, err, (int)strlen(err));
+            break;
+        }
 
         /* Send SSE event */
         char sse[1024];
         int slen = snprintf(sse, sizeof(sse), "data: {\"token\":\"%s\"}\n\n", escaped);
+        if (slen < 0 || slen >= (int)sizeof(sse)) {
+            const char *err = "data: {\"error\":\"token event too large\"}\n\n";
+            http_send(fd, err, (int)strlen(err));
+            break;
+        }
         int wr = (int)write(fd, sse, slen);
         if (wr <= 0) break; /* client disconnected */
 
@@ -4750,8 +4776,14 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
 
     /* Resolve HTML file paths relative to executable */
     char ui_path[512], vis_path[512];
-    snprintf(ui_path, sizeof(ui_path), "%sdoe_ui.html", exe_dir);
-    snprintf(vis_path, sizeof(vis_path), "%sdoe.html", exe_dir);
+    int ui_len = snprintf(ui_path, sizeof(ui_path), "%sdoe_ui.html", exe_dir);
+    int vis_len = snprintf(vis_path, sizeof(vis_path), "%sdoe.html", exe_dir);
+    if (ui_len < 0 || ui_len >= (int)sizeof(ui_path) ||
+        vis_len < 0 || vis_len >= (int)sizeof(vis_path)) {
+        fprintf(stderr, "[serve] static file path too long\n");
+        close(server_fd);
+        return;
+    }
 
     printf("[serve] parliament listening on http://%s:%d\n", g_serve_public ? "0.0.0.0" : "127.0.0.1", g_serve_port);
     printf("[serve]   /         → chat UI\n");
@@ -4799,20 +4831,22 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
             if (strcmp(path, "/") == 0 || strcmp(path, "/index.html") == 0) {
                 if (!http_serve_file(client, ui_path)) {
                     const char *msg = "doe_ui.html not found";
-                    http_send_header(client, 404, "text/plain", (int)strlen(msg));
-                    http_send(client, msg, (int)strlen(msg));
+                    http_send_text(client, 404, msg);
                 }
             } else if (strcmp(path, "/visual") == 0) {
                 if (!http_serve_file(client, vis_path)) {
                     const char *msg = "doe.html not found";
-                    http_send_header(client, 404, "text/plain", (int)strlen(msg));
-                    http_send(client, msg, (int)strlen(msg));
+                    http_send_text(client, 404, msg);
                 }
             } else if (strcmp(path, "/health") == 0) {
                 char body[512];
                 char host_path_json[512], host_arch_json[128];
-                json_escape(ps->host_path, host_path_json, sizeof(host_path_json));
-                json_escape(ps->host_arch, host_arch_json, sizeof(host_arch_json));
+                if (json_escape(ps->host_path, host_path_json, sizeof(host_path_json)) < 0 ||
+                    json_escape(ps->host_arch, host_arch_json, sizeof(host_arch_json)) < 0) {
+                    http_send_text(client, 500, "health response too large");
+                    close(client);
+                    continue;
+                }
                 int blen = snprintf(body, sizeof(body),
                     "{\"status\":\"ok\",\"model\":\"%s\",\"arch\":\"%s\","
                     "\"params\":\"%dM\",\"vocab\":%d,\"layers\":%d,"
@@ -4827,12 +4861,11 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
                     close(client);
                     continue;
                 }
-                http_send_header(client, 200, "application/json", blen);
-                http_send(client, body, blen);
+                if (http_send_header(client, 200, "application/json", blen))
+                    http_send(client, body, blen);
             } else {
                 const char *msg = "not found";
-                http_send_header(client, 404, "text/plain", (int)strlen(msg));
-                http_send(client, msg, (int)strlen(msg));
+                http_send_text(client, 404, msg);
             }
         } else if (strcmp(method, "POST") == 0 &&
                    (strcmp(path, "/chat/completions") == 0 || strcmp(path, "/v1/chat/completions") == 0)) {
@@ -4850,12 +4883,12 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
 
             if (user_msg_len < 0) {
                 const char *err = "{\"error\":\"invalid user message\"}";
-                http_send_header(client, 400, "application/json", (int)strlen(err));
-                http_send(client, err, (int)strlen(err));
+                if (http_send_header(client, 400, "application/json", (int)strlen(err)))
+                    http_send(client, err, (int)strlen(err));
             } else if (user_msg[0] == '\0') {
                 const char *err = "{\"error\":\"no user message\"}";
-                http_send_header(client, 400, "application/json", (int)strlen(err));
-                http_send(client, err, (int)strlen(err));
+                if (http_send_header(client, 400, "application/json", (int)strlen(err)))
+                    http_send(client, err, (int)strlen(err));
             } else {
                 float temp = json_get_float(body, "temperature", 0.0f);
                 float max_tok_f = json_get_float(body, "max_tokens", 256.0f);
@@ -4863,13 +4896,12 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
                 if (max_tok_f >= 1.0f) max_tok = max_tok_f > 512.0f ? 512 : (int)max_tok_f;
                 printf("[serve] inference: \"%.*s\" temp=%.2f max=%d\n",
                        (int)(strlen(user_msg) > 60 ? 60 : strlen(user_msg)), user_msg, temp, max_tok);
-                http_send_header(client, 200, "text/event-stream", -1);
-                http_stream_inference(client, ps, user_msg, temp, max_tok);
+                if (http_send_header(client, 200, "text/event-stream", -1))
+                    http_stream_inference(client, ps, user_msg, temp, max_tok);
             }
         } else {
             const char *msg = "method not allowed";
-            http_send_header(client, 400, "text/plain", (int)strlen(msg));
-            http_send(client, msg, (int)strlen(msg));
+            http_send_text(client, 400, msg);
         }
 
         close(client);
