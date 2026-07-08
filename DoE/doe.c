@@ -4444,13 +4444,16 @@ static int http_read_request(int fd, char *buf, int bufsz) {
 }
 
 /* Send full buffer over socket */
-static void http_send(int fd, const char *data, int len) {
+static int http_send(int fd, const char *data, int len) {
+    if (!data || len < 0) return 0;
     int sent = 0;
     while (sent < len) {
         int n = (int)write(fd, data + sent, len - sent);
-        if (n <= 0) break;
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return 0;
         sent += n;
     }
+    return 1;
 }
 
 /* Send HTTP response header */
@@ -4484,8 +4487,7 @@ static int http_send_header(int fd, int status, const char *content_type, int co
         fprintf(stderr, "[serve] HTTP response header too large\n");
         return 0;
     }
-    http_send(fd, hdr, hlen);
-    return 1;
+    return http_send(fd, hdr, hlen);
 }
 
 static void http_send_text(int fd, int status, const char *msg) {
@@ -4741,14 +4743,14 @@ static void http_stream_inference(int fd, GGUFIndex *ps, const char *user_msg, f
             http_send(fd, err, (int)strlen(err));
             break;
         }
-        int wr = (int)write(fd, sse, slen);
-        if (wr <= 0) break; /* client disconnected */
+        if (!http_send(fd, sse, slen)) break; /* client disconnected */
 
         prev = next;
     }
 
     /* Send done event */
-    write(fd, "data: {\"done\":true}\n\n", 21); /* D-L2: full 21 bytes incl. both \n */
+    static const char done_event[] = "data: {\"done\":true}\n\n";
+    http_send(fd, done_event, (int)sizeof(done_event) - 1); /* D-L2: full event incl. both \n */
     free_infer(&is);
 }
 
