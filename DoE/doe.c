@@ -4353,6 +4353,25 @@ static int json_escape(const char *src, char *buf, int bufsz) {
     return p;
 }
 
+static const char *http_header_value(const char *buf, int header_end, const char *name) {
+    int name_len = (int)strlen(name);
+    int line = 0;
+    while (line < header_end) {
+        int line_end = line;
+        while (line_end + 1 < header_end && !(buf[line_end] == '\r' && buf[line_end + 1] == '\n'))
+            line_end++;
+        if (line_end > line + name_len && buf[line + name_len] == ':' &&
+            strncasecmp(buf + line, name, (size_t)name_len) == 0) {
+            const char *v = buf + line + name_len + 1;
+            const char *end = buf + line_end;
+            while (v < end && (*v == ' ' || *v == '\t')) v++;
+            return v;
+        }
+        line = line_end + 2;
+    }
+    return NULL;
+}
+
 /* Read full HTTP request into buf, return total bytes. */
 static int http_read_request(int fd, char *buf, int bufsz) {
     int total = 0;
@@ -4360,6 +4379,7 @@ static int http_read_request(int fd, char *buf, int bufsz) {
     int header_end = -1;
     while (total < bufsz - 1) {
         int n = (int)read(fd, buf + total, bufsz - 1 - total);
+        if (n < 0 && errno == EINTR) continue;
         if (n <= 0) break;
         total += n;
         buf[total] = '\0';
@@ -4369,12 +4389,32 @@ static int http_read_request(int fd, char *buf, int bufsz) {
             if (hdr_end) {
                 header_end = (int)(hdr_end - buf) + 4;
                 /* Parse Content-Length */
-                char *cl = strcasestr(buf, "content-length:");
-                if (cl) content_length = atoi(cl + 15);
-                else content_length = 0;
+                const char *cl = http_header_value(buf, header_end, "content-length");
+                if (cl) {
+                    char *end = NULL;
+                    errno = 0;
+                    long v = strtol(cl, &end, 10);
+                    while (end && (*end == ' ' || *end == '\t')) end++;
+                    if (cl == end || errno || v < 0 || v > bufsz - header_end - 1 ||
+                        !end || (*end != '\r' && *end != '\n')) {
+                        fprintf(stderr, "[serve] invalid Content-Length\n");
+                        return -1;
+                    }
+                    content_length = (int)v;
+                } else {
+                    content_length = 0;
+                }
             }
         }
         if (header_end >= 0 && total >= header_end + content_length) break;
+    }
+    if (header_end < 0) {
+        fprintf(stderr, "[serve] HTTP headers exceed request buffer\n");
+        return -1;
+    }
+    if (total < header_end + content_length) {
+        fprintf(stderr, "[serve] HTTP body truncated\n");
+        return -1;
     }
     return total;
 }
@@ -4392,7 +4432,9 @@ static void http_send(int fd, const char *data, int len) {
 /* Send HTTP response header */
 static void http_send_header(int fd, int status, const char *content_type, int content_length) {
     char hdr[512];
-    const char *status_text = status == 200 ? "OK" : status == 404 ? "Not Found" : "Bad Request";
+    const char *status_text = status == 200 ? "OK" :
+                              status == 404 ? "Not Found" :
+                              status == 500 ? "Internal Server Error" : "Bad Request";
     int hlen;
     if (content_length >= 0) {
         hlen = snprintf(hdr, sizeof(hdr),
@@ -4417,6 +4459,12 @@ static void http_send_header(int fd, int status, const char *content_type, int c
     http_send(fd, hdr, hlen);
 }
 
+static void http_send_text(int fd, int status, const char *msg) {
+    int len = msg ? (int)strlen(msg) : 0;
+    http_send_header(fd, status, "text/plain; charset=utf-8", len);
+    if (len > 0) http_send(fd, msg, len);
+}
+
 /* Serve a static file (doe_ui.html, doe.html) */
 static int http_serve_file(int fd, const char *filepath) {
     FILE *f = fopen(filepath, "rb");
@@ -4424,13 +4472,15 @@ static int http_serve_file(int fd, const char *filepath) {
     if (fseek(f, 0, SEEK_END) != 0) {
         fprintf(stderr, "[serve] cannot seek static file: %s\n", filepath);
         fclose(f);
-        return 0;
+        http_send_text(fd, 500, "static file read failed");
+        return 1;
     }
     long sz = ftell(f);
     if (sz < 0 || sz > INT_MAX || fseek(f, 0, SEEK_SET) != 0) {
         fprintf(stderr, "[serve] invalid static file size for %s\n", filepath);
         fclose(f);
-        return 0;
+        http_send_text(fd, 500, "static file read failed");
+        return 1;
     }
     char *data = NULL;
     if (sz > 0) {
@@ -4438,13 +4488,15 @@ static int http_serve_file(int fd, const char *filepath) {
         if (!data) {
             fprintf(stderr, "[serve] allocation failed for static file %s (%ld bytes)\n", filepath, sz);
             fclose(f);
-            return 0;
+            http_send_text(fd, 500, "static file read failed");
+            return 1;
         }
         if (fread(data, 1, (size_t)sz, f) != (size_t)sz) {
             fprintf(stderr, "[serve] short read while serving static file: %s\n", filepath);
             free(data);
             fclose(f);
-            return 0;
+            http_send_text(fd, 500, "static file read failed");
+            return 1;
         }
     }
     fclose(f);
