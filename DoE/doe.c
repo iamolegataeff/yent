@@ -313,6 +313,8 @@ static FieldMLP   F_mlp;
 #define DARIO_MAX_COOC  32768
 #define DARIO_MAX_CTX   64
 #define DARIO_MAX_PROPH 16
+#define DARIO_COOC_CAP  1e6f
+#define DARIO_COOC_PRUNE_FLOOR 1e-3f
 
 /* Emotional chambers */
 enum { DCH_FEAR=0, DCH_LOVE, DCH_RAGE, DCH_VOID, DCH_FLOW, DCH_COMPLEX, DARIO_NUM_CH };
@@ -398,13 +400,63 @@ static float dario_cosine(const float *a, const float *b) {
     return dot / (sqrtf(na) * sqrtf(nb) + 1e-12f);
 }
 
+static float dario_cooc_clean_value(float v) {
+    if (!isfinite(v) || v < 0.0f) return 0.0f;
+    return v > DARIO_COOC_CAP ? DARIO_COOC_CAP : v;
+}
+
+static int dario_cooc_compact(float decay, float prune_floor) {
+    int w = 0, pruned = 0;
+    if (decay < 0.0f) decay = 0.0f;
+    if (decay > 1.0f) decay = 1.0f;
+    if (prune_floor < 0.0f) prune_floor = 0.0f;
+    for (int r = 0; r < DF.cooc_n; r++) {
+        float v = dario_cooc_clean_value(DF.cooc_val[r]) * decay;
+        if (DF.cooc_src[r] < 0 || DF.cooc_dst[r] < 0 || v < prune_floor) {
+            pruned++;
+            continue;
+        }
+        if (w != r) {
+            DF.cooc_src[w] = DF.cooc_src[r];
+            DF.cooc_dst[w] = DF.cooc_dst[r];
+        }
+        DF.cooc_val[w++] = v;
+    }
+    DF.cooc_n = w;
+    return pruned;
+}
+
+static int dario_cooc_weakest_index(void) {
+    if (DF.cooc_n <= 0) return -1;
+    int weakest = 0;
+    float weakest_v = dario_cooc_clean_value(DF.cooc_val[0]);
+    for (int i = 1; i < DF.cooc_n; i++) {
+        float v = dario_cooc_clean_value(DF.cooc_val[i]);
+        if (v < weakest_v) {
+            weakest = i;
+            weakest_v = v;
+        }
+    }
+    return weakest;
+}
+
 static void dario_cooc_update(int src, int dst, float delta) {
+    if (src < 0 || dst < 0 || !isfinite(delta) || delta <= 0.0f) return;
+    delta = dario_cooc_clean_value(delta);
     for (int i = 0; i < DF.cooc_n; i++)
         if (DF.cooc_src[i] == src && DF.cooc_dst[i] == dst) {
-            DF.cooc_val[i] += delta; return;
+            DF.cooc_val[i] = dario_cooc_clean_value(DF.cooc_val[i] + delta);
+            return;
         }
-    if (DF.cooc_n >= DARIO_MAX_COOC) return;
-    int i = DF.cooc_n++;
+    if (DF.cooc_n >= DARIO_MAX_COOC)
+        dario_cooc_compact(0.97f, DARIO_COOC_PRUNE_FLOOR);
+    int i = DF.cooc_n;
+    if (i >= DARIO_MAX_COOC) {
+        i = dario_cooc_weakest_index();
+        if (i < 0 || delta <= dario_cooc_clean_value(DF.cooc_val[i])) return;
+    } else {
+        DF.cooc_n++;
+    }
     DF.cooc_src[i] = src; DF.cooc_dst[i] = dst; DF.cooc_val[i] = delta;
 }
 
