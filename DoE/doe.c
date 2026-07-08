@@ -916,13 +916,11 @@ static void apply_field_to_logits(float *logits, int n) {
     int ctx_start = (DF.ctx_len > 8) ? DF.ctx_len - 8 : 0;
     float h_max = 0;
 
-    /* allocate scratch for H, F_p, A, T signals (on stack if n < 8192) */
+    /* H writes to concrete token IDs. F/A are slot-projected below, then scattered
+     * back to every real token ID that shares the slot. */
     float *H_sig = calloc(n, sizeof(float));
-    float *F_sig = calloc(n, sizeof(float));
-    float *A_sig = calloc(n, sizeof(float));
-    if (!H_sig || !F_sig || !A_sig) {
+    if (!H_sig) {
         fprintf(stderr, "[doe] Dario scratch allocation failed for vocab=%d; skipping field overlay\n", n);
-        free(H_sig); free(F_sig); free(A_sig);
         return;
     }
 
@@ -942,11 +940,15 @@ static void apply_field_to_logits(float *logits, int n) {
 
     /* ── F: Prophecy Fulfillment (unfulfilled predictions create pressure) ── */
     /* Semantic F/A channels are computed over the compact slot projection to keep
-     * per-token cost bounded; H above uses real token IDs because it writes to
-     * concrete logits. */
+     * per-token cost bounded, then scattered by token_id % DARIO_EMBED_SLOTS.
+     * This keeps high token IDs in the field instead of accidentally treating
+     * slot scores as only the first 2048 concrete vocabulary IDs. */
+    int slot_n = n < DARIO_EMBED_SLOTS ? n : DARIO_EMBED_SLOTS;
+    float F_slot[DARIO_EMBED_SLOTS] = {0};
+    float A_slot[DARIO_EMBED_SLOTS] = {0};
     float f_max = 0;
-    for (int i = 0; i < n && i < DARIO_EMBED_SLOTS; i++) {
-        float *te = dario_get_embed(i);
+    for (int slot = 0; slot < slot_n; slot++) {
+        float *te = dario_get_embed(slot);
         if (!te) continue;
         float score = 0;
         for (int p = 0; p < DF.prophecy_n; p++) {
@@ -959,21 +961,21 @@ static void apply_field_to_logits(float *logits, int n) {
             float debt = logf(1.0f + (float)pr->age);
             score += pr->strength * sim * debt;
         }
-        F_sig[i] = score;
+        F_slot[slot] = score;
     }
-    for (int i = 0; i < n; i++) if (F_sig[i] > f_max) f_max = F_sig[i];
-    if (f_max > 1e-6f) for (int i = 0; i < n; i++) F_sig[i] /= f_max;
+    for (int slot = 0; slot < slot_n; slot++) if (F_slot[slot] > f_max) f_max = F_slot[slot];
+    if (f_max > 1e-6f) for (int slot = 0; slot < slot_n; slot++) F_slot[slot] /= f_max;
 
     /* ── A: Destiny Attraction (EMA semantic direction) ── */
     if (DF.dest_magnitude > 1e-6f) {
         float a_max = 0;
-        for (int i = 0; i < n && i < DARIO_EMBED_SLOTS; i++) {
-            float *te = dario_get_embed(i);
-            if (te) A_sig[i] = dario_cosine(te, DF.destiny) * DF.dest_magnitude;
+        for (int slot = 0; slot < slot_n; slot++) {
+            float *te = dario_get_embed(slot);
+            if (te) A_slot[slot] = dario_cosine(te, DF.destiny) * DF.dest_magnitude;
         }
-        for (int i = 0; i < n; i++)
-            if (fabsf(A_sig[i]) > a_max) a_max = fabsf(A_sig[i]);
-        if (a_max > 1e-6f) for (int i = 0; i < n; i++) A_sig[i] /= a_max;
+        for (int slot = 0; slot < slot_n; slot++)
+            if (fabsf(A_slot[slot]) > a_max) a_max = fabsf(A_slot[slot]);
+        if (a_max > 1e-6f) for (int slot = 0; slot < slot_n; slot++) A_slot[slot] /= a_max;
     }
 
     /* ── Combine: THE DARIO EQUATION (additive overlay on transformer logits) ──
@@ -992,9 +994,10 @@ static void apply_field_to_logits(float *logits, int n) {
     float f_gated_sig = 1.0f / (1.0f + expf(-f_gate));
 
     for (int i = 0; i < n; i++) {
+        int slot = i % DARIO_EMBED_SLOTS;
         float h_term = eff_alpha * H_sig[i] * h_gated_sig;
-        float f_term = eff_beta  * F_sig[i] * f_gated_sig;
-        float a_term = eff_gamma * A_sig[i];
+        float f_term = eff_beta  * F_slot[slot] * f_gated_sig;
+        float a_term = eff_gamma * A_slot[slot];
         float t_term = (i < 50) ? t_boost * (1.0f - (float)i / 50.0f) : 0;
 
         logits[i] += g_field_gain * (h_term + f_term + a_term + t_term);
@@ -1003,7 +1006,7 @@ static void apply_field_to_logits(float *logits, int n) {
     /* tau_mod feeds into effective temperature (applied in field_step) */
     F.effective_temp *= DF.tau_mod;
 
-    free(H_sig); free(F_sig); free(A_sig);
+    free(H_sig);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
