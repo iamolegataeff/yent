@@ -4540,14 +4540,29 @@ static int json_get_last_user_message(const char *body, char *out, int outsz) {
     return json_get_string(last_user, "content", out, outsz);
 }
 
-static float json_get_float(const char *json, const char *key, float def) {
+static int json_get_number(const char *json, const char *key, float *out) {
     char needle[64];
     snprintf(needle, sizeof(needle), "\"%s\"", key);
     const char *p = strstr(json, needle);
-    if (!p) return def;
+    if (!p) return 0;
     p = strchr(p + strlen(needle), ':');
-    if (!p) return def;
-    return (float)atof(p + 1);
+    if (!p) return 0;
+    p++;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    errno = 0;
+    char *end = NULL;
+    float v = strtof(p, &end);
+    if (p == end || errno || !isfinite(v)) return 0;
+    while (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r') end++;
+    if (*end && *end != ',' && *end != '}' && *end != ']') return 0;
+    if (out) *out = v;
+    return 1;
+}
+
+static float json_get_float(const char *json, const char *key, float def) {
+    float v = def;
+    if (!json_get_number(json, key, &v)) return def;
+    return v;
 }
 
 /* Run inference and stream SSE tokens */
@@ -4811,9 +4826,9 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
                 http_send(client, err, (int)strlen(err));
             } else {
                 float temp = json_get_float(body, "temperature", 0.0f);
-                int max_tok = (int)json_get_float(body, "max_tokens", 256.0f);
-                if (max_tok < 1) max_tok = 256;
-                if (max_tok > 512) max_tok = 512;
+                float max_tok_f = json_get_float(body, "max_tokens", 256.0f);
+                int max_tok = 256;
+                if (max_tok_f >= 1.0f) max_tok = max_tok_f > 512.0f ? 512 : (int)max_tok_f;
                 printf("[serve] inference: \"%.*s\" temp=%.2f max=%d\n",
                        (int)(strlen(user_msg) > 60 ? 60 : strlen(user_msg)), user_msg, temp, max_tok);
                 http_send_header(client, 200, "text/event-stream", -1);
