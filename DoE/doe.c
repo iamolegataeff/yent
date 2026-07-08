@@ -994,7 +994,8 @@ static void apply_field_to_logits(float *logits, int n) {
     float f_gated_sig = 1.0f / (1.0f + expf(-f_gate));
 
     for (int i = 0; i < n; i++) {
-        int slot = i % DARIO_EMBED_SLOTS;
+        int slot = dario_embed_slot(i);
+        if (slot < 0) continue;
         float h_term = eff_alpha * H_sig[i] * h_gated_sig;
         float f_term = eff_beta  * F_slot[slot] * f_gated_sig;
         float a_term = eff_gamma * A_slot[slot];
