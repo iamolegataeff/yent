@@ -2786,32 +2786,45 @@ static void mycelium_save(GGUFIndex *ps, int step, float fitness) {
              (unsigned long long)ps->profile.fingerprint, step);
     FILE *f = fopen(path, "wb");
     if (!f) { printf("[mycelium] cannot write %s\n", path); return; }
+    #define SPORE_WRITE(ptr, size, count) do { \
+        if (fwrite((ptr), (size), (count), f) != (size_t)(count)) { \
+            printf("[mycelium] failed writing spore: %s\n", path); \
+            fclose(f); \
+            remove(path); \
+            return; \
+        } \
+    } while (0)
     /* header: fingerprint, step, fitness, n_layers, dim, rank */
     uint64_t fp = ps->profile.fingerprint;
-    fwrite(&fp, 8, 1, f);
-    fwrite(&step, 4, 1, f);
-    fwrite(&fitness, 4, 1, f);
+    SPORE_WRITE(&fp, 8, 1);
+    SPORE_WRITE(&step, 4, 1);
+    SPORE_WRITE(&fitness, 4, 1);
     int nl = ps->n_field_layers, dim = ps->host_dim, rank = ps->lora_rank;
-    fwrite(&nl, 4, 1, f); fwrite(&dim, 4, 1, f); fwrite(&rank, 4, 1, f);
+    SPORE_WRITE(&nl, 4, 1); SPORE_WRITE(&dim, 4, 1); SPORE_WRITE(&rank, 4, 1);
     /* per layer: n_alive, then per expert: alive, vitality, frequency, A, B */
     for (int l = 0; l < nl; l++) {
         FieldLayer *fl = &ps->field_layers[l];
-        fwrite(&fl->n_alive, 4, 1, f);
+        SPORE_WRITE(&fl->n_alive, 4, 1);
         /* parliament vote weights */
-        fwrite(fl->parliament.w_vote, sizeof(float), MAX_EXPERTS * dim, f);
-        fwrite(&fl->parliament.consensus, 4, 1, f);
+        SPORE_WRITE(fl->parliament.w_vote, sizeof(float), MAX_EXPERTS * dim);
+        SPORE_WRITE(&fl->parliament.consensus, 4, 1);
         for (int e = 0; e < MAX_EXPERTS; e++) {
             LoraExpert *ex = &fl->experts[e];
-            fwrite(&ex->alive, 4, 1, f);
+            SPORE_WRITE(&ex->alive, 4, 1);
             if (ex->alive) {
-                fwrite(&ex->vitality, 4, 1, f);
-                fwrite(&ex->frequency, 4, 1, f);
-                fwrite(ex->lora_A, sizeof(float), dim * rank, f);
-                fwrite(ex->lora_B, sizeof(float), rank * dim, f);
+                SPORE_WRITE(&ex->vitality, 4, 1);
+                SPORE_WRITE(&ex->frequency, 4, 1);
+                SPORE_WRITE(ex->lora_A, sizeof(float), dim * rank);
+                SPORE_WRITE(ex->lora_B, sizeof(float), rank * dim);
             }
         }
     }
-    fclose(f);
+    #undef SPORE_WRITE
+    if (fclose(f) != 0) {
+        printf("[mycelium] failed closing spore: %s\n", path);
+        remove(path);
+        return;
+    }
     printf("[mycelium] spore saved: %s (fitness=%.3f)\n", path, fitness);
 }
 
