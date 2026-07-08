@@ -4732,11 +4732,20 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
 
         char req[8192];
         int reqlen = http_read_request(client, req, sizeof(req));
-        if (reqlen <= 0) { close(client); continue; }
+        if (reqlen < 0) {
+            http_send_text(client, 400, "bad request");
+            close(client);
+            continue;
+        }
+        if (reqlen == 0) { close(client); continue; }
 
         /* Parse method and path */
         char method[8] = "", path[256] = "";
-        sscanf(req, "%7s %255s", method, path);
+        if (sscanf(req, "%7s %255s", method, path) != 2) {
+            http_send_text(client, 400, "bad request");
+            close(client);
+            continue;
+        }
 
         /* Handle CORS preflight */
         if (strcmp(method, "OPTIONS") == 0) {
@@ -4786,7 +4795,11 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
                    (strcmp(path, "/chat/completions") == 0 || strcmp(path, "/v1/chat/completions") == 0)) {
             /* Find body after \r\n\r\n */
             char *body = strstr(req, "\r\n\r\n");
-            if (!body) { close(client); continue; }
+            if (!body) {
+                http_send_text(client, 400, "bad request");
+                close(client);
+                continue;
+            }
             body += 4;
 
             char user_msg[2048] = "";
