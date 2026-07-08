@@ -315,6 +315,7 @@ static FieldMLP   F_mlp;
 #define DARIO_MAX_PROPH 16
 #define DARIO_COOC_CAP  1e6f
 #define DARIO_COOC_PRUNE_FLOOR 1e-3f
+#define DARIO_COOC_COMPACT_PERIOD 256
 
 /* Emotional chambers */
 enum { DCH_FEAR=0, DCH_LOVE, DCH_RAGE, DCH_VOID, DCH_FLOW, DCH_COMPLEX, DARIO_NUM_CH };
@@ -329,6 +330,7 @@ typedef struct {
     int   cooc_dst[DARIO_MAX_COOC];
     float cooc_val[DARIO_MAX_COOC];
     int   cooc_n;
+    int   cooc_last_compact_step;
 
     /* Context window (recent token IDs for Hebbian lookup) */
     int   context[DARIO_MAX_CTX];
@@ -440,6 +442,11 @@ static int dario_cooc_weakest_index(void) {
     return weakest;
 }
 
+static int dario_cooc_compact_due(void) {
+    int elapsed = DF.dstep - DF.cooc_last_compact_step;
+    return elapsed < 0 || elapsed >= DARIO_COOC_COMPACT_PERIOD;
+}
+
 static void dario_cooc_update(int src, int dst, float delta) {
     if (src < 0 || dst < 0 || !isfinite(delta) || delta <= 0.0f) return;
     delta = dario_cooc_clean_value(delta);
@@ -448,8 +455,10 @@ static void dario_cooc_update(int src, int dst, float delta) {
             DF.cooc_val[i] = dario_cooc_clean_value(DF.cooc_val[i] + delta);
             return;
         }
-    if (DF.cooc_n >= DARIO_MAX_COOC)
+    if (DF.cooc_n >= DARIO_MAX_COOC && dario_cooc_compact_due()) {
         dario_cooc_compact(0.97f, DARIO_COOC_PRUNE_FLOOR);
+        DF.cooc_last_compact_step = DF.dstep;
+    }
     int i = DF.cooc_n;
     if (i >= DARIO_MAX_COOC) {
         i = dario_cooc_weakest_index();
@@ -492,6 +501,7 @@ static void dario_field_init(void) {
     DF.beta_mod = 1.0f;
     DF.gamma_mod = 1.0f;
     DF.tau_mod = 1.0f;
+    DF.cooc_last_compact_step = -DARIO_COOC_COMPACT_PERIOD;
 }
 
 /* ── Emotional chambers update (Kuramoto-coupled somatic markers) ── */
