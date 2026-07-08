@@ -4508,14 +4508,18 @@ static int http_serve_file(int fd, const char *filepath) {
 
 /* Extract JSON string value for a key from body. Simple parser. */
 static int json_get_string(const char *json, const char *key, char *out, int outsz) {
+    if (!json || !key || !out || outsz <= 0) return -1;
+    out[0] = '\0';
     char needle[64];
-    snprintf(needle, sizeof(needle), "\"%s\"", key);
+    int nneedle = snprintf(needle, sizeof(needle), "\"%s\"", key);
+    if (nneedle < 0 || nneedle >= (int)sizeof(needle)) return -1;
     const char *p = strstr(json, needle);
     if (!p) return 0;
     p = strchr(p + strlen(needle), ':');
-    if (!p) return 0;
-    while (*p && (*p == ':' || *p == ' ' || *p == '\t')) p++;
-    if (*p != '"') return 0;
+    if (!p) return -1;
+    p++;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    if (*p != '"') return -1;
     p++;
     int i = 0;
     while (*p && *p != '"' && i < outsz - 1) {
@@ -4523,6 +4527,7 @@ static int json_get_string(const char *json, const char *key, char *out, int out
         out[i++] = *p++;
     }
     out[i] = '\0';
+    if (*p != '"') return -1;
     return i;
 }
 
@@ -4818,9 +4823,13 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
             body += 4;
 
             char user_msg[2048] = "";
-            json_get_last_user_message(body, user_msg, sizeof(user_msg));
+            int user_msg_len = json_get_last_user_message(body, user_msg, sizeof(user_msg));
 
-            if (user_msg[0] == '\0') {
+            if (user_msg_len < 0) {
+                const char *err = "{\"error\":\"invalid user message\"}";
+                http_send_header(client, 400, "application/json", (int)strlen(err));
+                http_send(client, err, (int)strlen(err));
+            } else if (user_msg[0] == '\0') {
                 const char *err = "{\"error\":\"no user message\"}";
                 http_send_header(client, 400, "application/json", (int)strlen(err));
                 http_send(client, err, (int)strlen(err));
