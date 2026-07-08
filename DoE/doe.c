@@ -1963,6 +1963,28 @@ static int field_recount_alive(FieldLayer *fl) {
     return n;
 }
 
+static float sanitize_expert_vitality(float v, int layer, int expert) {
+    if (!isfinite(v)) {
+        printf("[mycelium] invalid vitality in spore L%d e%d; resetting to 0.5\n", layer, expert);
+        return 0.5f;
+    }
+    if (v < 0.0f) return 0.0f;
+    if (v > 1.0f) return 1.0f;
+    return v;
+}
+
+static float sanitize_expert_frequency(float f, int layer, int expert) {
+    const float tau = 6.2831853f;
+    if (!isfinite(f)) {
+        printf("[mycelium] invalid frequency in spore L%d e%d; resetting\n", layer, expert);
+        return tau * (float)expert / (float)MAX_EXPERTS;
+    }
+    f = fmodf(f, tau);
+    if (!isfinite(f)) return tau * (float)expert / (float)MAX_EXPERTS;
+    if (f < 0.0f) f += tau;
+    return f;
+}
+
 #ifdef USE_METAL
 /* Parliament-on-GPU step 1 — pack the (inference-frozen) per-layer vote rows +
  * expert LoRA matrices into one contiguous, page-aligned arena and register it
@@ -2966,10 +2988,16 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
         for (int e = 0; e < MAX_EXPERTS; e++) {
             LoraExpert *ex = &fl->experts[e];
             int alive; SPORE_READ(&alive, 4, 1);
-            if (alive) {
+            int alive_flag = alive != 0;
+            if (alive != 0 && alive != 1)
+                printf("[mycelium] non-canonical alive flag in spore layer %d expert %d (%d); normalizing\n",
+                       l, e, alive);
+            if (alive_flag) {
                 float vitality, frequency;
                 SPORE_READ(&vitality, 4, 1);
                 SPORE_READ(&frequency, 4, 1);
+                vitality = sanitize_expert_vitality(vitality, l, e);
+                frequency = sanitize_expert_frequency(frequency, l, e);
                 if (!ex->alive) {
                     if (!init_lora_expert(ex, dim, rank, frequency)) {
                         fclose(f);
@@ -2981,6 +3009,10 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
                 ex->frequency = frequency;
                 SPORE_READ(ex->lora_A, sizeof(float), dim * rank);
                 SPORE_READ(ex->lora_B, sizeof(float), rank * dim);
+                if (lora_poisoned(ex->lora_A, ex->lora_B, dim * rank)) {
+                    printf("[mycelium] poisoned expert payload in spore L%d e%d; dropping expert\n", l, e);
+                    free_lora_expert(ex);
+                }
             } else if (ex->alive) {
                 free_lora_expert(ex);
             }
