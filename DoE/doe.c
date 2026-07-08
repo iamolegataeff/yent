@@ -2876,15 +2876,25 @@ static void mycelium_save(GGUFIndex *ps, int step, float fitness) {
             }
     }
     char path[256];
-    snprintf(path, 256, "%s/spore_%016llx_s%d.bin", MYCELIUM_DIR,
-             (unsigned long long)ps->profile.fingerprint, step);
-    FILE *f = fopen(path, "wb");
-    if (!f) { printf("[mycelium] cannot write %s\n", path); return; }
+    int pn = snprintf(path, sizeof(path), "%s/spore_%016llx_s%d.bin", MYCELIUM_DIR,
+                      (unsigned long long)ps->profile.fingerprint, step);
+    if (pn < 0 || pn >= (int)sizeof(path)) {
+        printf("[mycelium] spore path too long\n");
+        return;
+    }
+    char tmp_path[320];
+    int tn = snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+    if (tn < 0 || tn >= (int)sizeof(tmp_path)) {
+        printf("[mycelium] temp spore path too long: %s\n", path);
+        return;
+    }
+    FILE *f = fopen(tmp_path, "wb");
+    if (!f) { printf("[mycelium] cannot write %s\n", tmp_path); return; }
     #define SPORE_WRITE(ptr, size, count) do { \
         if (fwrite((ptr), (size), (count), f) != (size_t)(count)) { \
-            printf("[mycelium] failed writing spore: %s\n", path); \
+            printf("[mycelium] failed writing spore: %s\n", tmp_path); \
             fclose(f); \
-            remove(path); \
+            remove(tmp_path); \
             return; \
         } \
     } while (0)
@@ -2915,8 +2925,13 @@ static void mycelium_save(GGUFIndex *ps, int step, float fitness) {
     }
     #undef SPORE_WRITE
     if (fclose(f) != 0) {
-        printf("[mycelium] failed closing spore: %s\n", path);
-        remove(path);
+        printf("[mycelium] failed closing spore: %s\n", tmp_path);
+        remove(tmp_path);
+        return;
+    }
+    if (rename(tmp_path, path) != 0) {
+        printf("[mycelium] failed publishing spore %s -> %s\n", tmp_path, path);
+        remove(tmp_path);
         return;
     }
     printf("[mycelium] spore saved: %s (fitness=%.3f)\n", path, fitness);
