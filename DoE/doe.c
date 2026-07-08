@@ -3119,10 +3119,12 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
                 return 0;
             }
             int new_cap = cap_candidates ? cap_candidates * 2 : 16;
+            errno = 0;
             LoraSpore *grown = realloc(candidates, (size_t)new_cap * sizeof(*candidates));
             if (!grown) {
-                printf("[mycelium] cannot allocate spore candidate list (%d entries): %s\n",
-                       new_cap, strerror(errno));
+                int saved_errno = errno;
+                printf("[mycelium] cannot allocate spore candidate list (%d entries)%s%s\n",
+                       new_cap, saved_errno ? ": " : "", saved_errno ? strerror(saved_errno) : "");
                 closedir(dir);
                 free(candidates);
                 return 0;
