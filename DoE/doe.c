@@ -1963,6 +1963,17 @@ static int field_recount_alive(FieldLayer *fl) {
     return n;
 }
 
+static void field_release_resources(FieldLayer *fl) {
+    if (!fl) return;
+    int host_layer_idx = fl->host_layer_idx;
+    free(fl->parliament.w_vote);
+    for (int e = 0; e < MAX_EXPERTS; e++)
+        if (fl->experts[e].lora_A || fl->experts[e].lora_B)
+            free_lora_expert(&fl->experts[e]);
+    memset(fl, 0, sizeof(*fl));
+    fl->host_layer_idx = host_layer_idx;
+}
+
 static float sanitize_expert_vitality(float v, int layer, int expert) {
     if (!isfinite(v)) {
         printf("[mycelium] invalid vitality in spore L%d e%d; resetting to 0.5\n", layer, expert);
@@ -2955,15 +2966,17 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
 
     FILE *f = fopen(best_path, "rb");
     if (!f) return 0;
+    FieldLayer tmp_layers[MAX_LAYERS];
+    memset(tmp_layers, 0, sizeof(tmp_layers));
+    int loaded = 0;
     #define SPORE_READ(ptr, size, count) do { \
         if (fread((ptr), (size), (count), f) != (size_t)(count)) { \
             printf("[mycelium] truncated spore: %s\n", best_path); \
-            fclose(f); \
-            return 0; \
+            goto done; \
         } \
     } while (0)
     uint64_t fp; SPORE_READ(&fp, 8, 1);
-    if (fp != target_fp) { fclose(f); return 0; }
+    if (fp != target_fp) goto done;
     int step; float fitness;
     SPORE_READ(&step, 4, 1); SPORE_READ(&fitness, 4, 1);
     int nl, dim, rank;
@@ -2971,11 +2984,16 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
     if (nl != ps->n_field_layers || dim != ps->host_dim || rank != ps->lora_rank) {
         printf("[mycelium] spore mismatch (layers=%d/%d dim=%d/%d rank=%d/%d)\n",
                nl, ps->n_field_layers, dim, ps->host_dim, rank, ps->lora_rank);
-        fclose(f); return 0;
+        goto done;
     }
     for (int l = 0; l < nl; l++) {
-        FieldLayer *fl = &ps->field_layers[l];
-        if (!fl->parliament.w_vote) { fclose(f); return 0; }
+        FieldLayer *fl = &tmp_layers[l];
+        fl->host_layer_idx = ps->field_layers[l].host_layer_idx;
+        fl->parliament.w_vote = malloc((size_t)MAX_EXPERTS * dim * sizeof(float));
+        if (!fl->parliament.w_vote) {
+            printf("[mycelium] cannot allocate spore vote rows for layer %d\n", l);
+            goto done;
+        }
         int saved_alive = 0;
         SPORE_READ(&saved_alive, 4, 1);
         SPORE_READ(fl->parliament.w_vote, sizeof(float), MAX_EXPERTS * dim);
@@ -2988,11 +3006,12 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
         for (int e = 0; e < MAX_EXPERTS; e++) {
             LoraExpert *ex = &fl->experts[e];
             int alive; SPORE_READ(&alive, 4, 1);
-            int alive_flag = alive != 0;
-            if (alive != 0 && alive != 1)
-                printf("[mycelium] non-canonical alive flag in spore layer %d expert %d (%d); normalizing\n",
+            if (alive != 0 && alive != 1) {
+                printf("[mycelium] non-canonical alive flag in spore layer %d expert %d (%d); refusing load\n",
                        l, e, alive);
-            if (alive_flag) {
+                goto done;
+            }
+            if (alive) {
                 float vitality, frequency;
                 SPORE_READ(&vitality, 4, 1);
                 SPORE_READ(&frequency, 4, 1);
@@ -3000,8 +3019,7 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
                 frequency = sanitize_expert_frequency(frequency, l, e);
                 if (!ex->alive) {
                     if (!init_lora_expert(ex, dim, rank, frequency)) {
-                        fclose(f);
-                        return 0;
+                        goto done;
                     }
                 }
                 ex->alive = 1;
@@ -3022,11 +3040,31 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
             printf("[mycelium] spore alive count mismatch layer %d (%d header, %d flags); using flags\n",
                    l, saved_alive, actual_alive);
         }
+        if (actual_alive < MIN_EXPERTS) {
+            printf("[mycelium] spore layer %d has only %d alive experts after validation; refusing load\n",
+                   l, actual_alive);
+            goto done;
+        }
     }
-    #undef SPORE_READ
-    fclose(f);
+    if (fclose(f) != 0) {
+        f = NULL;
+        printf("[mycelium] failed closing spore after read: %s\n", best_path);
+        goto done;
+    }
+    f = NULL;
+    for (int l = 0; l < nl; l++) {
+        field_release_resources(&ps->field_layers[l]);
+        ps->field_layers[l] = tmp_layers[l];
+        memset(&tmp_layers[l], 0, sizeof(tmp_layers[l]));
+    }
     printf("[mycelium] spore loaded: %s (step=%d fitness=%.3f)\n", best_path, step, fitness);
-    return 1;
+    loaded = 1;
+done:
+    #undef SPORE_READ
+    if (f) fclose(f);
+    for (int l = 0; l < MAX_LAYERS; l++)
+        field_release_resources(&tmp_layers[l]);
+    return loaded;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
