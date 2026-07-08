@@ -2815,10 +2815,25 @@ static void mycelium_save(GGUFIndex *ps, int step, float fitness) {
     printf("[mycelium] spore saved: %s (fitness=%.3f)\n", path, fitness);
 }
 
+static int mycelium_spore_step(const char *name, uint64_t target_fp, int *out_step) {
+    if (!name || !out_step) return 0;
+    char prefix[64];
+    int plen_i = snprintf(prefix, sizeof(prefix), "spore_%016llx_s", (unsigned long long)target_fp);
+    if (plen_i < 0 || plen_i >= (int)sizeof(prefix)) return 0;
+    size_t plen = (size_t)plen_i;
+    if (strncmp(name, prefix, plen) != 0) return 0;
+    const char *step_s = name + plen;
+    if (*step_s == '\0') return 0;
+    errno = 0;
+    char *end = NULL;
+    long step = strtol(step_s, &end, 10);
+    if (end == step_s || errno || step < 0 || step > INT_MAX) return 0;
+    if (strcmp(end, ".bin") != 0) return 0;
+    *out_step = (int)step;
+    return 1;
+}
+
 static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
-    /* scan directory for best matching spore */
-    char pattern[256];
-    snprintf(pattern, 256, "%s/spore_%016llx_*.bin", MYCELIUM_DIR, (unsigned long long)target_fp);
     /* simple scan: find newest (highest step) spore for this fingerprint */
     char best_path[256] = {0};
     int best_step = -1;
@@ -2828,16 +2843,15 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
     while (fgets(line, sizeof(line), p)) {
         int len = strlen(line);
         while (len > 0 && (line[len-1]=='\n'||line[len-1]=='\r')) line[--len] = '\0';
-        /* match fingerprint */
-        char want[32]; snprintf(want, 32, "spore_%016llx", (unsigned long long)target_fp);
-        if (!strstr(line, want)) continue;
-        /* extract step from filename */
-        char *sp = strstr(line, "_s");
-        if (!sp) continue;
-        int s = atoi(sp+2);
+        int s = -1;
+        if (!mycelium_spore_step(line, target_fp, &s)) continue;
         if (s > best_step) {
+            int npath = snprintf(best_path, sizeof(best_path), "%s/%s", MYCELIUM_DIR, line);
+            if (npath < 0 || npath >= (int)sizeof(best_path)) {
+                printf("[mycelium] spore path too long, skipping: %s\n", line);
+                continue;
+            }
             best_step = s;
-            snprintf(best_path, 256, "%s/%s", MYCELIUM_DIR, line);
         }
     }
     pclose(p);
