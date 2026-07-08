@@ -1841,6 +1841,63 @@ static int gguf_sniff(const char *path, DiscoveredGGUF *out) {
     return (out->arch[0] != '\0' && out->dim > 0);
 }
 
+static int env_path_has_exec(const char *name) {
+    if (!name || !*name) return 0;
+    if (strchr(name, '/')) return access(name, X_OK) == 0;
+    const char *path = getenv("PATH");
+    if (!path || !*path) path = "/bin:/usr/bin:/usr/local/bin:/opt/homebrew/bin";
+    size_t name_len = strlen(name);
+    const char *p = path;
+    while (p && *p) {
+        const char *colon = strchr(p, ':');
+        size_t dir_len = colon ? (size_t)(colon - p) : strlen(p);
+        char full[512];
+        int ok = 0;
+        if (dir_len == 0) {
+            ok = snprintf(full, sizeof(full), "./%s", name);
+        } else if (dir_len + 1 + name_len < sizeof(full)) {
+            memcpy(full, p, dir_len);
+            full[dir_len] = '/';
+            memcpy(full + dir_len + 1, name, name_len + 1);
+            ok = (int)(dir_len + 1 + name_len);
+        }
+        if (ok > 0 && ok < (int)sizeof(full) && access(full, X_OK) == 0) return 1;
+        p = colon ? colon + 1 : NULL;
+    }
+    return 0;
+}
+
+static int env_has_suffix(const char *s, const char *suffix) {
+    if (!s || !suffix) return 0;
+    size_t slen = strlen(s), tlen = strlen(suffix);
+    return slen >= tlen && strcmp(s + slen - tlen, suffix) == 0;
+}
+
+static void env_scan_ggufs(Environment *env, const char *dir_path, int depth_remaining) {
+    if (!env || !dir_path || depth_remaining <= 0 || env->n_ggufs >= 32) return;
+    DIR *dir = opendir(dir_path);
+    if (!dir) return;
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL && env->n_ggufs < 32) {
+        const char *name = ent->d_name;
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
+        char path[256];
+        int npath = snprintf(path, sizeof(path), "%s/%s", dir_path, name);
+        if (npath < 0 || npath >= (int)sizeof(path)) continue;
+        if (env_has_suffix(name, ".gguf")) {
+            DiscoveredGGUF dg;
+            if (gguf_sniff(path, &dg)) env->ggufs[env->n_ggufs++] = dg;
+            continue;
+        }
+        if (depth_remaining > 1) {
+            struct stat st;
+            if (lstat(path, &st) == 0 && S_ISDIR(st.st_mode))
+                env_scan_ggufs(env, path, depth_remaining - 1);
+        }
+    }
+    closedir(dir);
+}
+
 static void env_scan(Environment *env, const char *self_src) {
     memset(env, 0, sizeof(Environment));
     snprintf(env->self_path, 256, "%s", self_src);
@@ -1853,20 +1910,9 @@ static void env_scan(Environment *env, const char *self_src) {
     sysctlbyname("hw.memsize", &mem, &len, NULL, 0); env->mem_available = mem;
     struct statfs sf; if (statfs(".", &sf) == 0) env->disk_free = (int64_t)sf.f_bavail * sf.f_bsize;
 #endif
-    env->has_compiler = (system("which cc >/dev/null 2>&1") == 0);
-    env->has_curl = (system("which curl >/dev/null 2>&1") == 0);
-    FILE *p = popen("find . -name '*.gguf' -maxdepth 3 2>/dev/null", "r");
-    if (p) {
-        char line[256];
-        while (fgets(line, sizeof(line), p) && env->n_ggufs < 32) {
-            int len = strlen(line);
-            while (len > 0 && (line[len-1]=='\n' || line[len-1]=='\r')) line[--len] = '\0';
-            if (len == 0) continue;
-            DiscoveredGGUF dg;
-            if (gguf_sniff(line, &dg)) env->ggufs[env->n_ggufs++] = dg;
-        }
-        pclose(p);
-    }
+    env->has_compiler = env_path_has_exec("cc");
+    env->has_curl = env_path_has_exec("curl");
+    env_scan_ggufs(env, ".", 3);
     printf("[env] cpu=%d mem=%.1fGB disk=%.1fGB compiler=%s curl=%s ggufs=%d\n",
            env->cpu_count, (float)env->mem_available/(1024*1024*1024),
            (float)env->disk_free/(1024*1024*1024),
