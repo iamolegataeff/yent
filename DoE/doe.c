@@ -2824,10 +2824,11 @@ static int mycelium_spore_step(const char *name, uint64_t target_fp, int *out_st
     if (strncmp(name, prefix, plen) != 0) return 0;
     const char *step_s = name + plen;
     if (*step_s == '\0') return 0;
+    if (*step_s < '0' || *step_s > '9') return 0;
     errno = 0;
     char *end = NULL;
     long step = strtol(step_s, &end, 10);
-    if (end == step_s || errno || step < 0 || step > INT_MAX) return 0;
+    if (end == step_s || errno != 0 || step < 0 || step > INT_MAX) return 0;
     if (strcmp(end, ".bin") != 0) return 0;
     *out_step = (int)step;
     return 1;
