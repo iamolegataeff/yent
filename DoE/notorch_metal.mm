@@ -736,7 +736,9 @@ kernel void parliament_elect(
     float cold = cons[layer];
     if (!isfinite(cold) || cold < 0.0f || cold > 1.0f) cold = 0.5f;
     float c = 0.9f * cold + 0.1f * cnew;
-    if (!isfinite(c) || c < 0.0f || c > 1.0f) c = 0.5f;
+    if (!isfinite(c)) c = 0.5f;
+    else if (c < 0.0f) c = 0.0f;
+    else if (c > 1.0f) c = 1.0f;
     cons[layer] = c;
     int k = (int)((float)n_alive * (1.0f - c));
     if (k < (int)min_e) k = (int)min_e;          /* CPU: if(k<2)k=2; MIN_EXPERTS==2 */
