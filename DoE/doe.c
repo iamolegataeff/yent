@@ -4861,6 +4861,40 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
     }
 }
 
+static int doe_parse_long_arg(const char *flag, const char *value, long *out) {
+    if (!value || !out) {
+        fprintf(stderr, "[doe] missing %s value\n", flag ? flag : "argument");
+        return 0;
+    }
+    errno = 0;
+    char *end = NULL;
+    long v = strtol(value, &end, 10);
+    while (end && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) end++;
+    if (end == value || errno || !end || *end != '\0') {
+        fprintf(stderr, "[doe] invalid %s value: %s\n", flag ? flag : "argument", value);
+        return 0;
+    }
+    *out = v;
+    return 1;
+}
+
+static int doe_parse_float_arg(const char *flag, const char *value, float *out) {
+    if (!value || !out) {
+        fprintf(stderr, "[doe] missing %s value\n", flag ? flag : "argument");
+        return 0;
+    }
+    errno = 0;
+    char *end = NULL;
+    float v = strtof(value, &end);
+    while (end && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) end++;
+    if (end == value || errno || !end || *end != '\0' || !isfinite(v)) {
+        fprintf(stderr, "[doe] invalid %s value: %s\n", flag ? flag : "argument", value);
+        return 0;
+    }
+    *out = v;
+    return 1;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════════
  * MAIN — the field manifests.
  * ═══════════════════════════════════════════════════════════════════════════════ */
@@ -4873,20 +4907,57 @@ int main(int argc, char **argv) {
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--model") == 0 && i+1 < argc) snprintf(gguf_path, 256, "%s", argv[++i]);
-        else if (strcmp(argv[i], "--threads") == 0 && i+1 < argc) { g_n_threads = atoi(argv[++i]); if (g_n_threads < 1) g_n_threads = 1; }
-        else if (strcmp(argv[i], "--rep-penalty") == 0 && i+1 < argc) { g_rep_penalty = atof(argv[++i]); if (g_rep_penalty <= 0.0f) g_rep_penalty = 1.0f; }
-        else if (strcmp(argv[i], "--field-gain") == 0 && i+1 < argc) { g_field_gain = atof(argv[++i]); if (g_field_gain < 0.0f) g_field_gain = 0.0f; }
-        else if (strcmp(argv[i], "--train") == 0 && i+1 < argc) { g_train = atoi(argv[++i]) ? 1 : 0; }
-        else if (strcmp(argv[i], "--max-new") == 0 && i+1 < argc) { g_gen_max_new = atoi(argv[++i]); if (g_gen_max_new < 1) g_gen_max_new = 1; if (g_gen_max_new > 512) g_gen_max_new = 512; }
-        else if (strcmp(argv[i], "--top-k") == 0 && i+1 < argc) { g_gen_top_k = atoi(argv[++i]); if (g_gen_top_k < 0) g_gen_top_k = 0; }
-        else if (strcmp(argv[i], "--temp") == 0 && i+1 < argc) { g_gen_temp_override = atof(argv[++i]); if (g_gen_temp_override < 0.0f) g_gen_temp_override = -1.0f; }
+        else if (strcmp(argv[i], "--threads") == 0 && i+1 < argc) {
+            long v; if (!doe_parse_long_arg("--threads", argv[++i], &v)) return 1;
+            if (v < 1) v = 1;
+            if (v > 32) v = 32;
+            g_n_threads = (int)v;
+        }
+        else if (strcmp(argv[i], "--rep-penalty") == 0 && i+1 < argc) {
+            float v; if (!doe_parse_float_arg("--rep-penalty", argv[++i], &v)) return 1;
+            g_rep_penalty = v;
+            if (g_rep_penalty <= 0.0f) g_rep_penalty = 1.0f;
+        }
+        else if (strcmp(argv[i], "--field-gain") == 0 && i+1 < argc) {
+            float v; if (!doe_parse_float_arg("--field-gain", argv[++i], &v)) return 1;
+            g_field_gain = v;
+            if (g_field_gain < 0.0f) g_field_gain = 0.0f;
+        }
+        else if (strcmp(argv[i], "--train") == 0 && i+1 < argc) {
+            long v; if (!doe_parse_long_arg("--train", argv[++i], &v)) return 1;
+            g_train = v ? 1 : 0;
+        }
+        else if (strcmp(argv[i], "--max-new") == 0 && i+1 < argc) {
+            long v; if (!doe_parse_long_arg("--max-new", argv[++i], &v)) return 1;
+            if (v < 1) v = 1;
+            if (v > 512) v = 512;
+            g_gen_max_new = (int)v;
+        }
+        else if (strcmp(argv[i], "--top-k") == 0 && i+1 < argc) {
+            long v; if (!doe_parse_long_arg("--top-k", argv[++i], &v)) return 1;
+            if (v < 0) v = 0;
+            if (v > INT_MAX) v = INT_MAX;
+            g_gen_top_k = (int)v;
+        }
+        else if (strcmp(argv[i], "--temp") == 0 && i+1 < argc) {
+            float v; if (!doe_parse_float_arg("--temp", argv[++i], &v)) return 1;
+            g_gen_temp_override = v;
+            if (g_gen_temp_override < 0.0f) g_gen_temp_override = -1.0f;
+        }
         else if (strcmp(argv[i], "--once") == 0) { g_once = 1; }
         else if (strcmp(argv[i], "--rope-norm") == 0) { g_rope_norm = 1; }
         else if (strcmp(argv[i], "--no-load-spore") == 0) { g_load_spore = 0; }
         else if (strcmp(argv[i], "--no-save-spore") == 0) { g_save_spore = 0; }
         else if (strcmp(argv[i], "--prophecy") == 0 && i+1 < argc) { /* will be set after field_init */ }
         else if (strcmp(argv[i], "--destiny") == 0 && i+1 < argc) { /* will be set after field_init */ }
-        else if (strcmp(argv[i], "--serve") == 0 && i+1 < argc) { g_serve_port = atoi(argv[++i]); }
+        else if (strcmp(argv[i], "--serve") == 0 && i+1 < argc) {
+            long v; if (!doe_parse_long_arg("--serve", argv[++i], &v)) return 1;
+            if (v < 1 || v > 65535) {
+                fprintf(stderr, "[doe] invalid --serve value: %ld (expected 1..65535)\n", v);
+                return 1;
+            }
+            g_serve_port = (int)v;
+        }
         else if (strcmp(argv[i], "--serve-public") == 0) { g_serve_public = 1; }
         else if (strcmp(argv[i], "--image") == 0 && i+1 < argc) snprintf(g_image_path, sizeof g_image_path, "%s", argv[++i]);
         else if (strcmp(argv[i], "--mmproj") == 0 && i+1 < argc) snprintf(g_mmproj_path, sizeof g_mmproj_path, "%s", argv[++i]);
@@ -4925,10 +4996,23 @@ int main(int argc, char **argv) {
 
     /* Parse field overrides */
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--prophecy") == 0 && i+1 < argc) F.prophecy = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--destiny") == 0 && i+1 < argc) F.destiny = atof(argv[++i]);
+        if (strcmp(argv[i], "--prophecy") == 0 && i+1 < argc) {
+            long v; if (!doe_parse_long_arg("--prophecy", argv[++i], &v)) return 1;
+            if (v < INT_MIN || v > INT_MAX) {
+                fprintf(stderr, "[doe] invalid --prophecy value: %ld (outside int range)\n", v);
+                return 1;
+            }
+            F.prophecy = (int)v;
+        }
+        else if (strcmp(argv[i], "--destiny") == 0 && i+1 < argc) {
+            float v; if (!doe_parse_float_arg("--destiny", argv[++i], &v)) return 1;
+            F.destiny = v;
+        }
         else if (strcmp(argv[i], "--lora-rank") == 0 && i+1 < argc) { i++; /* D-L1: accepted for compat; rank comes from the GGUF, not a flag */ }
-        else if (strcmp(argv[i], "--lora-alpha") == 0 && i+1 < argc) F.lora_alpha = atof(argv[++i]);
+        else if (strcmp(argv[i], "--lora-alpha") == 0 && i+1 < argc) {
+            float v; if (!doe_parse_float_arg("--lora-alpha", argv[++i], &v)) return 1;
+            F.lora_alpha = v;
+        }
     }
 
     /* ── Environment scan ── */
