@@ -1951,8 +1951,16 @@ static int init_lora_expert(LoraExpert *e, int dim, int rank, float freq) {
 
 static void free_lora_expert(LoraExpert *e) {
     free(e->lora_A); free(e->lora_B);
-    e->lora_A = e->lora_B = NULL;
-    e->alive = 0; e->vitality = 0;
+    memset(e, 0, sizeof(*e));
+}
+
+static int field_recount_alive(FieldLayer *fl) {
+    int n = 0;
+    if (!fl) return 0;
+    for (int e = 0; e < MAX_EXPERTS; e++)
+        if (fl->experts[e].alive) n++;
+    fl->n_alive = n;
+    return n;
 }
 
 #ifdef USE_METAL
@@ -2819,8 +2827,13 @@ static void mycelium_init(MyceliumState *ms) {
 }
 
 static void mycelium_save(GGUFIndex *ps, int step, float fitness) {
-    /* A13: NaN-quarantine gate — never persist a poisoned spore (else NaN experts survive restart) */
-    for (int l = 0; l < ps->n_field_layers; l++)
+    /* A13: quarantine gate — never persist poisoned or dead parliament state. */
+    for (int l = 0; l < ps->n_field_layers; l++) {
+        int actual_alive = field_recount_alive(&ps->field_layers[l]);
+        if (actual_alive < MIN_EXPERTS) {
+            printf("[mycelium] layer %d has only %d alive experts — spore NOT saved\n", l, actual_alive);
+            return;
+        }
         for (int e = 0; e < MAX_EXPERTS; e++)
             if (ps->field_layers[l].experts[e].alive &&
                 lora_poisoned(ps->field_layers[l].experts[e].lora_A, ps->field_layers[l].experts[e].lora_B,
@@ -2828,6 +2841,7 @@ static void mycelium_save(GGUFIndex *ps, int step, float fitness) {
                 printf("[mycelium] poisoned expert L%d e%d (NaN/Inf/|w|>1e4) — spore NOT saved (quarantine)\n", l, e);
                 return;
             }
+    }
     char path[256];
     snprintf(path, 256, "%s/spore_%016llx_s%d.bin", MYCELIUM_DIR,
              (unsigned long long)ps->profile.fingerprint, step);
@@ -2940,7 +2954,8 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
     for (int l = 0; l < nl; l++) {
         FieldLayer *fl = &ps->field_layers[l];
         if (!fl->parliament.w_vote) { fclose(f); return 0; }
-        SPORE_READ(&fl->n_alive, 4, 1);
+        int saved_alive = 0;
+        SPORE_READ(&saved_alive, 4, 1);
         SPORE_READ(fl->parliament.w_vote, sizeof(float), MAX_EXPERTS * dim);
         SPORE_READ(&fl->parliament.consensus, 4, 1);
         if (!isfinite(fl->parliament.consensus) ||
@@ -2969,6 +2984,11 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
             } else if (ex->alive) {
                 free_lora_expert(ex);
             }
+        }
+        int actual_alive = field_recount_alive(fl);
+        if (saved_alive != actual_alive) {
+            printf("[mycelium] spore alive count mismatch layer %d (%d header, %d flags); using flags\n",
+                   l, saved_alive, actual_alive);
         }
     }
     #undef SPORE_READ
@@ -4341,7 +4361,9 @@ skip_logitdump:
                     /* A14: poison-quarantine (NaN/Inf + finite |value|-explosion) — freeze + death */
                     if (lora_poisoned(fl->experts[e].lora_A, fl->experts[e].lora_B,
                                       ps->host_dim * ps->lora_rank)) {
-                        fl->experts[e].alive = 0; total_deaths++;
+                        free_lora_expert(&fl->experts[e]);
+                        field_recount_alive(fl);
+                        total_deaths++;
                     }
                 }
             }
@@ -4783,10 +4805,12 @@ static void http_stream_inference(int fd, GGUFIndex *ps, const char *user_msg, f
                 notorch_step(fl->experts[e].lora_A, fl->experts[e].lora_B,
                             ps->host_dim, ps->host_dim, ps->lora_rank,
                             is.x, is.xb, learn_signal);
-                /* A14: poison-quarantine (NaN/Inf + finite |value|-explosion) — freeze */
+                /* A14: poison-quarantine (NaN/Inf + finite |value|-explosion) — freeze + death */
                 if (lora_poisoned(fl->experts[e].lora_A, fl->experts[e].lora_B,
-                                  ps->host_dim * ps->lora_rank))
-                    fl->experts[e].alive = 0;
+                                  ps->host_dim * ps->lora_rank)) {
+                    free_lora_expert(&fl->experts[e]);
+                    field_recount_alive(fl);
+                }
             }
         }
 
