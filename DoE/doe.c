@@ -2556,7 +2556,8 @@ static int parliament_elect(Parliament *p, LoraExpert *experts, float *input, in
     var_v /= n_alive;
     float consensus = fminf(1.0f, sqrtf(var_v + 1e-8f) / (fabsf(mean_v) + 1.0f));
     if (!isfinite(consensus)) consensus = 0.5f;
-    if (!isfinite(p->consensus)) p->consensus = 0.5f;
+    if (!isfinite(p->consensus) || p->consensus < 0.0f || p->consensus > 1.0f)
+        p->consensus = 0.5f;
     p->consensus = 0.9f * p->consensus + 0.1f * consensus;
 
     int k = (int)(n_alive * (1.0f - p->consensus));
@@ -2942,6 +2943,11 @@ static int mycelium_load(GGUFIndex *ps, uint64_t target_fp) {
         SPORE_READ(&fl->n_alive, 4, 1);
         SPORE_READ(fl->parliament.w_vote, sizeof(float), MAX_EXPERTS * dim);
         SPORE_READ(&fl->parliament.consensus, 4, 1);
+        if (!isfinite(fl->parliament.consensus) ||
+            fl->parliament.consensus < 0.0f || fl->parliament.consensus > 1.0f) {
+            printf("[mycelium] invalid consensus in spore layer %d; resetting to 0.5\n", l);
+            fl->parliament.consensus = 0.5f;
+        }
         for (int e = 0; e < MAX_EXPERTS; e++) {
             LoraExpert *ex = &fl->experts[e];
             int alive; SPORE_READ(&alive, 4, 1);

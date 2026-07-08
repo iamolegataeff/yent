@@ -714,8 +714,13 @@ kernel void parliament_elect(
     uint n_alive = 0u;
     for (uint e = 0u; e < ne; e++) {
         gate[e] = 0.0f;
-        if (alive[e] != 0.0f) { votes[e] = vdot[e] + res[e]; n_alive++; }
-        else                  { votes[e] = -3.0e38f; }
+        if (alive[e] != 0.0f) {
+            votes[e] = vdot[e] + res[e];
+            if (!isfinite(votes[e])) votes[e] = -1.0e30f;
+            n_alive++;
+        } else {
+            votes[e] = -3.0e38f;
+        }
     }
     if (n_alive == 0u) return;
     if (n_alive < min_e) return;                 /* CPU returns 0 -> no injection (gate all 0) */
@@ -727,7 +732,11 @@ kernel void parliament_elect(
     var /= (float)n_alive;
     float cnew = sqrt(var + 1e-8f) / (fabs(mean) + 1.0f);
     if (cnew > 1.0f) cnew = 1.0f;
-    float c = 0.9f * cons[layer] + 0.1f * cnew;
+    if (!isfinite(cnew) || cnew < 0.0f || cnew > 1.0f) cnew = 0.5f;
+    float cold = cons[layer];
+    if (!isfinite(cold) || cold < 0.0f || cold > 1.0f) cold = 0.5f;
+    float c = 0.9f * cold + 0.1f * cnew;
+    if (!isfinite(c) || c < 0.0f || c > 1.0f) c = 0.5f;
     cons[layer] = c;
     int k = (int)((float)n_alive * (1.0f - c));
     if (k < (int)min_e) k = (int)min_e;          /* CPU: if(k<2)k=2; MIN_EXPERTS==2 */
