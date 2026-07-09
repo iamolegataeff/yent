@@ -48,6 +48,14 @@ static int pv_round_by(double x, int *out) { return pv_align_by_checked(x,  0, o
 static int pv_ceil_by (double x, int *out) { return pv_align_by_checked(x,  1, out); }
 static int pv_floor_by(double x, int *out) { return pv_align_by_checked(x, -1, out); }
 
+static int pv_ceil_int_checked(double x, int *out) {
+    if (!out || !isfinite(x) || x <= 0.0) return 0;
+    double v = ceil(x);
+    if (!isfinite(v) || v <= 0.0 || v > (double)INT_MAX) return 0;
+    *out = (int)v;
+    return 1;
+}
+
 static int pv_mul_size(size_t a, size_t b, size_t *out) {
     if (a != 0 && b > SIZE_MAX / a) return 0;
     *out = a * b;
@@ -184,10 +192,18 @@ float *pv_preprocess(const char *path, int *onx, int *ony) {
         stbi_image_free(img);
         return NULL;
     }
-    float scale_w = (float)tw / W, scale_h = (float)th / H;
-    float scale = scale_w < scale_h ? scale_w : scale_h;
-    int new_w = pv_imin((int)ceil(W * scale), tw);
-    int new_h = pv_imin((int)ceil(H * scale), th);
+    double scale_w = (double)tw / (double)W, scale_h = (double)th / (double)H;
+    double scale = scale_w < scale_h ? scale_w : scale_h;
+    int new_w_raw, new_h_raw;
+    if (!isfinite(scale) || scale <= 0.0 ||
+        !pv_ceil_int_checked((double)W * scale, &new_w_raw) ||
+        !pv_ceil_int_checked((double)H * scale, &new_h_raw)) {
+        fprintf(stderr, "pv: invalid scaled image size for %s\n", path);
+        stbi_image_free(img);
+        return NULL;
+    }
+    int new_w = pv_imin(new_w_raw, tw);
+    int new_h = pv_imin(new_h_raw, th);
     size_t pix, bytes;
     if (!pv_mul_size((size_t)new_w, (size_t)new_h, &pix) || !pv_mul_size(pix, 3, &bytes)) {
         fprintf(stderr, "pv: resize buffer overflow for %s\n", path);
