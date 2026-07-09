@@ -368,8 +368,9 @@ Ported from Indiana `context_neural_processor.py` (numpy) to C + notorch, zero e
 spawned by the same language-agnostic slot.
 
 - `sartre/utils/context_processor/context_processor.c` — echo-state RESERVOIR on notorch:
-  W_in/W filled by a FIXED SEEDED xorshift (reproducible, not `nt_tensor_rand`); matvecs via
-  `nt_blas_matvec`; leaky-tanh state settled a few steps; numpy `eigvals` → zero-dep power
+  W_in/W filled by a FIXED SEEDED xorshift (reproducible, not `nt_tensor_rand`);
+  fixed hidden/leaky instrument across files, so downstream `resonance` traces share one scale;
+  matvecs via `nt_blas_matvec`; leaky-tanh state settled a few steps; numpy `eigvals` → zero-dep power
   iteration scaling W to ρ≈1 (echo-state). No readout, no tag. `resonance` =
   `cosine(reservoir_state(content bag-of-words), reservoir_state(Yent's seed vocabulary))` — a
   **nonlinear LEXICAL reservoir score** (tracks word overlap, correlated with the lexical-overlap
@@ -384,8 +385,9 @@ spawned by the same language-agnostic slot.
   kernel path hosts the Rust utility (repo_monitor) and the C utility (context_processor)
   — language-agnostic slot proven concretely.
 
-Measured on neo: `make` 0 warn; `make test` 13/13 (spectral radius ρ≈1, resonance discriminates
-yent>other, resonance lexical-not-semantic paraphrase low, resonance deterministic, relevance,
+Measured on neo: `make` 0 warn; `make test` 14/14 (fixed reservoir instrument,
+spectral radius ρ≈1, resonance discriminates yent>other,
+resonance lexical-not-semantic paraphrase low, resonance deterministic, relevance,
 chaos/somatic bounds, html-strip, binary-empty, json-escape, read_file); kernel
 `-DHAS_PERCEPTION` 0 warn; end-to-end the kernel spawns both the C and the Rust utility
 through one piped slot, reaps, zero zombies; contamination scan clean (only /opt/homebrew).
