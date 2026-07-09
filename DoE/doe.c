@@ -4498,6 +4498,12 @@ static void chat(GGUFIndex *ps) {
                 if (!emb) { printf("[doe] image encode failed: %s\n", g_image_path); continue; }
                 printf("[doe] vision: %d image tokens (dim %d) from %s\n", n_img, vdim, g_image_path);
             }
+            if (n_img <= 0 || vdim != ps->host_dim) {
+                printf("[doe] vision embed shape mismatch: tokens=%d dim=%d host_dim=%d; refusing image splice\n",
+                       n_img, vdim, ps->host_dim);
+                free(emb);
+                continue;
+            }
             char vbuf[sizeof(input) + 2];
             if (!doe_snprintf_checked(vbuf, sizeof(vbuf), "vision prompt", "%s ", input)) {
                 free(emb);
