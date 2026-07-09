@@ -2672,6 +2672,9 @@ static void index_free(GGUFIndex *ps) {
     for (int i = 0; i < ps->n_f16_bufs; i++) free(ps->f16_bufs[i]);
     free(ps->f16_bufs);
     doe_free_tokenizer_metadata(ps);
+    free(ps->gamma_data);
+    ps->gamma_data = NULL;
+    ps->gamma_size = 0;
     if (ps->mmap_base) munmap(ps->mmap_base, ps->mmap_size);
 #ifdef USE_METAL
     /* expert_arena is wrapped by a NoCopy MTLBuffer (deallocator:nil) in notorch's
@@ -5589,12 +5592,29 @@ int main(int argc, char **argv) {
     if (gamma_path[0] != '\0') {
         FILE *gf = fopen(gamma_path, "rb");
         if (gf) {
-            fseek(gf, 0, SEEK_END); long gsz = ftell(gf); fseek(gf, 0, SEEK_SET);
-            idx.gamma_data = malloc(gsz);
-            idx.gamma_size = (int)gsz;
-            if (fread(idx.gamma_data, 1, gsz, gf) == (size_t)gsz)
-                printf("[gamma] loaded %ld bytes — personality active.\n", gsz);
-            else { free(idx.gamma_data); idx.gamma_data = NULL; idx.gamma_size = 0; }
+            if (fseek(gf, 0, SEEK_END) != 0) {
+                printf("[gamma] cannot seek %s: %s\n", gamma_path, strerror(errno));
+            } else {
+                long gsz = ftell(gf);
+                if (gsz <= 0 || gsz > INT_MAX) {
+                    printf("[gamma] invalid gamma size for %s: %ld bytes\n", gamma_path, gsz);
+                } else if (fseek(gf, 0, SEEK_SET) != 0) {
+                    printf("[gamma] cannot rewind %s: %s\n", gamma_path, strerror(errno));
+                } else {
+                    idx.gamma_data = malloc((size_t)gsz);
+                    if (!idx.gamma_data) {
+                        printf("[gamma] allocation failed for %s (%ld bytes)\n", gamma_path, gsz);
+                    } else if (fread(idx.gamma_data, 1, (size_t)gsz, gf) == (size_t)gsz) {
+                        idx.gamma_size = (int)gsz;
+                        printf("[gamma] loaded %ld bytes — personality active.\n", gsz);
+                    } else {
+                        printf("[gamma] short read from %s\n", gamma_path);
+                        free(idx.gamma_data);
+                        idx.gamma_data = NULL;
+                        idx.gamma_size = 0;
+                    }
+                }
+            }
             fclose(gf);
         }
     }
