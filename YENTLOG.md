@@ -41,7 +41,7 @@ yent/
 │   │   ├── sartre_bridge.go      # SARTRE utility receipts -> limpha seams + pressure traces
 │   │   ├── gamma.go              # supergamma metric layer
 │   │   ├── delta.go              # weight delta management
-│   │   ├── amk.go                # parliament/election logic
+│   │   ├── amk.go                # CGO bridge to the AML/AMK kernel (libamk.a)
 │   │   ├── quant.go              # quantization utilities
 │   │   ├── gguf.go               # GGUF metadata reader
 │   │   ├── tokenizer.go          # tokenization

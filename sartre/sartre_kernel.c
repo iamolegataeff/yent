@@ -32,6 +32,8 @@
 #include <sys/wait.h>
 #include <sys/resource.h>
 #include <math.h>
+#include <limits.h>
+#include <dirent.h>
 
 #ifdef HAS_PERCEPTION
 #include "perception.h"
@@ -48,6 +50,35 @@
 
 static SartreSystemState sys = {0};
 static int sartre_ready = 0;
+
+static long sartre_child_fd_close_ceiling(void) {
+    long max_seen = -1;
+    const char *fd_dirs[] = { "/dev/fd", "/proc/self/fd", NULL };
+    for (int i = 0; fd_dirs[i]; i++) {
+        DIR *dir = opendir(fd_dirs[i]);
+        if (!dir) continue;
+        struct dirent *ent;
+        while ((ent = readdir(dir)) != NULL) {
+            char *end = NULL;
+            errno = 0;
+            long fd = strtol(ent->d_name, &end, 10);
+            if (end != ent->d_name && *end == '\0' && errno == 0 && fd > max_seen)
+                max_seen = fd;
+        }
+        closedir(dir);
+        if (max_seen >= 3) return max_seen + 1;
+    }
+
+    struct rlimit fd_rl;
+    if (getrlimit(RLIMIT_NOFILE, &fd_rl) == 0) {
+        if (fd_rl.rlim_cur == RLIM_INFINITY || fd_rl.rlim_cur > (rlim_t)INT_MAX)
+            return INT_MAX;
+        if (fd_rl.rlim_cur > 0)
+            return (long)fd_rl.rlim_cur;
+    }
+    long maxfd = sysconf(_SC_OPEN_MAX);
+    return maxfd > 0 ? maxfd : 4096;
+}
 
 /* ═══════════════════════════════════════════════════════════════════
  * LIFECYCLE — birth, existence, nothingness
@@ -277,10 +308,11 @@ int sartre_ns_spawn_piped(const char *name, char *const argv[], float mem_limit_
         grew = 1;
     }
 
-    /* precompute the fd ceiling in the PARENT — sysconf is not async-signal-safe,
-     * so the post-fork child must not call it; it only close()s (which is safe). */
-    long maxfd = sysconf(_SC_OPEN_MAX);
-    if (maxfd < 0 || maxfd > 4096) maxfd = 4096;
+    /* Precompute the fd ceiling in the PARENT. The child path must stay async-
+     * signal-safe, so it only loops over close(); no directory/sysconf/getrlimit
+     * calls there. The parent scans the real fd table first, avoiding the old
+     * silent 4096 cap without forcing a million-close loop on ordinary hosts. */
+    long maxfd = sartre_child_fd_close_ceiling();
 
     int pipefd[2];
     if (out_read_fd) {
@@ -301,10 +333,10 @@ int sartre_ns_spawn_piped(const char *name, char *const argv[], float mem_limit_
             if (dup2(pipefd[1], STDOUT_FILENO) < 0) _exit(126);  /* broken stdout: fail loud */
             if (pipefd[1] != STDOUT_FILENO) close(pipefd[1]);
         }
-        /* close any other inherited fds so a utility never receives the host's
-         * DB / model / socket descriptors (0/1/2 stay; the rest are not ours to keep).
-         * maxfd was computed in the parent — only close() runs here (async-signal-safe). */
-        for (int fd = 3; fd < (int)maxfd; fd++) close(fd);
+        /* Close inherited fds so a utility never receives the host's DB/model/
+         * socket descriptors. maxfd was computed in the parent; child only
+         * calls close(), preserving fork-in-multithreaded-host discipline. */
+        for (long fd = 3; fd < maxfd && fd <= (long)INT_MAX; fd++) close((int)fd);
 
         if (mem_limit_mb > 0.0f && mem_limit_mb <= 1048576.0f) {   /* guard float->rlim_t overflow */
             rlim_t bytes = (rlim_t)(mem_limit_mb * 1024.0f * 1024.0f);

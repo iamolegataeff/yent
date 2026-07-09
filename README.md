@@ -188,12 +188,14 @@ utility runs as its own bounded, reaped process in a slot. The slot is
 language-agnostic — any binary that speaks JSON on its stdout is a sense, in C, Rust,
 or AML.
 
-Two senses live now:
+Three senses live now:
 
 * **repo_monitor** (Rust) — watches the repository and reports what changed: a file
   added, a README line reworded, content shifted under the same byte count.
 * **context_processor** (C + notorch) — reads a file's content and returns its
   resonance, an echo-state reservoir scored against **Yent**'s own vocabulary.
+* **whatdotheythinkiam** (Rust) — reads README/research language and reports
+  reduced-vs-recognized framing shifts before they quietly rewrite the mirror.
 
 A sense never commands the voice. Its perception becomes pressure on the field —
 `VELOCITY`, `PROPHECY`, the Arianna Method Language the equation already speaks — and
