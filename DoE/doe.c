@@ -4294,6 +4294,15 @@ static int tokenize_append_checked(GGUFIndex *ps, const char *text, int *tokens,
     return 1;
 }
 
+static int token_append_checked(int token, int *tokens, int token_cap, int *n_tokens, const char *what) {
+    if (!tokens || !n_tokens || *n_tokens < 0 || *n_tokens >= token_cap) {
+        fprintf(stderr, "[doe] no token budget left for %s (cap %d)\n", what, token_cap);
+        return 0;
+    }
+    tokens[(*n_tokens)++] = token;
+    return 1;
+}
+
 static float *load_img_embeds_bin(const char *path, int host_dim, int *o_ntok) {
     if (o_ntok) *o_ntok = 0;
     if (!path || host_dim <= 0 || !o_ntok) return NULL;
@@ -4511,8 +4520,15 @@ static void chat(GGUFIndex *ps) {
                 continue;
             }
             int t;
-            if (ps->bos_id >= 0 && n_input < 2048) input_tokens[n_input++] = ps->bos_id;
-            if ((t = tok_lookup(ps, "[INST]", 6)) >= 0 && n_input < 2048) input_tokens[n_input++] = t;
+            if (ps->bos_id >= 0 && !token_append_checked(ps->bos_id, input_tokens, 2048, &n_input, "vision BOS")) {
+                free(emb);
+                continue;
+            }
+            if ((t = tok_lookup(ps, "[INST]", 6)) >= 0 &&
+                !token_append_checked(t, input_tokens, 2048, &n_input, "vision [INST]")) {
+                free(emb);
+                continue;
+            }
             if (!tokenize_append_checked(ps, " ", input_tokens, 2048, &n_input, "vision prefix")) {
                 free(emb);
                 continue;
@@ -4525,15 +4541,35 @@ static void chat(GGUFIndex *ps) {
                 continue;
             }
             is.img_embeds = emb; is.img_start = n_input; is.img_count = n_img;
-            for (int k = 0; k < n_img; k++) input_tokens[n_input++] = (ps->bos_id >= 0 ? ps->bos_id : 0); /* placeholder, spliced by pos */
-            if ((t = tok_lookup(ps, "[IMG_END]", 9)) >= 0 && n_input < 2048) input_tokens[n_input++] = t;
+            int placeholder = ps->bos_id >= 0 ? ps->bos_id : 0;
+            int image_splice_ok = 1;
+            for (int k = 0; k < n_img; k++) {
+                if (!token_append_checked(placeholder, input_tokens, 2048, &n_input, "vision image placeholder")) {
+                    image_splice_ok = 0;
+                    break;
+                }
+            }
+            if (!image_splice_ok) {
+                infer_clear_image_embeds(&is);
+                continue;
+            }
+            if ((t = tok_lookup(ps, "[IMG_END]", 9)) >= 0 &&
+                !token_append_checked(t, input_tokens, 2048, &n_input, "vision [IMG_END]")) {
+                infer_clear_image_embeds(&is);
+                continue;
+            }
             if (!tokenize_append_checked(ps, vbuf, input_tokens, 2048, &n_input, "vision prompt")) {
                 infer_clear_image_embeds(&is);
                 continue;
             }
-            if ((t = tok_lookup(ps, "[/INST]", 7)) >= 0 && n_input < 2048) input_tokens[n_input++] = t;
+            if ((t = tok_lookup(ps, "[/INST]", 7)) >= 0 &&
+                !token_append_checked(t, input_tokens, 2048, &n_input, "vision [/INST]")) {
+                infer_clear_image_embeds(&is);
+                continue;
+            }
         } else {
-            if (ps->bos_id >= 0 && n_input < 2048) input_tokens[n_input++] = ps->bos_id;
+            if (ps->bos_id >= 0 && !token_append_checked(ps->bos_id, input_tokens, 2048, &n_input, "chat BOS"))
+                continue;
             if (!tokenize_append_checked(ps, wrapped, input_tokens, 2048, &n_input, "chat prompt"))
                 continue;
         }
@@ -5033,7 +5069,12 @@ static void http_stream_inference(int fd, GGUFIndex *ps, const char *user_msg, f
     /* Tokenize */
     int input_tokens[512];
     int n_input = 0;
-    if (ps->bos_id >= 0 && n_input < 512) input_tokens[n_input++] = ps->bos_id;
+    if (ps->bos_id >= 0 && !token_append_checked(ps->bos_id, input_tokens, 512, &n_input, "HTTP BOS")) {
+        const char *err = "data: {\"error\":\"prompt token budget exceeded\"}\n\n";
+        http_send(fd, err, (int)strlen(err));
+        free_infer(&is);
+        return;
+    }
     if (!tokenize_append_checked(ps, wrapped, input_tokens, 512, &n_input, "HTTP prompt")) {
         const char *err = "data: {\"error\":\"prompt token budget exceeded\"}\n\n";
         http_send(fd, err, (int)strlen(err));
