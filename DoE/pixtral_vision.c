@@ -13,6 +13,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdint.h>
+#include <limits.h>
 #include <Accelerate/Accelerate.h>
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -34,9 +35,18 @@ static const float PV_STD[3]  = {0.26862954f, 0.26130258f, 0.27577711f};
 
 static int pv_imax(int a, int b) { return a > b ? a : b; }
 static int pv_imin(int a, int b) { return a < b ? a : b; }
-static int pv_round_by(double x) { return (int)(round(x / PV_ALIGN) * PV_ALIGN); }
-static int pv_ceil_by (double x) { return (int)(ceil (x / PV_ALIGN) * PV_ALIGN); }
-static int pv_floor_by(double x) { return (int)(floor(x / PV_ALIGN) * PV_ALIGN); }
+static int pv_align_by_checked(double x, int mode, int *out) {
+    if (!out || !isfinite(x) || x < 0.0) return 0;
+    double q = x / (double)PV_ALIGN;
+    double a = mode < 0 ? floor(q) : (mode > 0 ? ceil(q) : round(q));
+    double v = a * (double)PV_ALIGN;
+    if (!isfinite(v) || v < 0.0 || v > (double)INT_MAX) return 0;
+    *out = (int)v;
+    return 1;
+}
+static int pv_round_by(double x, int *out) { return pv_align_by_checked(x,  0, out); }
+static int pv_ceil_by (double x, int *out) { return pv_align_by_checked(x,  1, out); }
+static int pv_floor_by(double x, int *out) { return pv_align_by_checked(x, -1, out); }
 
 static int pv_mul_size(size_t a, size_t b, size_t *out) {
     if (a != 0 && b > SIZE_MAX / a) return 0;
@@ -97,23 +107,38 @@ static float *pv_dq_shape(gguf_file *gf, const char *name, uint32_t ndim, const 
 }
 
 // ── Stage 1: preprocessing (smart_resize + bilinear + PAD_CEIL + normalize + planar) ──
-static void pv_smart_resize(int W, int H, int *tw, int *th) {
-    int h_bar = pv_imax(PV_ALIGN, pv_round_by(H));
-    int w_bar = pv_imax(PV_ALIGN, pv_round_by(W));
-    if ((long)h_bar * w_bar > PV_MAX_PX) {
+static int pv_smart_resize(int W, int H, int *tw, int *th) {
+    int h0, w0;
+    if (!tw || !th || W <= 0 || H <= 0 ||
+        !pv_round_by((double)H, &h0) || !pv_round_by((double)W, &w0))
+        return 0;
+    int h_bar = pv_imax(PV_ALIGN, h0);
+    int w_bar = pv_imax(PV_ALIGN, w0);
+    int64_t area = (int64_t)h_bar * (int64_t)w_bar;
+    if (area > PV_MAX_PX) {
         double beta = sqrt((double)H * W / (double)PV_MAX_PX);
-        h_bar = pv_imax(PV_ALIGN, pv_floor_by(H / beta));
-        w_bar = pv_imax(PV_ALIGN, pv_floor_by(W / beta));
-    } else if ((long)h_bar * w_bar < PV_MIN_PX) {
+        if (!isfinite(beta) || beta <= 0.0 ||
+            !pv_floor_by((double)H / beta, &h0) ||
+            !pv_floor_by((double)W / beta, &w0))
+            return 0;
+        h_bar = pv_imax(PV_ALIGN, h0);
+        w_bar = pv_imax(PV_ALIGN, w0);
+    } else if (area < PV_MIN_PX) {
         double beta = sqrt((double)PV_MIN_PX / ((double)H * W));
-        h_bar = pv_ceil_by(H * beta);
-        w_bar = pv_ceil_by(W * beta);
+        if (!isfinite(beta) || beta <= 0.0 ||
+            !pv_ceil_by((double)H * beta, &h_bar) ||
+            !pv_ceil_by((double)W * beta, &w_bar))
+            return 0;
     }
-    while ((long)h_bar * w_bar > PV_MAX_PX && (h_bar > PV_ALIGN || w_bar > PV_ALIGN)) {
+    while ((int64_t)h_bar * (int64_t)w_bar > PV_MAX_PX &&
+           (h_bar > PV_ALIGN || w_bar > PV_ALIGN)) {
         if ((h_bar >= w_bar && h_bar > PV_ALIGN) || w_bar <= PV_ALIGN) h_bar -= PV_ALIGN;
         else w_bar -= PV_ALIGN;
     }
+    if (h_bar <= 0 || w_bar <= 0 || (int64_t)h_bar * (int64_t)w_bar > PV_MAX_PX)
+        return 0;
     *tw = w_bar; *th = h_bar;
+    return 1;
 }
 
 static void pv_resize_bilinear_u8(const unsigned char *src, int sw, int sh,
@@ -148,7 +173,11 @@ float *pv_preprocess(const char *path, int *onx, int *ony) {
         return NULL;
     }
     int tw, th;
-    pv_smart_resize(W, H, &tw, &th);
+    if (!pv_smart_resize(W, H, &tw, &th)) {
+        fprintf(stderr, "pv: cannot safely resize image size %dx%d for %s\n", W, H, path);
+        stbi_image_free(img);
+        return NULL;
+    }
     if (tw <= 0 || th <= 0 || tw % PV_ALIGN != 0 || th % PV_ALIGN != 0 ||
         (long)tw * th > PV_MAX_PX) {
         fprintf(stderr, "pv: invalid resized image size %dx%d for %s\n", tw, th, path);
