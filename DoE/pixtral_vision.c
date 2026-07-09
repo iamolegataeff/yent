@@ -198,7 +198,8 @@ float *pv_preprocess(const char *path, int *onx, int *ony) {
     if (!isfinite(scale) || scale <= 0.0 ||
         !pv_ceil_int_checked((double)W * scale, &new_w_raw) ||
         !pv_ceil_int_checked((double)H * scale, &new_h_raw)) {
-        fprintf(stderr, "pv: invalid scaled image size for %s\n", path);
+        fprintf(stderr, "pv: invalid scaled image size for %s (src=%dx%d target=%dx%d scale=%.17g)\n",
+                path, W, H, tw, th, scale);
         stbi_image_free(img);
         return NULL;
     }
