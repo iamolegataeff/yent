@@ -139,6 +139,8 @@ static int g_train = 0; /* A13b/A14: notorch online-learning during inference; D
 static int g_gen_max_new = 200; /* bounded one-shot validation; default preserves old chat length */
 static int g_gen_top_k = 40;
 static int g_top_k_clamp_warned = 0;
+static int g_sampler_nonfinite_warned = 0;
+static int g_softmax_nonfinite_warned = 0;
 static float g_gen_temp_override = -1.0f; /* <0 uses field effective temperature */
 static int g_once = 0; /* exit after one generated answer; useful for artifact isolation */
 static int g_load_spore = 1;
@@ -878,11 +880,21 @@ static void field_step(float dt) {
  * the difference is intention. the difference is identity.
  * ═══════════════════════════════════════════════════════════════════════════════ */
 static float compute_prophecy_debt(const float *logits, int chosen, int n) {
-    if (n <= 0 || chosen < 0 || chosen >= n) return 0;
-    float mx = logits[0];
-    for (int i = 1; i < n; i++) if (logits[i] > mx) mx = logits[i];
-    float diff = mx - logits[chosen];
-    return diff > 0 ? diff / (diff + 1.0f) : 0;
+    if (!logits || n <= 0 || chosen < 0 || chosen >= n) return 0;
+    float chosen_v = logits[chosen];
+    if (!isfinite(chosen_v)) return 0;
+    float mx = -INFINITY;
+    int finite = 0;
+    for (int i = 0; i < n; i++) {
+        if (!isfinite(logits[i])) continue;
+        if (!finite || logits[i] > mx) mx = logits[i];
+        finite++;
+    }
+    if (!finite) return 0;
+    float diff = mx - chosen_v;
+    if (!isfinite(diff) || diff <= 0.0f) return 0;
+    float debt = diff / (diff + 1.0f);
+    return isfinite(debt) && debt > 0.0f ? debt : 0;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
@@ -995,7 +1007,7 @@ static void apply_field_to_logits(float *logits, int n) {
 
     for (int i = 0; i < n; i++) {
         int slot = dario_embed_slot(i);
-        if (slot < 0) continue;
+        if (slot < 0 || slot >= DARIO_EMBED_SLOTS) continue;
         float h_term = eff_alpha * H_sig[i] * h_gated_sig;
         float f_term = eff_beta  * F_slot[slot] * f_gated_sig;
         float a_term = eff_gamma * A_slot[slot];
@@ -1421,8 +1433,45 @@ static void doe_mv(float *out, const float *W, int dt, const float *x, int r, in
 }
 
 static void softmax_n(float *x, int n) {
-    float mx = x[0]; for (int i = 1; i < n; i++) if (x[i] > mx) mx = x[i];
-    float s = 0; for (int i = 0; i < n; i++) { x[i] = expf(x[i]-mx); s += x[i]; }
+    if (!x || n <= 0) return;
+    float mx = -INFINITY;
+    int finite = 0, posinf = 0, nonfinite = 0;
+    for (int i = 0; i < n; i++) {
+        if (isnan(x[i])) { nonfinite++; continue; }
+        if (isinf(x[i])) {
+            nonfinite++;
+            if (x[i] > 0.0f) posinf++;
+            continue;
+        }
+        if (!finite || x[i] > mx) mx = x[i];
+        finite++;
+    }
+    if (nonfinite && !g_softmax_nonfinite_warned) {
+        fprintf(stderr, "[doe] WARNING: softmax handled non-finite inputs\n");
+        g_softmax_nonfinite_warned = 1;
+    }
+    if (posinf > 0) {
+        float u = 1.0f / (float)posinf;
+        for (int i = 0; i < n; i++) x[i] = (isinf(x[i]) && x[i] > 0.0f) ? u : 0.0f;
+        return;
+    }
+    if (!finite) {
+        float u = 1.0f / (float)n;
+        for (int i = 0; i < n; i++) x[i] = u;
+        return;
+    }
+    float s = 0;
+    for (int i = 0; i < n; i++) {
+        if (!isfinite(x[i])) { x[i] = 0.0f; continue; }
+        x[i] = expf(x[i] - mx);
+        if (!isfinite(x[i])) x[i] = 0.0f;
+        s += x[i];
+    }
+    if (!isfinite(s) || s <= 0.0f) {
+        float u = 1.0f / (float)finite;
+        for (int i = 0; i < n; i++) x[i] = x[i] > 0.0f ? u : 0.0f;
+        return;
+    }
     for (int i = 0; i < n; i++) x[i] /= s;
 }
 
@@ -3768,10 +3817,14 @@ ffn_slot_fail:
  * ═══════════════════════════════════════════════════════════════════════════════ */
 static int sample(float *logits, int V, float temp, int top_k) {
     if (!logits || V <= 0) return 0;
-    int finite = 0;
+    int finite = 0, nonfinite = 0;
     for (int i = 0; i < V; i++) {
         if (isfinite(logits[i])) finite++;
-        else logits[i] = -1e30f;
+        else { logits[i] = -1e30f; nonfinite++; }
+    }
+    if (nonfinite && !g_sampler_nonfinite_warned) {
+        fprintf(stderr, "[doe] WARNING: sampler replaced non-finite logits with floor values\n");
+        g_sampler_nonfinite_warned = 1;
     }
     if (finite == 0) {
         fprintf(stderr, "[doe] sampler saw no finite logits; returning token 0\n");
