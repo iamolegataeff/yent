@@ -7,8 +7,8 @@
  *     seed vocabulary (distinct seed hits / total words); not a set Jaccard;
  *   - resonance: a deterministic echo-state RESERVOIR score — the cosine between the
  *     reservoir's response to the text's bag-of-words and its response to Yent's seed
- *     vocabulary. It is a NONLINEAR LEXICAL signal (a fixed random reservoir over hashed
- *     word counts), NOT a trained classifier and NOT semantic understanding; it tracks
+ *     vocabulary. It is a NONLINEAR LEXICAL signal (one fixed random reservoir over hashed
+ *     word counts for every file), NOT a trained classifier and NOT semantic understanding; it tracks
  *     lexical overlap through the reservoir's nonlinearity and is correlated with
  *     relevance. Honest scope: a nonlinear lexical reservoir score, no more.
  * Plus a chaos pulse. No "neural classification" is claimed — an earlier version returned
@@ -124,7 +124,9 @@ static float somatic_pulse(float intensity) {
 }
 
 /* ── Echo-state reservoir (notorch matvec) — nonlinear lexical resonance ── */
-#define ESN_INPUT 512
+#define ESN_INPUT  512
+#define ESN_HIDDEN 512
+#define ESN_LEAKY  0.8f
 
 typedef struct {
     nt_tensor *W_in;   /* hidden x INPUT  — seeded, fixed reservoir input map */
@@ -223,14 +225,14 @@ static void esn_free(ESN *e) {
 }
 
 /* Build the fixed seeded reservoir and the reference state from Yent's vocabulary.
+ * Hidden size and leaky rate are constant across files, so resonance values are
+ * comparable downstream instead of mixing different reservoirs by content size.
  * Returns 0 on success, -1 on allocation failure (frees any partial allocation). */
-static int esn_init(ESN *e, int content_size) {
+static int esn_init(ESN *e) {
     memset(e, 0, sizeof(*e));
-    int hidden = 512;
-    if (content_size / 1000 > hidden) hidden = content_size / 1000;
-    if (hidden > 1024) hidden = 1024;
+    int hidden = ESN_HIDDEN;
     e->hidden = hidden;
-    e->leaky  = 0.8f + fminf(0.15f, (float)content_size / 1000000.0f);
+    e->leaky  = ESN_LEAKY;
 
     e->W_in = nt_tensor_new2d(hidden, ESN_INPUT);
     e->W    = nt_tensor_new2d(hidden, hidden);
@@ -369,7 +371,7 @@ int main(int argc, char **argv) {
     float pulse_eff = clampf(pulse * 0.5f + soma * 0.5f, 0.0f, 1.0f);
 
     ESN e;
-    if (esn_init(&e, len) != 0) {
+    if (esn_init(&e) != 0) {
         fprintf(stderr, "[context_processor] esn init failed\n");
         free(content); free(bytes);
         return 1;
@@ -401,9 +403,10 @@ int main(void) {
      * so a (defensive) alloc failure never dereferences a NULL tensor. */
     ctx_srand(42);
     ESN e;
-    int init_ok = esn_init(&e, 4000);
+    int init_ok = esn_init(&e);
     total++; pass += check("esn init ok", init_ok == 0);
     if (init_ok == 0) {
+        total++; pass += check("reservoir instrument fixed", e.hidden == ESN_HIDDEN && e.leaky == ESN_LEAKY);
         float rho_after = spectral_radius(e.W->data, e.hidden, 80);
         total++; pass += check("spectral radius ~1 after scale", fabsf(rho_after - 1.0f) < 0.05f);
 
