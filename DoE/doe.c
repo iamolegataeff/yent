@@ -3297,6 +3297,7 @@ typedef struct {
     float *cos_cache, *sin_cache;
     HarmonicState hs;
     int max_seq;
+    size_t kv_bytes;
     float *img_embeds;            /* native pixtral image embeds [host_dim * img_count], or NULL */
     int    img_start, img_count;  /* positions [img_start, img_start+img_count) splice img_embeds */
 } InferState;
@@ -3316,6 +3317,7 @@ static InferState alloc_infer(GGUFIndex *ps, int max_seq) {
         return s;
     }
     s.max_seq = max_seq;
+    s.kv_bytes = kv_bytes;
     s.x = calloc((size_t)D, sizeof(float)); s.xb = calloc((size_t)D, sizeof(float)); s.xb2 = calloc((size_t)D, sizeof(float));
     s.q = calloc((size_t)ps->host_heads * ps->host_head_dim, sizeof(float));
     s.k = calloc((size_t)kd, sizeof(float)); s.v = calloc((size_t)kd, sizeof(float));
@@ -4421,9 +4423,8 @@ static void chat(GGUFIndex *ps) {
         }
 
         /* Reset KV cache */
-        int kd = ps->host_kv_heads * ps->host_head_dim;
-        memset(is.key_cache, 0, ps->host_n_layers * max_seq * kd * 4);
-        memset(is.value_cache, 0, ps->host_n_layers * max_seq * kd * 4);
+        memset(is.key_cache, 0, is.kv_bytes);
+        memset(is.value_cache, 0, is.kv_bytes);
 
         /* Wrap input in chat template (auto-detected from GGUF chat_template) */
         char wrapped[sizeof(input) + 128];
@@ -4987,9 +4988,8 @@ static void http_stream_inference(int fd, GGUFIndex *ps, const char *user_msg, f
     }
 
     /* Reset KV cache */
-    int kd = ps->host_kv_heads * ps->host_head_dim;
-    memset(is.key_cache, 0, (size_t)ps->host_n_layers * max_seq * kd * 4);
-    memset(is.value_cache, 0, (size_t)ps->host_n_layers * max_seq * kd * 4);
+    memset(is.key_cache, 0, is.kv_bytes);
+    memset(is.value_cache, 0, is.kv_bytes);
 
     /* Wrap input in chat template */
     char wrapped[4096];
