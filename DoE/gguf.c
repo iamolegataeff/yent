@@ -87,13 +87,14 @@ gguf_file* gguf_open(const char* path) {
         fclose(f); return NULL;
     }
     if (magic != GGUF_MAGIC) {
-        fprintf(stderr, "gguf: bad magic (got 0x%08x)\n", magic);
+        fprintf(stderr, "gguf: bad magic in %s (got 0x%08x)\n", path, magic);
         fclose(f); return NULL;
     }
 
     gf = (gguf_file*)calloc(1, sizeof(gguf_file));
     if (!gf) {
-        fprintf(stderr, "gguf: allocation failed while opening %s\n", path);
+        fprintf(stderr, "gguf: allocation failed while opening %s (%zu bytes)\n",
+                path, sizeof(gguf_file));
         fclose(f); return NULL;
     }
 
@@ -223,8 +224,9 @@ gguf_file* gguf_open(const char* path) {
     gf->data = NULL;
     int mem_rc = posix_memalign((void**)&gf->data, pg, alloc);
     if (mem_rc != 0 || !gf->data) {
-        fprintf(stderr, "gguf: data allocation failed for %s (%zu bytes, rc=%d)\n",
-                path, alloc, mem_rc);
+        fprintf(stderr, "gguf: data allocation failed for %s (%zu bytes, rc=%d%s%s)\n",
+                path, alloc, mem_rc,
+                mem_rc ? ": " : "", mem_rc ? strerror(mem_rc) : "");
         goto fail;
     }
     gf->data_size = raw_data_size;
