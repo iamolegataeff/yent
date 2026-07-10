@@ -81,14 +81,21 @@ gguf_file* gguf_open(const char* path) {
     gguf_file* gf = NULL;
 
     // Header
-    uint32_t magic;
-    if (!read_u32(f, &magic) || magic != GGUF_MAGIC) {
+    uint32_t magic = 0;
+    if (!read_u32(f, &magic)) {
+        fprintf(stderr, "gguf: truncated magic (%s)\n", path);
+        fclose(f); return NULL;
+    }
+    if (magic != GGUF_MAGIC) {
         fprintf(stderr, "gguf: bad magic (got 0x%08x)\n", magic);
         fclose(f); return NULL;
     }
 
     gf = (gguf_file*)calloc(1, sizeof(gguf_file));
-    if (!gf) { fclose(f); return NULL; }
+    if (!gf) {
+        fprintf(stderr, "gguf: allocation failed while opening %s\n", path);
+        fclose(f); return NULL;
+    }
 
     if (!read_u32(f, &gf->version) ||
         !read_u64(f, &gf->n_tensors) ||
@@ -214,7 +221,12 @@ gguf_file* gguf_open(const char* path) {
     if ((uint64_t)data_size > (uint64_t)SIZE_MAX - (uint64_t)(pg - 1)) goto fail;
     size_t alloc = ((size_t)data_size + pg - 1) & ~(pg - 1);
     gf->data = NULL;
-    if (posix_memalign((void**)&gf->data, pg, alloc) != 0 || !gf->data) { fclose(f); free(gf); return NULL; }
+    int mem_rc = posix_memalign((void**)&gf->data, pg, alloc);
+    if (mem_rc != 0 || !gf->data) {
+        fprintf(stderr, "gguf: data allocation failed for %s (%zu bytes, rc=%d)\n",
+                path, alloc, mem_rc);
+        goto fail;
+    }
     gf->data_size = raw_data_size;
     gf->data_alloc_size = (uint64_t)alloc;
     if (fseek(f, (long)gf->data_offset, SEEK_SET) != 0) goto fail;

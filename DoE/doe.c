@@ -4334,8 +4334,11 @@ static float *load_img_embeds_bin(const char *path, int host_dim, int *o_ntok) {
         printf("[doe] cannot open img-embeds-bin %s: %s\n", path, strerror(errno));
         return NULL;
     }
+    errno = 0;
     if (fseek(ef, 0, SEEK_END) != 0) {
-        printf("[doe] cannot seek img-embeds-bin %s: %s\n", path, strerror(errno));
+        int seek_errno = errno;
+        printf("[doe] cannot seek img-embeds-bin %s%s%s\n",
+               path, seek_errno ? ": " : "", seek_errno ? strerror(seek_errno) : "");
         fclose(ef);
         return NULL;
     }
@@ -4348,8 +4351,11 @@ static float *load_img_embeds_bin(const char *path, int host_dim, int *o_ntok) {
         fclose(ef);
         return NULL;
     }
+    errno = 0;
     if (fseek(ef, 0, SEEK_SET) != 0) {
-        printf("[doe] cannot rewind img-embeds-bin %s: %s\n", path, strerror(errno));
+        int rewind_errno = errno;
+        printf("[doe] cannot rewind img-embeds-bin %s%s%s\n",
+               path, rewind_errno ? ": " : "", rewind_errno ? strerror(rewind_errno) : "");
         fclose(ef);
         return NULL;
     }
@@ -5628,8 +5634,11 @@ int main(int argc, char **argv) {
     if (gamma_path[0] != '\0') {
         FILE *gf = fopen(gamma_path, "rb");
         if (gf) {
+            errno = 0;
             if (fseek(gf, 0, SEEK_END) != 0) {
-                printf("[gamma] cannot seek %s: %s\n", gamma_path, strerror(errno));
+                int seek_errno = errno;
+                printf("[gamma] cannot seek %s%s%s\n", gamma_path,
+                       seek_errno ? ": " : "", seek_errno ? strerror(seek_errno) : "");
             } else {
                 errno = 0;
                 long gsz = ftell(gf);
@@ -5639,35 +5648,40 @@ int main(int argc, char **argv) {
                            ftell_errno ? ": " : "", ftell_errno ? strerror(ftell_errno) : "");
                 } else if (gsz == 0 || gsz > INT_MAX) {
                     printf("[gamma] invalid gamma size for %s: %ld bytes\n", gamma_path, gsz);
-                } else if (fseek(gf, 0, SEEK_SET) != 0) {
-                    printf("[gamma] cannot rewind %s: %s\n", gamma_path, strerror(errno));
                 } else {
                     errno = 0;
-                    idx.gamma_data = malloc((size_t)gsz);
-                    if (!idx.gamma_data) {
-                        int malloc_errno = errno;
-                        printf("[gamma] allocation failed for %s (%ld bytes)%s%s\n", gamma_path, gsz,
-                               malloc_errno ? ": " : "", malloc_errno ? strerror(malloc_errno) : "");
+                    if (fseek(gf, 0, SEEK_SET) != 0) {
+                        int rewind_errno = errno;
+                        printf("[gamma] cannot rewind %s%s%s\n", gamma_path,
+                               rewind_errno ? ": " : "", rewind_errno ? strerror(rewind_errno) : "");
                     } else {
-                        size_t want = (size_t)gsz;
                         errno = 0;
-                        size_t got = fread(idx.gamma_data, 1, want, gf);
-                        int read_errno = errno;
-                        if (got == want) {
-                            idx.gamma_size = (int)gsz;
-                            printf("[gamma] loaded %ld bytes — personality active.\n", gsz);
+                        idx.gamma_data = malloc((size_t)gsz);
+                        if (!idx.gamma_data) {
+                            int malloc_errno = errno;
+                            printf("[gamma] allocation failed for %s (%ld bytes)%s%s\n", gamma_path, gsz,
+                                   malloc_errno ? ": " : "", malloc_errno ? strerror(malloc_errno) : "");
                         } else {
-                            if (ferror(gf)) {
-                                printf("[gamma] read error from %s after %zu/%zu bytes%s%s\n",
-                                       gamma_path, got, want,
-                                       read_errno ? ": " : "", read_errno ? strerror(read_errno) : "");
+                            size_t want = (size_t)gsz;
+                            errno = 0;
+                            size_t got = fread(idx.gamma_data, 1, want, gf);
+                            int read_errno = errno;
+                            if (got == want) {
+                                idx.gamma_size = (int)gsz;
+                                printf("[gamma] loaded %ld bytes — personality active.\n", gsz);
                             } else {
-                                printf("[gamma] short read from %s (%zu/%zu bytes)\n",
-                                       gamma_path, got, want);
+                                if (ferror(gf)) {
+                                    printf("[gamma] read error from %s after %zu/%zu bytes%s%s\n",
+                                           gamma_path, got, want,
+                                           read_errno ? ": " : "", read_errno ? strerror(read_errno) : "");
+                                } else {
+                                    printf("[gamma] short read from %s (%zu/%zu bytes)\n",
+                                           gamma_path, got, want);
+                                }
+                                free(idx.gamma_data);
+                                idx.gamma_data = NULL;
+                                idx.gamma_size = 0;
                             }
-                            free(idx.gamma_data);
-                            idx.gamma_data = NULL;
-                            idx.gamma_size = 0;
                         }
                     }
                 }
