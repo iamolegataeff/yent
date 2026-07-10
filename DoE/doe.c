@@ -3070,9 +3070,12 @@ static void mycelium_save(GGUFIndex *ps, int step, float fitness) {
         printf("[mycelium] temp spore path too long: %s\n", path);
         return;
     }
+    errno = 0;
     FILE *f = fopen(tmp_path, "wb");
     if (!f) {
-        printf("[mycelium] cannot write %s: %s\n", tmp_path, strerror(errno));
+        int open_errno = errno;
+        printf("[mycelium] cannot write %s%s%s\n", tmp_path,
+               open_errno ? ": " : "", open_errno ? strerror(open_errno) : "");
         return;
     }
     #define SPORE_WRITE(ptr, size, count) do { \
@@ -3112,13 +3115,19 @@ static void mycelium_save(GGUFIndex *ps, int step, float fitness) {
         }
     }
     #undef SPORE_WRITE
+    errno = 0;
     if (fclose(f) != 0) {
-        printf("[mycelium] failed closing spore: %s: %s\n", tmp_path, strerror(errno));
+        int close_errno = errno;
+        printf("[mycelium] failed closing spore: %s%s%s\n", tmp_path,
+               close_errno ? ": " : "", close_errno ? strerror(close_errno) : "");
         remove(tmp_path);
         return;
     }
+    errno = 0;
     if (rename(tmp_path, path) != 0) {
-        printf("[mycelium] failed publishing spore %s -> %s: %s\n", tmp_path, path, strerror(errno));
+        int rename_errno = errno;
+        printf("[mycelium] failed publishing spore %s -> %s%s%s\n", tmp_path, path,
+               rename_errno ? ": " : "", rename_errno ? strerror(rename_errno) : "");
         remove(tmp_path);
         return;
     }
@@ -3151,9 +3160,12 @@ static int lora_spore_step_desc_cmp(const void *a, const void *b) {
 }
 
 static int mycelium_load_file(GGUFIndex *ps, uint64_t target_fp, const char *spore_path, int filename_step) {
+    errno = 0;
     FILE *f = fopen(spore_path, "rb");
     if (!f) {
-        printf("[mycelium] cannot read spore %s: %s\n", spore_path, strerror(errno));
+        int open_errno = errno;
+        printf("[mycelium] cannot read spore %s%s%s\n", spore_path,
+               open_errno ? ": " : "", open_errno ? strerror(open_errno) : "");
         return 0;
     }
     FieldLayer tmp_layers[MAX_LAYERS];
@@ -3252,12 +3264,17 @@ static int mycelium_load_file(GGUFIndex *ps, uint64_t target_fp, const char *spo
         goto done;
     }
     if (ferror(f)) {
-        printf("[mycelium] read error at spore end %s: %s\n", spore_path, strerror(errno));
+        int read_errno = errno;
+        printf("[mycelium] read error at spore end %s%s%s\n", spore_path,
+               read_errno ? ": " : "", read_errno ? strerror(read_errno) : "");
         goto done;
     }
+    errno = 0;
     if (fclose(f) != 0) {
+        int close_errno = errno;
         f = NULL;
-        printf("[mycelium] failed closing spore after read: %s: %s\n", spore_path, strerror(errno));
+        printf("[mycelium] failed closing spore after read: %s%s%s\n", spore_path,
+               close_errno ? ": " : "", close_errno ? strerror(close_errno) : "");
         goto done;
     }
     f = NULL;
@@ -4390,9 +4407,12 @@ static int token_append_checked(int token, int *tokens, int token_cap, int *n_to
 static float *load_img_embeds_bin(const char *path, int host_dim, int *o_ntok) {
     if (o_ntok) *o_ntok = 0;
     if (!path || host_dim <= 0 || !o_ntok) return NULL;
+    errno = 0;
     FILE *ef = fopen(path, "rb");
     if (!ef) {
-        printf("[doe] cannot open img-embeds-bin %s: %s\n", path, strerror(errno));
+        int open_errno = errno;
+        printf("[doe] cannot open img-embeds-bin %s%s%s\n",
+               path, open_errno ? ": " : "", open_errno ? strerror(open_errno) : "");
         return NULL;
     }
     errno = 0;
@@ -5693,6 +5713,7 @@ int main(int argc, char **argv) {
 
     /* ── Load gamma if found ── */
     if (gamma_path[0] != '\0') {
+        errno = 0;
         FILE *gf = fopen(gamma_path, "rb");
         if (gf) {
             errno = 0;
@@ -5749,7 +5770,9 @@ int main(int argc, char **argv) {
             }
             fclose(gf);
         } else {
-            printf("[gamma] cannot open %s: %s\n", gamma_path, strerror(errno));
+            int open_errno = errno;
+            printf("[gamma] cannot open %s%s%s\n", gamma_path,
+                   open_errno ? ": " : "", open_errno ? strerror(open_errno) : "");
         }
     }
 
