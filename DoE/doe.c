@@ -2555,6 +2555,7 @@ static int index_load(GGUFIndex *ps, const char *path) {
             }
         }
     }
+    if (getenv("DOE_PROFILE")) printf("[doe] wired %d host tensors\n", wired);
     free(tinfo);
 
     /* tied embeddings: if output.weight missing, reuse token_embd.weight */
@@ -4521,7 +4522,6 @@ static void chat(GGUFIndex *ps) {
     }
     CalendarDrift cd; drift_init(&cd);
     MetaTrack meta; meta_init(&meta);
-    HarmonicState hs = {0};
 
     char input[8192];  /* enlarged for long prompts / long-context probes */
     printf("\n[doe] the parliament is in session. type your message (Ctrl+C to dissipate):\n");
