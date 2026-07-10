@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <limits.h>
 #include <stdint.h>
+#include <errno.h>
 
 // ── Reading primitives ───────────────────────────────────────────────────────
 
@@ -76,8 +77,14 @@ static int skip_value(FILE* f, uint32_t type) {
 // ── GGUF Open ────────────────────────────────────────────────────────────────
 
 gguf_file* gguf_open(const char* path) {
+    errno = 0;
     FILE* f = fopen(path, "rb");
-    if (!f) { fprintf(stderr, "gguf: cannot open %s\n", path); return NULL; }
+    if (!f) {
+        int open_errno = errno;
+        fprintf(stderr, "gguf: cannot open %s%s%s\n",
+                path, open_errno ? ": " : "", open_errno ? strerror(open_errno) : "");
+        return NULL;
+    }
     gguf_file* gf = NULL;
 
     // Header
@@ -282,8 +289,14 @@ static void gguf_free_str_array(char** arr, uint64_t n) {
 char** gguf_read_str_array(const char* path, const char* key, int* out_n) {
     if (out_n) *out_n = 0;
     if (!path || !key) return NULL;
+    errno = 0;
     FILE* f = fopen(path, "rb");
-    if (!f) return NULL;
+    if (!f) {
+        int open_errno = errno;
+        fprintf(stderr, "gguf: cannot open %s while reading string array %s%s%s\n",
+                path, key, open_errno ? ": " : "", open_errno ? strerror(open_errno) : "");
+        return NULL;
+    }
     uint32_t magic;
     if (!read_u32(f, &magic) || magic != GGUF_MAGIC) { fclose(f); return NULL; }
     uint32_t version; uint64_t n_tensors, n_kv;
@@ -365,8 +378,14 @@ void gguf_f16_to_f32_n(const uint16_t* src, float* dst, long n) {
 int32_t* gguf_read_i32_array(const char* path, const char* key, int* out_n) {
     if (out_n) *out_n = 0;
     if (!path || !key) return NULL;
+    errno = 0;
     FILE* f = fopen(path, "rb");
-    if (!f) return NULL;
+    if (!f) {
+        int open_errno = errno;
+        fprintf(stderr, "gguf: cannot open %s while reading i32 array %s%s%s\n",
+                path, key, open_errno ? ": " : "", open_errno ? strerror(open_errno) : "");
+        return NULL;
+    }
     uint32_t magic;
     if (!read_u32(f, &magic) || magic != GGUF_MAGIC) { fclose(f); return NULL; }
     uint32_t version; uint64_t n_tensors, n_kv;
