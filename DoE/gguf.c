@@ -231,9 +231,9 @@ gguf_file* gguf_open(const char* path) {
     gf->data = NULL;
     int mem_rc = posix_memalign((void**)&gf->data, pg, alloc);
     if (mem_rc != 0 || !gf->data) {
+        const char *why = mem_rc ? strerror(mem_rc) : "returned NULL";
         fprintf(stderr, "gguf: data allocation failed for %s (%zu bytes, rc=%d%s%s)\n",
-                path, alloc, mem_rc,
-                mem_rc ? ": " : "", mem_rc ? strerror(mem_rc) : "");
+                path, alloc, mem_rc, why[0] ? ": " : "", why);
         goto fail;
     }
     gf->data_size = raw_data_size;
