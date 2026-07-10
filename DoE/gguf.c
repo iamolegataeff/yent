@@ -32,21 +32,12 @@ static int read_string(FILE* f, char* buf, int max) {
     return 1;
 }
 
-static char* read_string_alloc(FILE* f, uint64_t* out_len, int* out_alloc_failed) {
-    if (out_len) *out_len = 0;
-    if (out_alloc_failed) *out_alloc_failed = 0;
+static char* read_string_alloc(FILE* f) {
     uint64_t len;
     if (!read_u64(f, &len)) return NULL;
-    if (out_len) *out_len = len;
-    if (len > (uint64_t)SIZE_MAX - 1) {
-        if (out_alloc_failed) *out_alloc_failed = 1;
-        return NULL;
-    }
+    if (len > (uint64_t)SIZE_MAX - 1) return NULL;
     char* s = (char*)malloc((size_t)len + 1);
-    if (!s) {
-        if (out_alloc_failed) *out_alloc_failed = 1;
-        return NULL;
-    }
+    if (!s) return NULL;
     if (len > 0 && fread(s, 1, (size_t)len, f) != (size_t)len) {
         free(s);
         return NULL;
@@ -233,9 +224,9 @@ gguf_file* gguf_open(const char* path) {
     gf->data = NULL;
     int mem_rc = posix_memalign((void**)&gf->data, pg, alloc);
     if (mem_rc != 0 || !gf->data) {
-        const char* why = mem_rc ? strerror(mem_rc) : "returned NULL";
         fprintf(stderr, "gguf: data allocation failed for %s (%zu bytes, rc=%d%s%s)\n",
-                path, alloc, mem_rc, why[0] ? ": " : "", why);
+                path, alloc, mem_rc,
+                mem_rc ? ": " : "", mem_rc ? strerror(mem_rc) : "");
         goto fail;
     }
     gf->data_size = raw_data_size;
@@ -292,22 +283,9 @@ char** gguf_read_str_array(const char* path, const char* key, int* out_n) {
     if (out_n) *out_n = 0;
     if (!path || !key) return NULL;
     FILE* f = fopen(path, "rb");
-    if (!f) {
-        fprintf(stderr, "gguf: cannot open %s while reading string array %s\n", path, key);
-        return NULL;
-    }
+    if (!f) return NULL;
     uint32_t magic;
-    if (!read_u32(f, &magic)) {
-        fprintf(stderr, "gguf: truncated magic while reading string array %s (%s)\n", key, path);
-        fclose(f);
-        return NULL;
-    }
-    if (magic != GGUF_MAGIC) {
-        fprintf(stderr, "gguf: bad magic while reading string array %s in %s (got 0x%08x)\n",
-                key, path, magic);
-        fclose(f);
-        return NULL;
-    }
+    if (!read_u32(f, &magic) || magic != GGUF_MAGIC) { fclose(f); return NULL; }
     uint32_t version; uint64_t n_tensors, n_kv;
     if (!read_u32(f, &version) || !read_u64(f, &n_tensors) || !read_u64(f, &n_kv)) {
         fprintf(stderr, "gguf: truncated header while reading string array %s (%s)\n", key, path);
@@ -336,26 +314,12 @@ char** gguf_read_str_array(const char* path, const char* key, int* out_n) {
                 return NULL;
             }
             char** result = (char**)calloc(alen ? (size_t)alen : 1, sizeof(char*));
-            if (!result) {
-                size_t nitems = alen ? (size_t)alen : 1;
-                fprintf(stderr, "gguf: allocation failed for string array %s in %s (%zu bytes)\n",
-                        key, path, nitems * sizeof(char*));
-                fclose(f);
-                return NULL;
-            }
+            if (!result) { fclose(f); return NULL; }
             for (uint64_t j = 0; j < alen; j++) {
-                uint64_t slen = 0;
-                int alloc_failed = 0;
-                result[j] = read_string_alloc(f, &slen, &alloc_failed);
+                result[j] = read_string_alloc(f);
                 if (!result[j]) {
-                    if (alloc_failed) {
-                        fprintf(stderr, "gguf: allocation failed for string array %s item %llu/%llu in %s (string length %llu)\n",
-                                key, (unsigned long long)j, (unsigned long long)alen, path,
-                                (unsigned long long)slen);
-                    } else {
-                        fprintf(stderr, "gguf: truncated string array %s at item %llu/%llu (%s)\n",
-                                key, (unsigned long long)j, (unsigned long long)alen, path);
-                    }
+                    fprintf(stderr, "gguf: truncated string array %s at item %llu/%llu (%s)\n",
+                            key, (unsigned long long)j, (unsigned long long)alen, path);
                     gguf_free_str_array(result, j);
                     fclose(f);
                     return NULL;
@@ -386,11 +350,7 @@ uint16_t* gguf_load_f16(const gguf_file* gf, int tensor_idx) {
     uint64_t nbytes = ti->n_elements * 2;
     if (ti->offset >= gf->data_size || nbytes > gf->data_size - ti->offset) return NULL;
     uint16_t* dst = (uint16_t*)malloc(nbytes);
-    if (!dst) {
-        fprintf(stderr, "gguf: allocation failed loading f16 tensor '%s' (%llu bytes)\n",
-                ti->name, (unsigned long long)nbytes);
-        return NULL;
-    }
+    if (!dst) return NULL;
     memcpy(dst, gf->data + ti->offset, nbytes);
     return dst;
 }
@@ -406,22 +366,9 @@ int32_t* gguf_read_i32_array(const char* path, const char* key, int* out_n) {
     if (out_n) *out_n = 0;
     if (!path || !key) return NULL;
     FILE* f = fopen(path, "rb");
-    if (!f) {
-        fprintf(stderr, "gguf: cannot open %s while reading i32 array %s\n", path, key);
-        return NULL;
-    }
+    if (!f) return NULL;
     uint32_t magic;
-    if (!read_u32(f, &magic)) {
-        fprintf(stderr, "gguf: truncated magic while reading i32 array %s (%s)\n", key, path);
-        fclose(f);
-        return NULL;
-    }
-    if (magic != GGUF_MAGIC) {
-        fprintf(stderr, "gguf: bad magic while reading i32 array %s in %s (got 0x%08x)\n",
-                key, path, magic);
-        fclose(f);
-        return NULL;
-    }
+    if (!read_u32(f, &magic) || magic != GGUF_MAGIC) { fclose(f); return NULL; }
     uint32_t version; uint64_t n_tensors, n_kv;
     if (!read_u32(f, &version) || !read_u64(f, &n_tensors) || !read_u64(f, &n_kv)) {
         fprintf(stderr, "gguf: truncated header while reading i32 array %s (%s)\n", key, path);
@@ -450,13 +397,7 @@ int32_t* gguf_read_i32_array(const char* path, const char* key, int* out_n) {
                 return NULL;
             }
             int32_t* result = (int32_t*)calloc(alen ? (size_t)alen : 1, sizeof(int32_t));
-            if (!result) {
-                size_t nitems = alen ? (size_t)alen : 1;
-                fprintf(stderr, "gguf: allocation failed for i32 array %s in %s (%zu bytes)\n",
-                        key, path, nitems * sizeof(int32_t));
-                fclose(f);
-                return NULL;
-            }
+            if (!result) { fclose(f); return NULL; }
             for (uint64_t j = 0; j < alen; j++) {
                 uint32_t v;
                 if (!read_u32(f, &v)) {
