@@ -2189,13 +2189,42 @@ static int index_load(GGUFIndex *ps, const char *path) {
     ps->rms_norm_eps = 1e-5f;
     ps->add_space_prefix = 1;
 
+    errno = 0;
     int fd = open(path, O_RDONLY);
-    if (fd < 0) { printf("[doe] cannot open %s\n", path); return 0; }
-    struct stat st; fstat(fd, &st);
-    ps->mmap_size = st.st_size;
+    if (fd < 0) {
+        int open_errno = errno;
+        printf("[doe] cannot open %s%s%s\n", path,
+               open_errno ? ": " : "", open_errno ? strerror(open_errno) : "");
+        return 0;
+    }
+    struct stat st;
+    errno = 0;
+    if (fstat(fd, &st) != 0) {
+        int stat_errno = errno;
+        printf("[doe] cannot stat %s%s%s\n", path,
+               stat_errno ? ": " : "", stat_errno ? strerror(stat_errno) : "");
+        close(fd);
+        return 0;
+    }
+    if (st.st_size <= 0 || (uintmax_t)st.st_size > (uintmax_t)SIZE_MAX) {
+        printf("[doe] invalid GGUF file size for %s: %lld bytes\n",
+               path, (long long)st.st_size);
+        close(fd);
+        return 0;
+    }
+    ps->mmap_size = (size_t)st.st_size;
+    errno = 0;
     ps->mmap_base = mmap(NULL, ps->mmap_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    int mmap_errno = errno;
     close(fd);
-    if (ps->mmap_base == MAP_FAILED) { ps->mmap_base = NULL; return 0; }
+    if (ps->mmap_base == MAP_FAILED) {
+        printf("[doe] cannot mmap %s (%zu bytes)%s%s\n",
+               path, ps->mmap_size,
+               mmap_errno ? ": " : "", mmap_errno ? strerror(mmap_errno) : "");
+        ps->mmap_base = NULL;
+        ps->mmap_size = 0;
+        return 0;
+    }
 #ifdef USE_METAL
     /* Metal: register the whole packed GGUF block as a resident zero-copy GPU buffer (Phase 2 —
      * weights bind by offset, no per-token upload). mmap base is page-aligned;
