@@ -2770,6 +2770,9 @@ static int parliament_elect(Parliament *p, LoraExpert *experts, float *input, in
     if (!isfinite(p->consensus) || p->consensus < 0.0f || p->consensus > 1.0f)
         p->consensus = 0.5f;
     p->consensus = 0.9f * p->consensus + 0.1f * consensus;
+    if (!isfinite(p->consensus)) p->consensus = 0.5f;
+    else if (p->consensus < 0.0f) p->consensus = 0.0f;
+    else if (p->consensus > 1.0f) p->consensus = 1.0f;
 
     int k = (int)(n_alive * (1.0f - p->consensus));
     if (k < 2) k = 2; if (k > n_alive) k = n_alive;
@@ -3031,6 +3034,10 @@ static void mycelium_init(MyceliumState *ms) {
 
 static void mycelium_save(GGUFIndex *ps, int step, float fitness) {
     /* A13: quarantine gate — never persist poisoned or dead parliament state. */
+    if (!isfinite(fitness)) {
+        printf("[mycelium] invalid spore fitness (%.6g) — spore NOT saved\n", fitness);
+        return;
+    }
     for (int l = 0; l < ps->n_field_layers; l++) {
         int actual_alive = field_recount_alive(&ps->field_layers[l]);
         if (actual_alive < MIN_EXPERTS) {
@@ -3044,6 +3051,11 @@ static void mycelium_save(GGUFIndex *ps, int step, float fitness) {
                 printf("[mycelium] poisoned expert L%d e%d (NaN/Inf/|w|>1e4) — spore NOT saved (quarantine)\n", l, e);
                 return;
             }
+        float consensus = ps->field_layers[l].parliament.consensus;
+        if (!isfinite(consensus) || consensus < 0.0f || consensus > 1.0f) {
+            printf("[mycelium] invalid consensus in layer %d (%.6g) — spore NOT saved\n", l, consensus);
+            return;
+        }
     }
     char path[256];
     int pn = snprintf(path, sizeof(path), "%s/spore_%016llx_s%d.bin", MYCELIUM_DIR,
