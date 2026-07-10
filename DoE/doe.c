@@ -141,6 +141,7 @@ static int g_gen_top_k = 40;
 static int g_top_k_clamp_warned = 0;
 static int g_sampler_nonfinite_warned = 0;
 static int g_softmax_nonfinite_warned = 0;
+static int g_tokenizer_zero_fallback_warned = 0;
 static float g_gen_temp_override = -1.0f; /* <0 uses field effective temperature */
 static int g_once = 0; /* exit after one generated answer; useful for artifact isolation */
 static int g_load_spore = 1;
@@ -4164,6 +4165,14 @@ static int try_special_token(GGUFIndex *ps, const char *text, int tlen, int i, i
     return -1;
 }
 
+static void warn_tokenizer_zero_fallback(const char *kind, unsigned char byte) {
+    if (!g_tokenizer_zero_fallback_warned) {
+        fprintf(stderr, "[doe] WARNING: tokenizer missing %s fallback for byte 0x%02X; using token 0\n",
+                kind ? kind : "byte", byte);
+        g_tokenizer_zero_fallback_warned = 1;
+    }
+}
+
 static int tokenize_input(GGUFIndex *ps, const char *text, int *tokens, int max_tokens) {
     if (!text || !tokens || max_tokens <= 0) return 0;
     if (!ps->vocab_tokens) {
@@ -4200,7 +4209,11 @@ static int tokenize_input(GGUFIndex *ps, const char *text, int *tokens, int max_
             int r = gpt2_byte_to_rune((unsigned char)text[i]);
             char u8[4]; int u8len = rune_to_utf8(r, u8);
             int id = tok_lookup(ps, u8, u8len);
-            ids[n++] = (id >= 0) ? id : 0;
+            if (id >= 0) ids[n++] = id;
+            else {
+                warn_tokenizer_zero_fallback("GPT-2 byte", (unsigned char)text[i]);
+                ids[n++] = 0;
+            }
             i++;
         }
     } else {
@@ -4255,7 +4268,12 @@ static int tokenize_input(GGUFIndex *ps, const char *text, int *tokens, int max_
                 else {
                     char hex[7]; snprintf(hex, 7, "<0x%02X>", (unsigned char)sp[k]);
                     id = tok_lookup(ps, hex, 6);
-                    ids[n++] = (id >= 0) ? id : 0; k++;
+                    if (id >= 0) ids[n++] = id;
+                    else {
+                        warn_tokenizer_zero_fallback("SentencePiece byte", (unsigned char)sp[k]);
+                        ids[n++] = 0;
+                    }
+                    k++;
                 }
             }
             free(sp);
