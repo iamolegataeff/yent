@@ -2245,7 +2245,9 @@ static int index_load(GGUFIndex *ps, const char *path) {
             /* Detect chat template style from template string */
             if (strstr(key, "chat_template") && vlen > 10 && vlen < 100000) {
                 /* Search for distinctive patterns in the Jinja template */
-                char *tmpl = malloc(vlen + 1); memcpy(tmpl, p, vlen); tmpl[vlen] = 0;
+                char *tmpl = malloc(vlen + 1);
+                if (!tmpl) goto bail;
+                memcpy(tmpl, p, vlen); tmpl[vlen] = 0;
                 if (strstr(tmpl, "im_start"))       ps->chat_style = 1; /* ChatML */
                 else if (strstr(tmpl, "[INST]"))     ps->chat_style = 2; /* Llama/Mistral */
                 else if (strstr(tmpl, "<|user|>"))   ps->chat_style = 3; /* Zephyr */
