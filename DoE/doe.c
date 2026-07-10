@@ -1911,11 +1911,31 @@ static int gguf_sniff_skip_value(FILE *f, uint32_t vtype) {
 }
 
 static int gguf_sniff(const char *path, DiscoveredGGUF *out) {
+    if (!path || !out) return 0;
+    errno = 0;
     FILE *f = fopen(path, "rb");
-    if (!f) return 0;
+    if (!f) {
+        int open_errno = errno;
+        fprintf(stderr, "[env] cannot open GGUF candidate %s%s%s\n",
+                path, open_errno ? ": " : "", open_errno ? strerror(open_errno) : "");
+        return 0;
+    }
     struct stat st;
-    if (fstat(fileno(f), &st) != 0) { fclose(f); return 0; }
-    out->file_size = st.st_size;
+    errno = 0;
+    if (fstat(fileno(f), &st) != 0) {
+        int stat_errno = errno;
+        fprintf(stderr, "[env] cannot stat GGUF candidate %s%s%s\n",
+                path, stat_errno ? ": " : "", stat_errno ? strerror(stat_errno) : "");
+        fclose(f);
+        return 0;
+    }
+    if (st.st_size <= 0 || (uintmax_t)st.st_size > (uintmax_t)INT64_MAX) {
+        fprintf(stderr, "[env] invalid GGUF candidate size for %s: %lld bytes\n",
+                path, (long long)st.st_size);
+        fclose(f);
+        return 0;
+    }
+    out->file_size = (int64_t)st.st_size;
     snprintf(out->path, 256, "%s", path);
     memset(out->arch, 0, 64); out->n_layers = 0; out->dim = 0; out->n_heads = 0;
     uint32_t magic; if (fread(&magic, 4, 1, f) != 1 || magic != 0x46554747) { fclose(f); return 0; }
@@ -1990,7 +2010,7 @@ static int env_has_suffix(const char *s, const char *suffix) {
 }
 
 static void env_scan_ggufs(Environment *env, const char *dir_path, int depth_remaining) {
-    if (!env || !dir_path || depth_remaining <= 0 || env->n_ggufs >= 32) return;
+    if (!env || !dir_path || depth_remaining < 0 || env->n_ggufs >= 32) return;
     DIR *dir = opendir(dir_path);
     if (!dir) return;
     struct dirent *ent;
@@ -2005,7 +2025,7 @@ static void env_scan_ggufs(Environment *env, const char *dir_path, int depth_rem
             if (gguf_sniff(path, &dg)) env->ggufs[env->n_ggufs++] = dg;
             continue;
         }
-        if (depth_remaining > 1) {
+        if (depth_remaining > 0) {
             struct stat st;
             if (lstat(path, &st) == 0 && S_ISDIR(st.st_mode))
                 env_scan_ggufs(env, path, depth_remaining - 1);
