@@ -4168,7 +4168,7 @@ static int try_special_token(GGUFIndex *ps, const char *text, int tlen, int i, i
 static void warn_tokenizer_zero_fallback(const char *kind, unsigned char byte) {
     if (!g_tokenizer_zero_fallback_warned) {
         fprintf(stderr, "[doe] WARNING: tokenizer missing %s fallback for byte 0x%02X; using token 0\n",
-                kind ? kind : "byte", byte);
+                kind ? kind : "byte", (unsigned int)byte);
         g_tokenizer_zero_fallback_warned = 1;
     }
 }
@@ -4331,22 +4331,25 @@ static float *load_img_embeds_bin(const char *path, int host_dim, int *o_ntok) {
     if (!path || host_dim <= 0 || !o_ntok) return NULL;
     FILE *ef = fopen(path, "rb");
     if (!ef) {
-        printf("[doe] cannot open img-embeds-bin: %s\n", path);
+        printf("[doe] cannot open img-embeds-bin %s: %s\n", path, strerror(errno));
         return NULL;
     }
     if (fseek(ef, 0, SEEK_END) != 0) {
-        printf("[doe] cannot seek img-embeds-bin: %s\n", path);
+        printf("[doe] cannot seek img-embeds-bin %s: %s\n", path, strerror(errno));
         fclose(ef);
         return NULL;
     }
+    errno = 0;
     long sz = ftell(ef);
+    int ftell_errno = errno;
     if (sz < 0) {
-        printf("[doe] cannot size img-embeds-bin: %s\n", path);
+        printf("[doe] cannot size img-embeds-bin %s%s%s\n",
+               path, ftell_errno ? ": " : "", ftell_errno ? strerror(ftell_errno) : "");
         fclose(ef);
         return NULL;
     }
     if (fseek(ef, 0, SEEK_SET) != 0) {
-        printf("[doe] cannot rewind img-embeds-bin: %s\n", path);
+        printf("[doe] cannot rewind img-embeds-bin %s: %s\n", path, strerror(errno));
         fclose(ef);
         return NULL;
     }
@@ -4372,14 +4375,27 @@ static float *load_img_embeds_bin(const char *path, int host_dim, int *o_ntok) {
         fclose(ef);
         return NULL;
     }
+    errno = 0;
     float *emb = malloc((size_t)ne * sizeof(float));
     if (!emb) {
-        printf("[doe] img-embeds-bin allocation failed: %ld floats\n", ne);
+        int malloc_errno = errno;
+        printf("[doe] img-embeds-bin allocation failed for %s: %ld floats%s%s\n",
+               path, ne, malloc_errno ? ": " : "", malloc_errno ? strerror(malloc_errno) : "");
         fclose(ef);
         return NULL;
     }
-    if (fread(emb, sizeof(float), (size_t)ne, ef) != (size_t)ne) {
-        printf("[doe] short read from img-embeds-bin: %s\n", path);
+    errno = 0;
+    size_t got = fread(emb, sizeof(float), (size_t)ne, ef);
+    int read_errno = errno;
+    if (got != (size_t)ne) {
+        if (ferror(ef)) {
+            printf("[doe] read error from img-embeds-bin %s after %zu/%zu floats%s%s\n",
+                   path, got, (size_t)ne,
+                   read_errno ? ": " : "", read_errno ? strerror(read_errno) : "");
+        } else {
+            printf("[doe] short read from img-embeds-bin %s (%zu/%zu floats)\n",
+                   path, got, (size_t)ne);
+        }
         free(emb);
         fclose(ef);
         return NULL;
