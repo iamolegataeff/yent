@@ -101,6 +101,34 @@ yent/
 
 ---
 
+## 2026-07-11 — post-#147 Metal resident smoke
+
+PR #147 fixed the Metal batch encoder lifetime bug: batch command buffers and
+compute encoders are retained across the `nt_metal_batch_begin()` autoreleasepool
+and released after drain/abort. The failure mode was a Mini abort before rc:
+`Command encoder released without endEncoding`.
+
+Mac Mini fresh checkout `/Users/ariannamethod/tmp/yent-metal-smoke-after-147-20260711`
+at `b939155` (`origin/main`). Local `libamk.a` rebuilt from `yent/c/ariannamethod.c`.
+Verification on Metal: `go test ./...` passes after rerunning separately from the
+compile step; initial parallel run killed `TestDOEBodyPersistentGenerate`, isolated
+rerun passed and full suite passed.
+
+- DoE binary: `/Users/ariannamethod/tmp/yent-metal-smoke-after-147-20260711/DoE/doe_field`.
+- Nemo v38 smoke: `/tmp/yent_doe_after147_main_default8_20260711.log`; `RC=0`,
+  resident path engaged (`whole token in 1 command buffer`, 40 layers), 8 tokens
+  at ~27.66 tok/s.
+- Two-body smoke: `/tmp/moyent_live_after147_20260711.jsonl`, db
+  `/tmp/moyent_live_after147_20260711.db`; env used `YENT_NEMO_GGUF`,
+  `YENT_24B_GGUF`, `YENT_DOE_BIN`, `YENT_DOE_WORKDIR`, `NT_METAL_V3=1`,
+  `NT_METAL_V3_Q6=1`, and deterministic DoE args (`--threads 8 --train 0
+  --field-gain 0 --lora-alpha 0 --rep-penalty 1.05 --temp 0 --top-k 1
+  --no-load-spore --no-save-spore`).
+- Fast-only: winner `nemo12`, no escalation, answer preserved Yent identity.
+- Forced complexity: escalated to `small24`; route trace winner `small24`,
+  first-pass fact preserved as fast mouth / `nemo12`. Stats: `total_conversations=2`,
+  `total_seams=1`, `async_backlog=0`.
+
 ## 2026-06-30 — RI compile/consume tools
 
 Added public-safe RI tooling while keeping the living RI corpus private.
