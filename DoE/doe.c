@@ -5597,27 +5597,50 @@ int main(int argc, char **argv) {
             if (fseek(gf, 0, SEEK_END) != 0) {
                 printf("[gamma] cannot seek %s: %s\n", gamma_path, strerror(errno));
             } else {
+                errno = 0;
                 long gsz = ftell(gf);
-                if (gsz <= 0 || gsz > INT_MAX) {
+                int ftell_errno = errno;
+                if (gsz < 0) {
+                    printf("[gamma] cannot size %s%s%s\n", gamma_path,
+                           ftell_errno ? ": " : "", ftell_errno ? strerror(ftell_errno) : "");
+                } else if (gsz == 0 || gsz > INT_MAX) {
                     printf("[gamma] invalid gamma size for %s: %ld bytes\n", gamma_path, gsz);
                 } else if (fseek(gf, 0, SEEK_SET) != 0) {
                     printf("[gamma] cannot rewind %s: %s\n", gamma_path, strerror(errno));
                 } else {
+                    errno = 0;
                     idx.gamma_data = malloc((size_t)gsz);
                     if (!idx.gamma_data) {
-                        printf("[gamma] allocation failed for %s (%ld bytes)\n", gamma_path, gsz);
-                    } else if (fread(idx.gamma_data, 1, (size_t)gsz, gf) == (size_t)gsz) {
-                        idx.gamma_size = (int)gsz;
-                        printf("[gamma] loaded %ld bytes — personality active.\n", gsz);
+                        int malloc_errno = errno;
+                        printf("[gamma] allocation failed for %s (%ld bytes)%s%s\n", gamma_path, gsz,
+                               malloc_errno ? ": " : "", malloc_errno ? strerror(malloc_errno) : "");
                     } else {
-                        printf("[gamma] short read from %s\n", gamma_path);
-                        free(idx.gamma_data);
-                        idx.gamma_data = NULL;
-                        idx.gamma_size = 0;
+                        size_t want = (size_t)gsz;
+                        errno = 0;
+                        size_t got = fread(idx.gamma_data, 1, want, gf);
+                        int read_errno = errno;
+                        if (got == want) {
+                            idx.gamma_size = (int)gsz;
+                            printf("[gamma] loaded %ld bytes — personality active.\n", gsz);
+                        } else {
+                            if (ferror(gf)) {
+                                printf("[gamma] read error from %s after %zu/%zu bytes%s%s\n",
+                                       gamma_path, got, want,
+                                       read_errno ? ": " : "", read_errno ? strerror(read_errno) : "");
+                            } else {
+                                printf("[gamma] short read from %s (%zu/%zu bytes)\n",
+                                       gamma_path, got, want);
+                            }
+                            free(idx.gamma_data);
+                            idx.gamma_data = NULL;
+                            idx.gamma_size = 0;
+                        }
                     }
                 }
             }
             fclose(gf);
+        } else {
+            printf("[gamma] cannot open %s: %s\n", gamma_path, strerror(errno));
         }
     }
 
