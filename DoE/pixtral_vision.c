@@ -14,6 +14,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <limits.h>
+#include <errno.h>
 #include <Accelerate/Accelerate.h>
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -590,16 +591,58 @@ static int pv_expect_count(const char *label, long got, long expected) {
 
 static float *pv_load_bin(const char *path, long *n) {
     FILE *f = fopen(path, "rb");
-    if (!f) { fprintf(stderr, "cannot open %s\n", path); return NULL; }
-    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
+    if (!f) { fprintf(stderr, "cannot open %s: %s\n", path, strerror(errno)); return NULL; }
+    errno = 0;
+    if (fseek(f, 0, SEEK_END) != 0) {
+        int saved_errno = errno;
+        fprintf(stderr, "cannot seek %s%s%s\n",
+                path, saved_errno ? ": " : "", saved_errno ? strerror(saved_errno) : "");
+        fclose(f);
+        return NULL;
+    }
+    errno = 0;
     long bytes = ftell(f);
-    if (bytes < 0 || bytes % (long)sizeof(float) != 0) { fclose(f); return NULL; }
+    if (bytes < 0) {
+        int saved_errno = errno;
+        fprintf(stderr, "cannot tell size of %s%s%s\n",
+                path, saved_errno ? ": " : "", saved_errno ? strerror(saved_errno) : "");
+        fclose(f);
+        return NULL;
+    }
+    if (bytes % (long)sizeof(float) != 0) {
+        fprintf(stderr, "%s: size %ld is not a whole number of floats\n", path, bytes);
+        fclose(f);
+        return NULL;
+    }
     *n = bytes / (long)sizeof(float);
-    if (fseek(f, 0, SEEK_SET) != 0) { fclose(f); return NULL; }
+    errno = 0;
+    if (fseek(f, 0, SEEK_SET) != 0) {
+        int saved_errno = errno;
+        fprintf(stderr, "cannot rewind %s%s%s\n",
+                path, saved_errno ? ": " : "", saved_errno ? strerror(saved_errno) : "");
+        fclose(f);
+        return NULL;
+    }
     float *b = pv_alloc_f32((size_t)(*n), "pv_test bin");
     if (!b) { fclose(f); return NULL; }
-    if (fread(b, sizeof(float), *n, f) != (size_t)(*n)) { fclose(f); free(b); return NULL; }
-    fclose(f);
+    errno = 0;
+    size_t got = fread(b, sizeof(float), (size_t)(*n), f);
+    if (got != (size_t)(*n)) {
+        int read_failed = ferror(f);
+        int saved_errno = errno;
+        fprintf(stderr, "short read from %s: got %zu floats, expected %ld%s%s\n",
+                path, got, *n,
+                read_failed && saved_errno ? ": " : "",
+                read_failed && saved_errno ? strerror(saved_errno) : "");
+        fclose(f);
+        free(b);
+        return NULL;
+    }
+    if (fclose(f) != 0) {
+        fprintf(stderr, "cannot close %s: %s\n", path, strerror(errno));
+        free(b);
+        return NULL;
+    }
     return b;
 }
 // returns 1 if rel error < rel_tol and no NaN.
@@ -626,92 +669,103 @@ static int pv_compare(const char *label, const float *mine, const float *ref, lo
 //   6 img_break(in=proj)  7 full end-to-end -> final
 int main(int argc, char **argv) {
     if (argc < 5) { fprintf(stderr, "usage: %s <stage> <image> <gguf|-> <gt.bin> [input.bin]\n", argv[0]); return 1; }
+    int rc = 1;
+    int ok = 0;
     int stage = atoi(argv[1]);
+    if (stage < 1 || stage > 7) {
+        fprintf(stderr, "invalid stage %d; expected 1..7\n", stage);
+        return 1;
+    }
     int nx, ny;
     float *inp = pv_preprocess(argv[2], &nx, &ny);
-    if (!inp) return 1;
+    float *ref = NULL;
+    gguf_file *gf = NULL;
+    if (!inp) goto cleanup;
     printf("preprocessed %s -> %dx%d\n", argv[2], nx, ny);
     int npx = nx / PV_PATCH, npy = ny / PV_PATCH, npos = npx * npy;
     int OWm = npx / 2, OHm = npy / 2, nm = OWm * OHm;
-    long rn; float *ref = pv_load_bin(argv[4], &rn);
-    if (!ref) return 1;
-    int ok = 0;
+    long rn; ref = pv_load_bin(argv[4], &rn);
+    if (!ref) goto cleanup;
 
     if (stage == 1) {
-        if (!pv_expect_count("stage1 ref", rn, (long)nx * ny * 3)) return 1;
+        if (!pv_expect_count("stage1 ref", rn, (long)nx * ny * 3)) goto cleanup;
         ok = pv_compare("inp_raw", inp, ref, (long)nx * ny * 3, 1e-4);
         printf("STAGE%d %s\n", stage, ok ? "PASS" : "FAIL");
-        return ok ? 0 : 3;
+        rc = ok ? 0 : 3;
+        goto cleanup;
     }
 
-    gguf_file *gf = gguf_open(argv[3]);
-    if (!gf) { fprintf(stderr, "cannot open gguf %s\n", argv[3]); return 1; }
+    gf = gguf_open(argv[3]);
+    if (!gf) { fprintf(stderr, "cannot open gguf %s\n", argv[3]); goto cleanup; }
     const int NE = 1024, DIM = 5120;
 
     if (stage == 2 || stage == 3 || stage == 7) {
         int nembd, np2;
         float *cur = pv_patch_embed(inp, nx, ny, gf, &np2, &nembd);
-        if (!cur) return 1;
+        if (!cur) goto cleanup;
         if (stage == 2) {
-            if (!pv_expect_count("stage2 ref", rn, (long)nembd * np2)) { free(cur); return 1; }
+            if (!pv_expect_count("stage2 ref", rn, (long)nembd * np2)) { free(cur); goto cleanup; }
             ok = pv_compare("conv", cur, ref, (long)nembd * np2, 1e-2);
         } else {
             int *ph = pv_alloc_i32((size_t)np2, "pv_test rope row positions");
             int *pw = pv_alloc_i32((size_t)np2, "pv_test rope col positions");
-            if (!ph || !pw) { free(ph); free(pw); free(cur); return 1; }
+            if (!ph || !pw) { free(ph); free(pw); free(cur); goto cleanup; }
             for (int i = 0; i < np2; i++) { ph[i] = i / npx; pw[i] = i % npx; }
             float *trunk = pv_vit_trunk(cur, nembd, np2, gf, ph, pw);   // in place
             free(ph); free(pw);
-            if (!trunk) { free(cur); return 1; }
+            if (!trunk) { free(cur); goto cleanup; }
             cur = trunk;
             if (stage == 3) {
-                if (!pv_expect_count("stage3 ref", rn, (long)nembd * np2)) { free(cur); return 1; }
+                if (!pv_expect_count("stage3 ref", rn, (long)nembd * np2)) { free(cur); goto cleanup; }
                 ok = pv_compare("trunk", cur, ref, (long)nembd * np2, 5e-2);
             } else { // stage 7 end-to-end
                 int nmm; float *mg = pv_merger(cur, nembd, npx, npy, gf, &nmm);
-                if (!mg) { free(cur); return 1; }
+                if (!mg) { free(cur); goto cleanup; }
                 int dim;  float *pj = pv_projector(mg, nembd, nmm, gf, &dim);
-                if (!pj) { free(mg); free(cur); return 1; }
+                if (!pj) { free(mg); free(cur); goto cleanup; }
                 int ntok; float *fin = pv_img_break(pj, dim, OWm, OHm, gf, &ntok);
-                if (!fin) { free(mg); free(pj); free(cur); return 1; }
+                if (!fin) { free(mg); free(pj); free(cur); goto cleanup; }
                 printf("end-to-end -> [%d, %d]\n", dim, ntok);
-                if (!pv_expect_count("stage7 ref", rn, (long)dim * ntok)) { free(mg); free(pj); free(fin); free(cur); return 1; }
+                if (!pv_expect_count("stage7 ref", rn, (long)dim * ntok)) { free(mg); free(pj); free(fin); free(cur); goto cleanup; }
                 ok = pv_compare("final", fin, ref, (long)dim * ntok, 5e-2);
                 free(mg); free(pj); free(fin);
             }
         }
         free(cur);
     } else { // isolated stages need input.bin (clip dump of previous stage)
-        if (argc < 6) { fprintf(stderr, "stage %d needs input.bin\n", stage); return 1; }
+        if (argc < 6) { fprintf(stderr, "stage %d needs input.bin\n", stage); goto cleanup; }
         long in_n; float *input = pv_load_bin(argv[5], &in_n);
-        if (!input) return 1;
+        if (!input) goto cleanup;
         if (stage == 4) {
-            if (!pv_expect_count("stage4 input", in_n, (long)NE * npos)) { free(input); return 1; }
+            if (!pv_expect_count("stage4 input", in_n, (long)NE * npos)) { free(input); goto cleanup; }
             int nmm; float *mg = pv_merger(input, NE, npx, npy, gf, &nmm);
-            if (!mg) { free(input); return 1; }
+            if (!mg) { free(input); goto cleanup; }
             printf("merger -> [%d, %d]\n", NE, nmm);
-            if (!pv_expect_count("stage4 ref", rn, (long)NE * nmm)) { free(mg); free(input); return 1; }
+            if (!pv_expect_count("stage4 ref", rn, (long)NE * nmm)) { free(mg); free(input); goto cleanup; }
             ok = pv_compare("merger", mg, ref, (long)NE * nmm, 2e-2); free(mg);
         } else if (stage == 5) {
-            if (!pv_expect_count("stage5 input", in_n, (long)NE * nm)) { free(input); return 1; }
+            if (!pv_expect_count("stage5 input", in_n, (long)NE * nm)) { free(input); goto cleanup; }
             int dim; float *pj = pv_projector(input, NE, nm, gf, &dim);
-            if (!pj) { free(input); return 1; }
+            if (!pj) { free(input); goto cleanup; }
             printf("projector -> [%d, %d]\n", dim, nm);
-            if (!pv_expect_count("stage5 ref", rn, (long)dim * nm)) { free(pj); free(input); return 1; }
+            if (!pv_expect_count("stage5 ref", rn, (long)dim * nm)) { free(pj); free(input); goto cleanup; }
             ok = pv_compare("proj", pj, ref, (long)dim * nm, 2e-2); free(pj);
         } else if (stage == 6) {
-            if (!pv_expect_count("stage6 input", in_n, (long)DIM * nm)) { free(input); return 1; }
+            if (!pv_expect_count("stage6 input", in_n, (long)DIM * nm)) { free(input); goto cleanup; }
             int ntok; float *fin = pv_img_break(input, DIM, OWm, OHm, gf, &ntok);
-            if (!fin) { free(input); return 1; }
+            if (!fin) { free(input); goto cleanup; }
             printf("img_break -> [%d, %d]\n", DIM, ntok);
-            if (!pv_expect_count("stage6 ref", rn, (long)DIM * ntok)) { free(fin); free(input); return 1; }
+            if (!pv_expect_count("stage6 ref", rn, (long)DIM * ntok)) { free(fin); free(input); goto cleanup; }
             ok = pv_compare("final", fin, ref, (long)DIM * ntok, 1e-3); free(fin);
         }
         free(input);
     }
-    gguf_close(gf);
     printf("STAGE%d %s\n", stage, ok ? "PASS" : "FAIL");
+    rc = ok ? 0 : 3;
+
+cleanup:
+    if (gf) gguf_close(gf);
     free(inp); free(ref);
-    return ok ? 0 : 3;
+    return rc;
 }
 #endif
