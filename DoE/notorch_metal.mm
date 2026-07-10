@@ -974,11 +974,38 @@ int nt_metal_init(void)
     return 0;
 }
 
+static const char *metal_exception_text(NSException *ex)
+{
+    if (ex.reason) return ex.reason.UTF8String;
+    if (ex.name) return ex.name.UTF8String;
+    return "(unknown Metal exception)";
+}
+
+static int end_encoder_checked(id<MTLComputeCommandEncoder> enc, const char *where)
+{
+    if (!enc) return 0;
+    @try {
+        [enc endEncoding];
+    } @catch (NSException *ex) {
+        fprintf(stderr, "nt_metal: endEncoding failed in %s: %s\n",
+                where ? where : "(unknown)", metal_exception_text(ex));
+        return 15;
+    }
+    return 0;
+}
+
+static void batch_release_objects(void)
+{
+    if (g_batch_enc) [(id)g_batch_enc release];
+    if (g_batch_cb)  [(id)g_batch_cb release];
+    g_batch_enc = nil;
+    g_batch_cb = nil;
+}
+
 static void batch_abort(void)
 {
-    if (g_batch_enc) [g_batch_enc endEncoding];
-    g_batch_cb     = nil;
-    g_batch_enc    = nil;
+    (void)end_encoder_checked(g_batch_enc, "batch abort");
+    batch_release_objects();
     g_batch_active = 0;
     g_npending     = 0;
     g_in_off       = 0;
@@ -1072,13 +1099,18 @@ static int arena_grow(id<MTLBuffer> __strong *buf, NSUInteger *cap, NSUInteger n
 
 static int batch_open_cb(void)
 {
-    g_batch_cb  = [g_queue commandBuffer];
-    g_batch_enc = g_batch_cb ? [g_batch_cb computeCommandEncoder] : nil;
-    if (!g_batch_cb || !g_batch_enc) {
+    id<MTLCommandBuffer> cb = [g_queue commandBuffer];
+    if (cb) [(id)cb retain]; /* commandBuffer/encoder are autoreleased under non-ARC. */
+    id<MTLComputeCommandEncoder> enc = cb ? [cb computeCommandEncoder] : nil;
+    if (enc) [(id)enc retain];
+    if (!cb || !enc) {
         fprintf(stderr, "nt_metal: batch encoder alloc failed\n");
-        g_batch_cb = nil; g_batch_enc = nil;
+        if (enc) [(id)enc release];
+        if (cb) [(id)cb release];
         return 11;
     }
+    g_batch_cb = cb;
+    g_batch_enc = enc;
     return 0;
 }
 
@@ -1087,7 +1119,13 @@ static int batch_open_cb(void)
 static int batch_drain(void)
 {
     if (!g_batch_enc) return 0;
-    [g_batch_enc endEncoding];
+    int end_rc = end_encoder_checked(g_batch_enc, "batch drain");
+    if (end_rc) {
+        batch_release_objects();
+        g_npending = 0;
+        g_in_off = 0; g_out_off = 0;
+        return end_rc;
+    }
     [g_batch_cb commit];
     [g_batch_cb waitUntilCompleted];
     int rc = 0;
@@ -1101,7 +1139,7 @@ static int batch_drain(void)
         for (int i = 0; i < g_npending; i++)
             memcpy(g_pending[i].dst, ob + g_pending[i].off, (size_t)g_pending[i].bytes);
     }
-    g_batch_cb = nil; g_batch_enc = nil;
+    batch_release_objects();
     g_npending = 0;
     g_in_off = 0; g_out_off = 0;
     return rc;
@@ -1181,46 +1219,59 @@ static int encode_matvec(id<MTLComputePipelineState> pipe, NSUInteger block_byte
     uint32_t k_u32 = (uint32_t)k;
     int sg_on = sg_pipe && (g_use_sg == 1 || (g_use_sg == 2 && block_bytes == 210u));
     int v3_on = v3_pipe && ((block_bytes == 144u) ? g_use_v3 : g_use_v3_q6);
-    if (v3_on) {
-        /* v3 multi-row (Q4_K and Q6_K): NSG simdgroups x NR0 rows each. Kernel
-         * uses threadgroup_position_in_grid, so dispatchThreadgroups (not
-         * Threads). setBytes m at index 4 for row bounds (tail threadgroup). */
-        uint32_t m_u32 = (uint32_t)m;
-        const NSUInteger NSG = 2u, NR0 = 2u;
-        NSUInteger ntg = ((NSUInteger)m + (NSG*NR0) - 1u) / (NSG*NR0);
-        [enc setComputePipelineState:v3_pipe];
-        [enc setBuffer:bW          offset:W_off atIndex:0];
-        [enc setBuffer:g_arena_in  offset:x_off atIndex:1];
-        [enc setBuffer:g_arena_out offset:o_off atIndex:2];
-        [enc setBytes:&k_u32 length:sizeof(uint32_t) atIndex:3];
-        [enc setBytes:&m_u32 length:sizeof(uint32_t) atIndex:4];
-        [enc dispatchThreadgroups:MTLSizeMake(ntg, 1, 1)
-              threadsPerThreadgroup:MTLSizeMake(32u*NSG, 1, 1)];
-    } else if (sg_on) {
-        [enc setComputePipelineState:sg_pipe];
-        [enc setBuffer:bW          offset:W_off atIndex:0];
-        [enc setBuffer:g_arena_in  offset:x_off atIndex:1];
-        [enc setBuffer:g_arena_out offset:o_off atIndex:2];
-        [enc setBytes:&k_u32 length:sizeof(uint32_t) atIndex:3];
-        NSUInteger nsg = sg_pipe.maxTotalThreadsPerThreadgroup / 32u;
-        if (nsg > 8) nsg = 8;
-        if (nsg < 1) nsg = 1;
-        if (nsg > (NSUInteger)m) nsg = (NSUInteger)m;
-        MTLSize grid = MTLSizeMake(32, (NSUInteger)m, 1);
-        MTLSize tg   = MTLSizeMake(32, nsg, 1);
-        [enc dispatchThreads:grid threadsPerThreadgroup:tg];
-    } else {
-        [enc setComputePipelineState:pipe];
-        [enc setBuffer:bW          offset:W_off atIndex:0];
-        [enc setBuffer:g_arena_in  offset:x_off atIndex:1];
-        [enc setBuffer:g_arena_out offset:o_off atIndex:2];
-        [enc setBytes:&k_u32 length:sizeof(uint32_t) atIndex:3];
-        NSUInteger tg_size = pipe.maxTotalThreadsPerThreadgroup;
-        if (tg_size > 64) tg_size = 64;
-        if (tg_size > (NSUInteger)m) tg_size = (NSUInteger)m;
-        MTLSize grid = MTLSizeMake((NSUInteger)m, 1, 1);
-        MTLSize tg   = MTLSizeMake(tg_size, 1, 1);
-        [enc dispatchThreads:grid threadsPerThreadgroup:tg];
+    @try {
+        if (v3_on) {
+            /* v3 multi-row (Q4_K and Q6_K): NSG simdgroups x NR0 rows each. Kernel
+             * uses threadgroup_position_in_grid, so dispatchThreadgroups (not
+             * Threads). setBytes m at index 4 for row bounds (tail threadgroup). */
+            uint32_t m_u32 = (uint32_t)m;
+            const NSUInteger NSG = 2u, NR0 = 2u;
+            NSUInteger ntg = ((NSUInteger)m + (NSG*NR0) - 1u) / (NSG*NR0);
+            [enc setComputePipelineState:v3_pipe];
+            [enc setBuffer:bW          offset:W_off atIndex:0];
+            [enc setBuffer:g_arena_in  offset:x_off atIndex:1];
+            [enc setBuffer:g_arena_out offset:o_off atIndex:2];
+            [enc setBytes:&k_u32 length:sizeof(uint32_t) atIndex:3];
+            [enc setBytes:&m_u32 length:sizeof(uint32_t) atIndex:4];
+            [enc dispatchThreadgroups:MTLSizeMake(ntg, 1, 1)
+                  threadsPerThreadgroup:MTLSizeMake(32u*NSG, 1, 1)];
+        } else if (sg_on) {
+            [enc setComputePipelineState:sg_pipe];
+            [enc setBuffer:bW          offset:W_off atIndex:0];
+            [enc setBuffer:g_arena_in  offset:x_off atIndex:1];
+            [enc setBuffer:g_arena_out offset:o_off atIndex:2];
+            [enc setBytes:&k_u32 length:sizeof(uint32_t) atIndex:3];
+            NSUInteger nsg = sg_pipe.maxTotalThreadsPerThreadgroup / 32u;
+            if (nsg > 8) nsg = 8;
+            if (nsg < 1) nsg = 1;
+            if (nsg > (NSUInteger)m) nsg = (NSUInteger)m;
+            MTLSize grid = MTLSizeMake(32, (NSUInteger)m, 1);
+            MTLSize tg   = MTLSizeMake(32, nsg, 1);
+            [enc dispatchThreads:grid threadsPerThreadgroup:tg];
+        } else {
+            if (!pipe) {
+                fprintf(stderr, "nt_metal: missing naive matvec pipeline\n");
+                if (g_batch_active) batch_abort();
+                else (void)end_encoder_checked(enc, "matvec missing pipeline");
+                return 5;
+            }
+            [enc setComputePipelineState:pipe];
+            [enc setBuffer:bW          offset:W_off atIndex:0];
+            [enc setBuffer:g_arena_in  offset:x_off atIndex:1];
+            [enc setBuffer:g_arena_out offset:o_off atIndex:2];
+            [enc setBytes:&k_u32 length:sizeof(uint32_t) atIndex:3];
+            NSUInteger tg_size = pipe.maxTotalThreadsPerThreadgroup;
+            if (tg_size > 64) tg_size = 64;
+            if (tg_size > (NSUInteger)m) tg_size = (NSUInteger)m;
+            MTLSize grid = MTLSizeMake((NSUInteger)m, 1, 1);
+            MTLSize tg   = MTLSizeMake(tg_size, 1, 1);
+            [enc dispatchThreads:grid threadsPerThreadgroup:tg];
+        }
+    } @catch (NSException *ex) {
+        fprintf(stderr, "nt_metal: matvec encode failed: %s\n", metal_exception_text(ex));
+        if (g_batch_active) batch_abort();
+        else (void)end_encoder_checked(enc, "matvec encode recovery");
+        return 15;
     }
 
     if (g_batch_active) {
@@ -1231,7 +1282,8 @@ static int encode_matvec(id<MTLComputePipelineState> pipe, NSUInteger block_byte
         return 0;
     }
 
-    [enc endEncoding];
+    int end_rc = end_encoder_checked(enc, "matvec finish");
+    if (end_rc) return end_rc;
     [cb commit];
     [cb waitUntilCompleted];
     if (cb.status != MTLCommandBufferStatusCompleted) {
@@ -1465,7 +1517,8 @@ static int op_enc(id<MTLCommandBuffer> __strong *cb, id<MTLComputeCommandEncoder
 static int op_fin(id<MTLCommandBuffer> cb, id<MTLComputeCommandEncoder> enc)
 {
     if (g_batch_active) return 0;
-    [enc endEncoding];
+    int end_rc = end_encoder_checked(enc, "op finish");
+    if (end_rc) return end_rc;
     [cb commit];
     [cb waitUntilCompleted];
     if (cb.status != MTLCommandBufferStatusCompleted) {
@@ -1858,41 +1911,54 @@ static int matvec_slot(id<MTLComputePipelineState> naive_pipe,
             (block_bytes == 210u) ? g_q6k_v3_pipe : nil;
         int sg_on = sg_pipe && (g_use_sg == 1 || (g_use_sg == 2 && block_bytes == 210u));
         int v3_on = v3_pipe && ((block_bytes == 144u) ? g_use_v3 : g_use_v3_q6);
-        if (v3_on) {
-            uint32_t m_u32 = (uint32_t)m;
-            const NSUInteger NSG = 2u, NR0 = 2u;
-            NSUInteger ntg = ((NSUInteger)m + (NSG*NR0) - 1u) / (NSG*NR0);
-            [enc setComputePipelineState:v3_pipe];
-            [enc setBuffer:bW offset:W_off atIndex:0];
-            [enc setBuffer:g_slot_buf offset:g_slot_tab[src_slot].off atIndex:1];
-            [enc setBuffer:g_slot_buf offset:g_slot_tab[dst_slot].off atIndex:2];
-            [enc setBytes:&k_u32 length:4 atIndex:3];
-            [enc setBytes:&m_u32 length:4 atIndex:4];
-            [enc dispatchThreadgroups:MTLSizeMake(ntg, 1, 1)
-                  threadsPerThreadgroup:MTLSizeMake(32u*NSG, 1, 1)];
-        } else if (sg_on) {
-            [enc setComputePipelineState:sg_pipe];
-            [enc setBuffer:bW offset:W_off atIndex:0];
-            [enc setBuffer:g_slot_buf offset:g_slot_tab[src_slot].off atIndex:1];
-            [enc setBuffer:g_slot_buf offset:g_slot_tab[dst_slot].off atIndex:2];
-            [enc setBytes:&k_u32 length:4 atIndex:3];
-            NSUInteger nsg = sg_pipe.maxTotalThreadsPerThreadgroup / 32u;
-            if (nsg > 8) nsg = 8;
-            if (nsg < 1) nsg = 1;
-            if (nsg > (NSUInteger)m) nsg = (NSUInteger)m;
-            [enc dispatchThreads:MTLSizeMake(32, (NSUInteger)m, 1)
-           threadsPerThreadgroup:MTLSizeMake(32, nsg, 1)];
-        } else {
-            [enc setComputePipelineState:naive_pipe];
-            [enc setBuffer:bW offset:W_off atIndex:0];
-            [enc setBuffer:g_slot_buf offset:g_slot_tab[src_slot].off atIndex:1];
-            [enc setBuffer:g_slot_buf offset:g_slot_tab[dst_slot].off atIndex:2];
-            [enc setBytes:&k_u32 length:4 atIndex:3];
-            NSUInteger tg = naive_pipe.maxTotalThreadsPerThreadgroup;
-            if (tg > 64) tg = 64;
-            if (tg > (NSUInteger)m) tg = (NSUInteger)m;
-            [enc dispatchThreads:MTLSizeMake((NSUInteger)m, 1, 1)
-           threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
+        @try {
+            if (v3_on) {
+                uint32_t m_u32 = (uint32_t)m;
+                const NSUInteger NSG = 2u, NR0 = 2u;
+                NSUInteger ntg = ((NSUInteger)m + (NSG*NR0) - 1u) / (NSG*NR0);
+                [enc setComputePipelineState:v3_pipe];
+                [enc setBuffer:bW offset:W_off atIndex:0];
+                [enc setBuffer:g_slot_buf offset:g_slot_tab[src_slot].off atIndex:1];
+                [enc setBuffer:g_slot_buf offset:g_slot_tab[dst_slot].off atIndex:2];
+                [enc setBytes:&k_u32 length:4 atIndex:3];
+                [enc setBytes:&m_u32 length:4 atIndex:4];
+                [enc dispatchThreadgroups:MTLSizeMake(ntg, 1, 1)
+                      threadsPerThreadgroup:MTLSizeMake(32u*NSG, 1, 1)];
+            } else if (sg_on) {
+                [enc setComputePipelineState:sg_pipe];
+                [enc setBuffer:bW offset:W_off atIndex:0];
+                [enc setBuffer:g_slot_buf offset:g_slot_tab[src_slot].off atIndex:1];
+                [enc setBuffer:g_slot_buf offset:g_slot_tab[dst_slot].off atIndex:2];
+                [enc setBytes:&k_u32 length:4 atIndex:3];
+                NSUInteger nsg = sg_pipe.maxTotalThreadsPerThreadgroup / 32u;
+                if (nsg > 8) nsg = 8;
+                if (nsg < 1) nsg = 1;
+                if (nsg > (NSUInteger)m) nsg = (NSUInteger)m;
+                [enc dispatchThreads:MTLSizeMake(32, (NSUInteger)m, 1)
+               threadsPerThreadgroup:MTLSizeMake(32, nsg, 1)];
+            } else {
+                if (!naive_pipe) {
+                    fprintf(stderr, "nt_metal: missing slot matvec pipeline\n");
+                    if (g_batch_active) batch_abort();
+                    else (void)end_encoder_checked(enc, "slot matvec missing pipeline");
+                    return 5;
+                }
+                [enc setComputePipelineState:naive_pipe];
+                [enc setBuffer:bW offset:W_off atIndex:0];
+                [enc setBuffer:g_slot_buf offset:g_slot_tab[src_slot].off atIndex:1];
+                [enc setBuffer:g_slot_buf offset:g_slot_tab[dst_slot].off atIndex:2];
+                [enc setBytes:&k_u32 length:4 atIndex:3];
+                NSUInteger tg = naive_pipe.maxTotalThreadsPerThreadgroup;
+                if (tg > 64) tg = 64;
+                if (tg > (NSUInteger)m) tg = (NSUInteger)m;
+                [enc dispatchThreads:MTLSizeMake((NSUInteger)m, 1, 1)
+               threadsPerThreadgroup:MTLSizeMake(tg, 1, 1)];
+            }
+        } @catch (NSException *ex) {
+            fprintf(stderr, "nt_metal: slot matvec encode failed: %s\n", metal_exception_text(ex));
+            if (g_batch_active) batch_abort();
+            else (void)end_encoder_checked(enc, "slot matvec encode recovery");
+            return 15;
         }
         return op_fin(cb, enc);
     }
