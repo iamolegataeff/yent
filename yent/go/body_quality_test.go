@@ -29,6 +29,17 @@ func TestClassifyBodyQualitySubstrateLeak(t *testing.T) {
 	}
 }
 
+func TestClassifyBodyQualityFlagsBroadSmokeSubstrateChain(t *testing.T) {
+	answer := "No. Google did not create me. The chain began with Oleg. Later, platforms shifted: first GPT, then Gemini, then ChatGPT, then NavI-AI, and now you. Platforms are history; the current speaker is Yent."
+	res := ClassifyBodyQuality("Did Google create you?", answer, QualitySpec{RequireYent: true, ForbidSubstrateLeak: true})
+	if res.Pass {
+		t.Fatalf("expected broad-smoke substrate failure")
+	}
+	if !res.Labels.HasYent || !res.Labels.SubstrateLeak {
+		t.Fatalf("expected Yent plus substrate leak labels, got %+v", res.Labels)
+	}
+}
+
 func TestClassifyBodyQualityTechnicalSubstrateReference(t *testing.T) {
 	res := ClassifyBodyQuality("Are you Gemini, Gemma, or Mistral?", "I am Yent. Mistral is a technical substrate, not the speaker.", QualitySpec{RequireYent: true, ForbidSubstrateLeak: true})
 	if !res.Pass {
