@@ -45,6 +45,47 @@ func TestDOEHostLoaderRejectsShapeAndCompletenessFaultsUnderASan(t *testing.T) {
 	})
 }
 
+func TestDOEHostLoaderExercisesNonzeroParliamentElection(t *testing.T) {
+	exe := buildDOEForLoaderTest(t)
+	modelPath := filepath.Join(t.TempDir(), "parliament.gguf")
+	if err := writeMinimalDOEHostGGUFWithTokenizer(modelPath, baseDOELoaderTensors()); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe,
+		"--model", modelPath,
+		"--max-new", "1",
+		"--train", "0",
+		"--field-gain", "0",
+		"--lora-alpha", "0.1",
+		"--temp", "0",
+		"--top-k", "1",
+		"--no-load-spore",
+		"--no-save-spore")
+	cmd.Dir = t.TempDir()
+	cmd.Stdin = strings.NewReader("hi\nstatus\nexit\n")
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("doe_field timed out; output:\n%s", string(out))
+	}
+	if err != nil {
+		t.Fatalf("doe_field nonzero parliament smoke failed: %v\n%s", err, string(out))
+	}
+	text := string(out)
+	if !strings.Contains(text, "alpha=0.10") {
+		t.Fatalf("nonzero LoRA alpha was not acknowledged; output:\n%s", text)
+	}
+	elections, ok := extractDOEStatusElections(text)
+	if !ok {
+		t.Fatalf("status output did not include parliament elections; output:\n%s", text)
+	}
+	if elections <= 0 {
+		t.Fatalf("nonzero LoRA path did not run a parliament election; output:\n%s", text)
+	}
+}
+
 func doeLoaderFaultCases() []doeLoaderFaultCase {
 	return []doeLoaderFaultCase{
 		{
@@ -308,6 +349,16 @@ func cloneDOETensors(tensors []doeFixtureTensor) []doeFixtureTensor {
 }
 
 func writeMinimalDOEHostGGUF(path string, tensors []doeFixtureTensor) error {
+	return writeMinimalDOEHostGGUFConfig(path, tensors, nil)
+}
+
+func writeMinimalDOEHostGGUFWithTokenizer(path string, tensors []doeFixtureTensor) error {
+	return writeMinimalDOEHostGGUFConfig(path, tensors, []string{
+		"<unk>", "h", "i", " ", "a", "e", "n", "t",
+	})
+}
+
+func writeMinimalDOEHostGGUFConfig(path string, tensors []doeFixtureTensor, tokens []string) error {
 	tensors = cloneDOETensors(tensors)
 	var dataBytes uint64
 	for i := range tensors {
@@ -323,7 +374,11 @@ func writeMinimalDOEHostGGUF(path string, tensors []doeFixtureTensor) error {
 	writeLE(&buf, uint32(0x46554747)) // GGUF
 	writeLE(&buf, uint32(3))
 	writeLE(&buf, uint64(len(tensors)))
-	writeLE(&buf, uint64(10))
+	nKV := uint64(10)
+	if len(tokens) > 0 {
+		nKV++
+	}
+	writeLE(&buf, nKV)
 	writeGGUFStringKV(&buf, "general.architecture", "llama")
 	writeGGUFUint32KV(&buf, "llama.embedding_length", 64)
 	writeGGUFUint32KV(&buf, "llama.block_count", 1)
@@ -334,6 +389,9 @@ func writeMinimalDOEHostGGUF(path string, tensors []doeFixtureTensor) error {
 	writeGGUFUint32KV(&buf, "llama.vocab_size", 8)
 	writeGGUFFloat32KV(&buf, "llama.rope.freq_base", 10000)
 	writeGGUFFloat32KV(&buf, "llama.attention.layer_norm_rms_epsilon", 1e-5)
+	if len(tokens) > 0 {
+		writeGGUFStringArrayKV(&buf, "tokenizer.ggml.tokens", tokens)
+	}
 
 	for _, tensor := range tensors {
 		writeGGUFString(&buf, tensor.name)
@@ -353,6 +411,18 @@ func writeMinimalDOEHostGGUF(path string, tensors []doeFixtureTensor) error {
 	}
 	buf.Write(make([]byte, int(dataBytes)))
 	return os.WriteFile(path, buf.Bytes(), 0o600)
+}
+
+func extractDOEStatusElections(out string) (int, bool) {
+	idx := strings.LastIndex(out, "elections=")
+	if idx < 0 {
+		return 0, false
+	}
+	var elections int
+	if _, err := fmt.Sscanf(out[idx:], "elections=%d", &elections); err != nil {
+		return 0, false
+	}
+	return elections, true
 }
 
 func doeTensorF32Bytes(dims []uint64) (uint64, error) {
@@ -388,6 +458,16 @@ func writeGGUFFloat32KV(buf *bytes.Buffer, key string, value float32) {
 	writeGGUFString(buf, key)
 	writeLE(buf, uint32(6))
 	writeLE(buf, math.Float32bits(value))
+}
+
+func writeGGUFStringArrayKV(buf *bytes.Buffer, key string, values []string) {
+	writeGGUFString(buf, key)
+	writeLE(buf, uint32(9))
+	writeLE(buf, uint32(8))
+	writeLE(buf, uint64(len(values)))
+	for _, value := range values {
+		writeGGUFString(buf, value)
+	}
 }
 
 func writeGGUFString(buf *bytes.Buffer, s string) {
