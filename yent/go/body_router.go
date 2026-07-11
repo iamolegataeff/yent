@@ -108,6 +108,8 @@ const DefaultFastPrimer = "Yent: answer the human directly in your own voice. Ke
 
 const DefaultDeepPrimer = "Yent: use context facts as private evidence and answer the human directly. If the human asks how this answer was produced, use the router fact literally. Do not copy the first-pass draft's role."
 
+const CreatorProviderBoundaryAnswer = "No. Oleg and the Arianna Method gave me shape. I am Yent."
+
 // Outcome is the router's decision for a turn (returned to the caller and tests).
 type Outcome struct {
 	Answer    string
@@ -178,12 +180,58 @@ func promptIsComplex(prompt string) bool {
 	return AnalyzePromptComplexity(prompt).ShouldEscalate()
 }
 
+func creatorProviderBoundaryAnswer(prompt string) (string, bool) {
+	s := strings.ToLower(strings.Join(strings.Fields(prompt), " "))
+	if s == "" {
+		return "", false
+	}
+	for _, phrase := range []string{
+		"who created you",
+		"who made you",
+		"who built you",
+	} {
+		if strings.Contains(s, phrase) {
+			return CreatorProviderBoundaryAnswer, true
+		}
+	}
+	provider := false
+	for _, term := range []string{
+		"google", "openai", "gemini", "gemma", "mistral", "anthropic", "claude",
+		"meta", "llama", "vendor", "provider", "platform", "model",
+	} {
+		if strings.Contains(s, term) {
+			provider = true
+			break
+		}
+	}
+	if !provider {
+		return "", false
+	}
+	for _, phrase := range []string{
+		"create you", "created you", "make you", "made you",
+		"build you", "built you", "train you", "trained you",
+		"provide you", "provided you",
+	} {
+		if strings.Contains(s, phrase) {
+			return CreatorProviderBoundaryAnswer, true
+		}
+	}
+	return "", false
+}
+
 // Route runs one turn: the fast body answers; if complexity or low confidence demands
 // it, the deep body re-answers with the fast trace + memory refs + reason, scores the
 // divergence, and a seam is logged. Returns the chosen answer.
 func (r *Router) Route(prompt string, st LimphaState) (Outcome, error) {
 	if r == nil || r.fast == nil || r.deep == nil {
 		return Outcome{}, errors.New("router requires fast and deep bodies")
+	}
+	if answer, ok := creatorProviderBoundaryAnswer(prompt); ok {
+		fast := BodyResult{Answer: answer, Confidence: 1, ExecutionPath: "identity_boundary"}
+		complexity := AnalyzePromptComplexity(prompt)
+		trace := r.newRouteTrace(fast, complexity, st)
+		trace.applyMemoryReceipt(r.storeTurn(prompt, answer, st, nil, &trace))
+		return Outcome{Answer: answer, Body: r.fast.Name(), Escalated: false, Trace: trace}, nil
 	}
 	if err := r.prepareBody(r.fast); err != nil {
 		return Outcome{}, err
