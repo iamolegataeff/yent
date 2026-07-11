@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	yent "github.com/ariannamethod/yent/yent/go"
 )
 
 type doeFixtureTensor struct {
@@ -83,6 +85,57 @@ func TestDOEHostLoaderExercisesNonzeroParliamentElection(t *testing.T) {
 	}
 	if elections <= 0 {
 		t.Fatalf("nonzero LoRA path did not run a parliament election; output:\n%s", text)
+	}
+}
+
+func TestDOEBodyCapturesRealDOEForcedSlotFailureDiagnostics(t *testing.T) {
+	exe := buildDOEForLoaderTestWithFlags(t, "testing", []string{"-O0", "-DDOE_TESTING"})
+	modelPath := filepath.Join(t.TempDir(), "diagnostics.gguf")
+	if err := writeMinimalDOEHostGGUFWithTokenizer(modelPath, baseDOELoaderTensors()); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	body, err := yent.NewDOEBody(yent.DOEBodyConfig{
+		Name:      "nemo12",
+		BinPath:   exe,
+		ModelPath: modelPath,
+		WorkDir:   t.TempDir(),
+		Args: []string{
+			"--max-new", "1",
+			"--train", "0",
+			"--field-gain", "0",
+			"--lora-alpha", "0.1",
+			"--temp", "0",
+			"--top-k", "1",
+			"--no-load-spore",
+			"--no-save-spore",
+		},
+		Env:          []string{"DOE_TEST_FORCE_SLOT_FAIL=nt_metal_slot_download(SLOT_X)"},
+		Timeout:      5 * time.Second,
+		PrimeTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer body.Close()
+
+	out, err := body.Generate("hi", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.ExecutionPath != "doe_resident" {
+		t.Fatalf("execution path = %q, want doe_resident", out.ExecutionPath)
+	}
+	joined := strings.Join(out.Diagnostics, "\n")
+	for _, want := range []string{
+		"Metal slot path failed",
+		"test-forced slot path",
+		"nt_metal_slot_download(SLOT_X)",
+		"rc=77",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("real DOE diagnostics missing %q:\n%v", want, out.Diagnostics)
+		}
 	}
 }
 
