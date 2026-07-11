@@ -69,14 +69,20 @@ type Seam struct {
 // LimphaClient is the in-process memory handle. It keeps the API the REPL used
 // for the old socket client (Store/Search/Stats/Close), now backed by SQLite.
 type LimphaClient struct {
-	db           *sql.DB
-	dbPath       string
-	sessionID    string
-	connected    bool
-	asyncMu      sync.Mutex
-	async        *limphaAsync
-	ftsErrors    int64
-	ftsFallbacks int64
+	db                         *sql.DB
+	dbPath                     string
+	sessionID                  string
+	connected                  bool
+	asyncMu                    sync.Mutex
+	async                      *limphaAsync
+	memoryMu                   sync.Mutex
+	lastMemoryError            string
+	memoryFailures             int64
+	memoryConversationFailures int64
+	memorySeamFailures         int64
+	memoryEnqueueFailures      int64
+	ftsErrors                  int64
+	ftsFallbacks               int64
 }
 
 const limphaSchema = `
@@ -264,6 +270,7 @@ func (c *LimphaClient) store(prompt, response string, st LimphaState) (int64, er
 	quality := computeQuality(prompt, response)
 	tx, err := c.db.Begin()
 	if err != nil {
+		c.recordMemoryFailure("conversation", err)
 		return 0, err
 	}
 	res, err := tx.Exec(
@@ -275,6 +282,7 @@ func (c *LimphaClient) store(prompt, response string, st LimphaState) (int64, er
 		st.Temperature, st.Destiny, st.Pain, st.Tension, st.Debt, st.Velocity, st.Alpha, quality)
 	if err != nil {
 		tx.Rollback()
+		c.recordMemoryFailure("conversation", err)
 		return 0, err
 	}
 	id, _ := res.LastInsertId()
@@ -283,9 +291,11 @@ func (c *LimphaClient) store(prompt, response string, st LimphaState) (int64, er
 		   avg_quality = (avg_quality * turn_count + ?) / (turn_count + 1)
 		 WHERE session_id = ?`, now, quality, c.sessionID); err != nil {
 		tx.Rollback()
+		c.recordMemoryFailure("conversation", err)
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
+		c.recordMemoryFailure("conversation", err)
 		return 0, err
 	}
 	return id, nil
@@ -624,10 +634,43 @@ func (c *LimphaClient) StoreSeam(s Seam) (int64, error) {
 		nowSeconds(), c.sessionID, convID, s.BodyA, s.BodyB, s.Prompt,
 		s.AClaim, s.BClaim, s.Agreement, s.Tension, s.Winner, s.Reason, s.MemoryDelta)
 	if err != nil {
+		c.recordMemoryFailure("seam", err)
 		return 0, err
 	}
 	id, _ := res.LastInsertId()
 	return id, nil
+}
+
+func (c *LimphaClient) recordMemoryFailure(kind string, err error) {
+	if c == nil || err == nil {
+		return
+	}
+	atomic.AddInt64(&c.memoryFailures, 1)
+	switch kind {
+	case "conversation":
+		atomic.AddInt64(&c.memoryConversationFailures, 1)
+	case "seam":
+		atomic.AddInt64(&c.memorySeamFailures, 1)
+	case "enqueue":
+		atomic.AddInt64(&c.memoryEnqueueFailures, 1)
+	}
+	c.memoryMu.Lock()
+	c.lastMemoryError = kind + ": " + err.Error()
+	c.memoryMu.Unlock()
+}
+
+func (c *LimphaClient) memoryFailureSnapshot() (string, int64, int64, int64, int64) {
+	if c == nil {
+		return "", 0, 0, 0, 0
+	}
+	c.memoryMu.Lock()
+	last := c.lastMemoryError
+	c.memoryMu.Unlock()
+	return last,
+		atomic.LoadInt64(&c.memoryFailures),
+		atomic.LoadInt64(&c.memoryConversationFailures),
+		atomic.LoadInt64(&c.memorySeamFailures),
+		atomic.LoadInt64(&c.memoryEnqueueFailures)
 }
 
 // RecentSeams returns recent seams (newest first) — the substrate supergamma reads
@@ -749,19 +792,25 @@ func (c *LimphaClient) Stats() (map[string]interface{}, error) {
 		asyncBacklog = len(c.async.queue)
 	}
 	c.asyncMu.Unlock()
+	lastMemoryError, memoryFailures, conversationFailures, seamFailures, enqueueFailures := c.memoryFailureSnapshot()
 	return map[string]interface{}{
-		"total_conversations": convCount,
-		"total_shards":        shardCount,
-		"total_sessions":      sessCount,
-		"total_seams":         seamCount,
-		"pending_training":    pending,
-		"current_session":     c.sessionID,
-		"db_path":             c.dbPath,
-		"db_size_bytes":       dbSize,
-		"async_enabled":       asyncEnabled,
-		"async_backlog":       asyncBacklog,
-		"fts_query_errors":    atomic.LoadInt64(&c.ftsErrors),
-		"fts_query_fallbacks": atomic.LoadInt64(&c.ftsFallbacks),
+		"total_conversations":          convCount,
+		"total_shards":                 shardCount,
+		"total_sessions":               sessCount,
+		"total_seams":                  seamCount,
+		"pending_training":             pending,
+		"current_session":              c.sessionID,
+		"db_path":                      c.dbPath,
+		"db_size_bytes":                dbSize,
+		"async_enabled":                asyncEnabled,
+		"async_backlog":                asyncBacklog,
+		"memory_write_failures":        memoryFailures,
+		"memory_conversation_failures": conversationFailures,
+		"memory_seam_failures":         seamFailures,
+		"memory_enqueue_failures":      enqueueFailures,
+		"last_memory_error":            lastMemoryError,
+		"fts_query_errors":             atomic.LoadInt64(&c.ftsErrors),
+		"fts_query_fallbacks":          atomic.LoadInt64(&c.ftsFallbacks),
 	}, nil
 }
 
