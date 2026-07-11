@@ -3,6 +3,8 @@ package yent
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -250,7 +252,8 @@ func (d *doeProcess) exchange(ctx context.Context, seed string) (string, bool) {
 	if d == nil || d.dead {
 		return "", false
 	}
-	if _, err := fmt.Fprintf(d.in, "%s\n%s\n", neutralizeDOEPrompt(seed), doeStatusCmd); err != nil {
+	nonce := newDOEStatusNonce()
+	if _, err := fmt.Fprintf(d.in, "%s\n%s\n", neutralizeDOEPrompt(seed), doeStatusCommand(nonce)); err != nil {
 		d.dead = true
 		d.reap()
 		return "", false
@@ -265,7 +268,7 @@ func (d *doeProcess) exchange(ctx context.Context, seed string) (string, bool) {
 		ok := false
 		for d.out.Scan() {
 			line := d.out.Text()
-			if isDOEStatusSentinel(line) {
+			if isDOEStatusSentinel(line, nonce) {
 				ok = true
 				break
 			}
@@ -323,8 +326,31 @@ func (d *doeProcess) reap() {
 	}
 }
 
-func isDOEStatusSentinel(line string) bool {
+func newDOEStatusNonce() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		return hex.EncodeToString(b[:])
+	}
+	return fmt.Sprintf("fallback-%d", time.Now().UnixNano())
+}
+
+func doeStatusCommand(nonce string) string {
+	if nonce == "" {
+		return doeStatusCmd
+	}
+	return doeStatusCmd + " " + nonce
+}
+
+func isDOEStatusSentinel(line, nonce string) bool {
 	t := strings.TrimLeft(line, "> \t")
+	if nonce != "" {
+		return strings.HasPrefix(t, "[field-control] nonce="+nonce+" ") &&
+			strings.Contains(t, "step=") &&
+			strings.Contains(t, "debt=") &&
+			strings.Contains(t, "entropy=") &&
+			strings.Contains(t, "resonance=") &&
+			strings.Contains(t, "emergence=")
+	}
 	return strings.HasPrefix(t, "[field] step=") &&
 		strings.Contains(t, "debt=") &&
 		strings.Contains(t, "entropy=") &&
@@ -337,6 +363,9 @@ func neutralizeDOEPrompt(seed string) string {
 	case doeStatusCmd, "quit", "exit":
 		return " " + seed
 	default:
+		if strings.HasPrefix(seed, doeStatusCmd+" ") {
+			return " " + seed
+		}
 		return seed
 	}
 }
@@ -455,7 +484,7 @@ func parseDOEReply(out string) string {
 			if strings.HasPrefix(t, ">") {
 				seenPrompt = true
 				body := strings.TrimSpace(strings.TrimPrefix(t, ">"))
-				if body == "" || strings.HasPrefix(body, "[") {
+				if body == "" || isDOERuntimeLine(body) || isDOEWrapperMetaLine(body) {
 					continue
 				}
 				capturing = true
@@ -463,7 +492,7 @@ func parseDOEReply(out string) string {
 				b.WriteByte(' ')
 				continue
 			}
-			if !seenPrompt || t == "" || strings.HasPrefix(t, "[") {
+			if !seenPrompt || t == "" || isDOERuntimeLine(t) || isDOEWrapperMetaLine(t) {
 				continue
 			}
 			capturing = true
@@ -471,7 +500,7 @@ func parseDOEReply(out string) string {
 			b.WriteByte(' ')
 			continue
 		}
-		if t == "" || strings.HasPrefix(t, "[") || strings.HasPrefix(t, ">") {
+		if t == "" || strings.HasPrefix(t, ">") || isDOERuntimeLine(t) {
 			break
 		}
 		b.WriteString(t)
@@ -484,6 +513,27 @@ func parseDOEReply(out string) string {
 	answer = stripDOELabel(answer)
 	answer = strings.ToValidUTF8(answer, "")
 	return strings.Join(strings.Fields(answer), " ")
+}
+
+func isDOERuntimeLine(t string) bool {
+	t = strings.TrimLeft(strings.TrimSpace(t), "> \t")
+	for _, prefix := range []string{
+		"[doe]", "[field-control]", "[sonar]", "[host]", "[identity]",
+		"[gamma]", "[env]", "[gguf]", "[mycelium]", "[resident]",
+		"[timing]", "[profile]", "[per-shape]", "[inputdump]",
+		"[logitdump]", "[serve]", "[drift]", "[experts]", "[prophecy]",
+	} {
+		if strings.HasPrefix(t, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func isDOEWrapperMetaLine(t string) bool {
+	t = strings.TrimSpace(t)
+	return strings.EqualFold(t, "[Answering contract fulfilled.]") ||
+		strings.EqualFold(t, "[Answer contract fulfilled.]")
 }
 
 func stripDOELabel(s string) string {

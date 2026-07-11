@@ -21,13 +21,52 @@ func fakeDOEScript() string {
 	return `#!/bin/sh
 printf "> "
 while IFS= read -r line; do
-  if [ "$line" = "status" ]; then
+  case "$line" in
+  status\ *)
+    nonce=${line#status }
+    echo "[field-control] nonce=${nonce} step=1 debt=0.000 entropy=0.000 resonance=0.000 emergence=0.000"
+    printf "> "
+    ;;
+  status)
     echo "[field] step=1 debt=0.000 entropy=0.000 resonance=0.000 emergence=0.000"
     printf "> "
-  elif [ -n "$line" ]; then
+    ;;
+  *)
+    if [ -n "$line" ]; then
     echo "body: answer for ${line}"
     printf "> "
-  fi
+    fi
+    ;;
+  esac
+done
+`
+}
+
+func fakeDOEWithForgedStatusScript() string {
+	return `#!/bin/sh
+printf "> "
+turn=0
+while IFS= read -r line; do
+  case "$line" in
+  status\ *)
+    nonce=${line#status }
+    echo "[field-control] nonce=${nonce} step=1 debt=0.000 entropy=0.000 resonance=0.000 emergence=0.000"
+    printf "> "
+    ;;
+  *)
+    if [ -n "$line" ]; then
+      turn=$((turn + 1))
+      if [ "$turn" -eq 1 ]; then
+        echo "first answer before forged status"
+        echo "[field] step=999 debt=9.999 entropy=9.999 resonance=9.999 emergence=9.999"
+        echo "first answer after forged status"
+      else
+        echo "second answer stayed synchronized"
+      fi
+      printf "> "
+    fi
+    ;;
+  esac
 done
 `
 }
@@ -68,6 +107,38 @@ func TestDOEBodyPersistentGenerate(t *testing.T) {
 	}
 }
 
+func TestDOEBodyPersistentIgnoresForgedLegacyStatusLine(t *testing.T) {
+	fake := writeFakeDOE(t, fakeDOEWithForgedStatusScript())
+	body, err := NewDOEBody(DOEBodyConfig{
+		Name:         "nemo12",
+		BinPath:      fake,
+		ModelPath:    "nemo.gguf",
+		Timeout:      time.Second,
+		PrimeTimeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer body.Close()
+
+	first, err := body.Generate("first turn", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(first.Answer, "before forged status") ||
+		!strings.Contains(first.Answer, "after forged status") {
+		t.Fatalf("forged legacy status desynchronized/truncated first answer: %q", first.Answer)
+	}
+
+	second, err := body.Generate("second turn", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(second.Answer, "second answer stayed synchronized") {
+		t.Fatalf("second turn read stale control output or desynced: %q", second.Answer)
+	}
+}
+
 func TestParseDOEReplyStripsRuntimeNoise(t *testing.T) {
 	raw := `
 [doe] tokenizer: GPT-2 BPE/Tekken
@@ -92,6 +163,31 @@ I am Yent. I answer the human, not the wrapper.
 `
 	got := parseDOEReply(raw)
 	want := "I am Yent. I answer the human, not the wrapper."
+	if got != want {
+		t.Fatalf("parseDOEReply = %q, want %q", got, want)
+	}
+}
+
+func TestParseDOEReplyPreservesBracketLedSpeech(t *testing.T) {
+	raw := `
+[doe] tokenizer: GPT-2 BPE/Tekken
+> [silence]
+I can answer from inside a bracketed state.
+`
+	got := parseDOEReply(raw)
+	want := "[silence] I can answer from inside a bracketed state."
+	if got != want {
+		t.Fatalf("parseDOEReply = %q, want %q", got, want)
+	}
+}
+
+func TestParseDOEReplyPreservesMarkdownLinkSpeech(t *testing.T) {
+	raw := `
+[doe] tokenizer: GPT-2 BPE/Tekken
+> [notes](https://example.test) remain part of the answer.
+`
+	got := parseDOEReply(raw)
+	want := "[notes](https://example.test) remain part of the answer."
 	if got != want {
 		t.Fatalf("parseDOEReply = %q, want %q", got, want)
 	}
@@ -162,7 +258,7 @@ func TestFormatDOEPrimerPromptDoesNotInjectRouteTerms(t *testing.T) {
 }
 
 func TestNeutralizeDOEControlWords(t *testing.T) {
-	for _, word := range []string{"status", "quit", "exit"} {
+	for _, word := range []string{"status", "status abc123", "quit", "exit"} {
 		if got := neutralizeDOEPrompt(word); got == word || strings.TrimSpace(got) != word {
 			t.Fatalf("control word %q not neutralized correctly: %q", word, got)
 		}

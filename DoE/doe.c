@@ -4513,6 +4513,22 @@ static int doe_snprintf_checked(char *dst, size_t dstsz, const char *what, const
     return 1;
 }
 
+static int doe_control_nonce_valid(const char *s) {
+    if (!s || !*s) return 0;
+    size_t len = strlen(s);
+    if (len > 128) return 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if ((c >= '0' && c <= '9') ||
+            (c >= 'A' && c <= 'Z') ||
+            (c >= 'a' && c <= 'z') ||
+            c == '-' || c == '_' || c == '.')
+            continue;
+        return 0;
+    }
+    return 1;
+}
+
 static void chat(GGUFIndex *ps) {
     int max_seq = 1536;  /* room for ~1022 image tokens / long contexts */
     InferState is = alloc_infer(ps, max_seq);
@@ -4538,6 +4554,12 @@ static void chat(GGUFIndex *ps) {
         while (len > 0 && (input[len-1]=='\n' || input[len-1]=='\r')) input[--len] = '\0';
         if (!len) continue;
         if (strcmp(input,"quit")==0 || strcmp(input,"exit")==0) break;
+        if (strncmp(input, "status ", 7) == 0 && doe_control_nonce_valid(input + 7)) {
+            const char *nonce = input + 7;
+            printf("[field-control] nonce=%s step=%d debt=%.3f entropy=%.3f resonance=%.3f emergence=%.3f\n",
+                   nonce, F.step, F.debt, F.entropy, F.resonance, F.emergence);
+            continue;
+        }
         if (strcmp(input,"status")==0) {
             printf("[field] step=%d debt=%.3f entropy=%.3f resonance=%.3f emergence=%.3f\n",
                    F.step, F.debt, F.entropy, F.resonance, F.emergence);
