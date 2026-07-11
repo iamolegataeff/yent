@@ -7,6 +7,10 @@ package yent
 // not block on SQLite writes; a dual-body turn is still persisted atomically as
 // conversation -> seam with the seam linked to the stored conversation id.
 
+import "errors"
+
+var errLimphaAsyncQueueFull = errors.New("limpha async queue full")
+
 type limphaJobKind int
 
 const (
@@ -138,6 +142,7 @@ func (c *LimphaClient) enqueueLimphaJob(job limphaJob) bool {
 	case c.async.queue <- job:
 		return true
 	default:
+		c.recordMemoryFailure("enqueue", errLimphaAsyncQueueFull)
 		return false
 	}
 }

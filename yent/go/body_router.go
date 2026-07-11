@@ -133,6 +133,10 @@ type RouteTrace struct {
 	DeepExecutionPath   string           `json:"deep_execution_path,omitempty"`
 	FastDiagnostics     []string         `json:"fast_diagnostics,omitempty"`
 	DeepDiagnostics     []string         `json:"deep_diagnostics,omitempty"`
+	MemoryStatus        string           `json:"memory_status,omitempty"`
+	MemoryError         string           `json:"memory_error,omitempty"`
+	MemoryConversation  int64            `json:"memory_conversation_id,omitempty"`
+	MemorySeam          int64            `json:"memory_seam_id,omitempty"`
 	Agreement           float64          `json:"agreement,omitempty"`
 	Tension             float64          `json:"tension,omitempty"`
 	Complexity          PromptComplexity `json:"complexity"`
@@ -193,7 +197,7 @@ func (r *Router) Route(prompt string, st LimphaState) (Outcome, error) {
 	trace := r.newRouteTrace(fast, complexity, st)
 	if reason == "" {
 		// single-body turn: the fast body answers alone.
-		r.storeTurn(prompt, fast.Answer, st, nil)
+		trace.applyMemoryReceipt(r.storeTurn(prompt, fast.Answer, st, nil, &trace))
 		return Outcome{Answer: fast.Answer, Body: r.fast.Name(), Escalated: false, Trace: trace}, nil
 	}
 
@@ -212,7 +216,7 @@ func (r *Router) Route(prompt string, st LimphaState) (Outcome, error) {
 		// deep failed — keep the fast answer rather than dropping the turn.
 		trace.Winner = r.fast.Name()
 		trace.DeepError = err.Error()
-		r.storeTurn(prompt, fast.Answer, st, nil)
+		trace.applyMemoryReceipt(r.storeTurn(prompt, fast.Answer, st, nil, &trace))
 		return Outcome{Answer: fast.Answer, Body: r.fast.Name(), Escalated: true, Reason: reason, Trace: trace}, nil
 	}
 	trace.DeepExecutionPath = deep.ExecutionPath
@@ -233,13 +237,14 @@ func (r *Router) Route(prompt string, st LimphaState) (Outcome, error) {
 	trace.Winner = winner
 	trace.Agreement = agreement
 	trace.Tension = tension
-	seamID := r.storeTurn(prompt, answer, st, &Seam{
+	seam := &Seam{
 		BodyA: r.fast.Name(), BodyB: r.deep.Name(),
 		Prompt: prompt, AClaim: fast.Answer, BClaim: deep.Answer,
 		Agreement: agreement, Tension: tension, Winner: winner, Reason: reason,
-		MemoryDelta: formatMemoryDelta(trace),
-	})
-	return Outcome{Answer: answer, Body: winner, Escalated: true, Reason: reason, SeamID: seamID, Trace: trace}, nil
+	}
+	receipt := r.storeTurn(prompt, answer, st, seam, &trace)
+	trace.applyMemoryReceipt(receipt)
+	return Outcome{Answer: answer, Body: winner, Escalated: true, Reason: reason, SeamID: receipt.SeamID, Trace: trace}, nil
 }
 
 // escalationContext is what the deep body receives: the fast body's trace, the routing
@@ -370,31 +375,61 @@ func (r *Router) prepareBody(target Body) error {
 }
 
 // storeConversation persists a turn into the shared brain; 0 if memory is off.
-func (r *Router) storeConversation(prompt, answer string, st LimphaState) int64 {
+func (r *Router) storeConversation(prompt, answer string, st LimphaState) (int64, error) {
 	if r.limpha == nil || !r.limpha.connected {
-		return 0
+		return 0, nil
 	}
-	id, _ := r.limpha.store(prompt, answer, st)
-	return id
+	return r.limpha.StoreTurn(prompt, answer, st)
 }
 
 // storeTurn records one selected answer and, for dual-pass turns, its seam. In
 // async mode the link is preserved inside the worker; the immediate seam id is
 // unavailable and returns 0.
-func (r *Router) storeTurn(prompt, answer string, st LimphaState, seam *Seam) int64 {
+func (r *Router) storeTurn(prompt, answer string, st LimphaState, seam *Seam, trace *RouteTrace) memoryWriteReceipt {
 	if r.limpha == nil || !r.limpha.connected {
-		return 0
+		return memoryWriteReceipt{Status: "disabled"}
 	}
 	if r.AsyncMemory && r.limpha.EnqueueTurn(prompt, answer, st, seam) {
-		return 0
+		return memoryWriteReceipt{Status: "queued"}
 	}
-	convID := r.storeConversation(prompt, answer, st)
+	convID, err := r.storeConversation(prompt, answer, st)
+	if err != nil {
+		return memoryWriteReceipt{Status: "failed", Error: err}
+	}
 	if seam == nil {
-		return 0
+		return memoryWriteReceipt{Status: "stored", ConversationID: convID}
 	}
 	seam.ConversationID = convID
-	id, _ := r.limpha.StoreSeam(*seam)
-	return id
+	if trace != nil {
+		traceWithConversation := *trace
+		traceWithConversation.MemoryStatus = "conversation_stored"
+		traceWithConversation.MemoryConversation = convID
+		seam.MemoryDelta = formatMemoryDelta(traceWithConversation)
+	}
+	id, err := r.limpha.StoreSeam(*seam)
+	if err != nil {
+		return memoryWriteReceipt{Status: "failed", Error: err, ConversationID: convID}
+	}
+	return memoryWriteReceipt{Status: "stored", ConversationID: convID, SeamID: id}
+}
+
+type memoryWriteReceipt struct {
+	Status         string
+	Error          error
+	ConversationID int64
+	SeamID         int64
+}
+
+func (t *RouteTrace) applyMemoryReceipt(receipt memoryWriteReceipt) {
+	if t == nil {
+		return
+	}
+	t.MemoryStatus = receipt.Status
+	t.MemoryConversation = receipt.ConversationID
+	t.MemorySeam = receipt.SeamID
+	if receipt.Error != nil {
+		t.MemoryError = compactLine(receipt.Error.Error(), 240)
+	}
 }
 
 func isFinite01(v float64) bool {

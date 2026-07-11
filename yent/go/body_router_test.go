@@ -334,6 +334,69 @@ func TestRouterAsyncMemoryQueuesConversationAndSeam(t *testing.T) {
 	}
 }
 
+func TestRouterSyncMemoryFailureVisibleAndSkipsOrphanSeam(t *testing.T) {
+	lc := newRouterLimpha(t)
+	if _, err := lc.db.Exec(`CREATE TRIGGER fail_router_conv BEFORE INSERT ON conversations BEGIN
+		SELECT RAISE(FAIL, 'forced conversation write failure');
+	END;`); err != nil {
+		t.Fatal(err)
+	}
+	fast := &fakeBody{name: "nemo12", answer: "unsure", confidence: 0.2}
+	deep := &fakeBody{name: "small24", answer: "deep answer",
+		verdict: &Verdict{Agreement: 0.4, Tension: 0.6, Winner: "small24"}}
+	r := NewRouter(fast, deep, lc)
+	out, err := r.Route("what is the architecture?", LimphaState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Answer != "deep answer" || !out.Escalated {
+		t.Fatalf("dialogue should remain fail-soft, got %+v", out)
+	}
+	if out.SeamID != 0 || out.Trace.MemoryStatus != "failed" ||
+		!strings.Contains(out.Trace.MemoryError, "forced conversation write failure") {
+		t.Fatalf("memory failure must be visible and seam skipped: %+v", out.Trace)
+	}
+	s, _ := lc.Stats()
+	if s["total_conversations"].(int64) != 0 || s["total_seams"].(int64) != 0 {
+		t.Fatalf("failed conversation must not leave orphan seam, stats=%v", s)
+	}
+	if s["memory_conversation_failures"].(int64) != 1 ||
+		!strings.Contains(s["last_memory_error"].(string), "forced conversation write failure") {
+		t.Fatalf("stats must expose limpha failure, stats=%v", s)
+	}
+}
+
+func TestRouterAsyncMemoryFailureRecordedAfterDrain(t *testing.T) {
+	lc := newRouterLimpha(t)
+	if _, err := lc.db.Exec(`CREATE TRIGGER fail_router_async_conv BEFORE INSERT ON conversations BEGIN
+		SELECT RAISE(FAIL, 'forced async conversation write failure');
+	END;`); err != nil {
+		t.Fatal(err)
+	}
+	lc.StartAsync(8)
+	fast := &fakeBody{name: "nemo12", answer: "unsure", confidence: 0.2}
+	deep := &fakeBody{name: "small24", answer: "deep answer",
+		verdict: &Verdict{Agreement: 0.4, Tension: 0.6, Winner: "small24"}}
+	r := NewRouter(fast, deep, lc)
+	r.AsyncMemory = true
+	out, err := r.Route("what is the architecture?", LimphaState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Trace.MemoryStatus != "queued" || out.SeamID != 0 {
+		t.Fatalf("async turn should report queued before drain, got %+v", out.Trace)
+	}
+	lc.StopAsync()
+	s, _ := lc.Stats()
+	if s["total_conversations"].(int64) != 0 || s["total_seams"].(int64) != 0 {
+		t.Fatalf("failed async conversation must not leave orphan seam, stats=%v", s)
+	}
+	if s["memory_conversation_failures"].(int64) != 1 ||
+		!strings.Contains(s["last_memory_error"].(string), "forced async conversation write failure") {
+		t.Fatalf("async stats must expose limpha failure, stats=%v", s)
+	}
+}
+
 func TestRouterSingleResidentClosesInactiveBodies(t *testing.T) {
 	lc := newRouterLimpha(t)
 	fast := &closableFakeBody{fakeBody: fakeBody{name: "nemo12", answer: "unsure", confidence: 0.2}}

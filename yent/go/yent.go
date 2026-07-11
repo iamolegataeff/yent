@@ -402,7 +402,9 @@ func (y *Yent) Generate(prompt string, maxTokens int, temperature, topP float32)
 		s := y.amk.GetState()
 		state := LimphaStateFromAMState(s, y.DeltaAlpha)
 		if !y.limpha.EnqueueTurn(prompt, result, state, nil) {
-			_ = y.limpha.Store(prompt, result, state)
+			if err := y.limpha.Store(prompt, result, state); err != nil {
+				fmt.Fprintf(os.Stderr, "[limpha] memory write failed: %v\n", err)
+			}
 		}
 	}
 
