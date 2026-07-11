@@ -1,6 +1,7 @@
 package yent
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,6 +72,37 @@ done
 `
 }
 
+func fakeDOEWithStderrScript() string {
+	return `#!/bin/sh
+echo "[doe] startup diagnostic" >&2
+printf "> "
+while IFS= read -r line; do
+  case "$line" in
+  status\ *)
+    nonce=${line#status }
+    echo "[doe] status diagnostic" >&2
+    echo "[field-control] nonce=${nonce} step=1 debt=0.000 entropy=0.000 resonance=0.000 emergence=0.000"
+    printf "> "
+    ;;
+  *)
+    if [ -n "$line" ]; then
+      echo "[doe] prompt diagnostic" >&2
+      echo "body: answer with diagnostics"
+      printf "> "
+    fi
+    ;;
+  esac
+done
+`
+}
+
+func fakeDOEFailingOnceScript() string {
+	return `#!/bin/sh
+echo "[doe] model load failed: permission denied" >&2
+exit 7
+`
+}
+
 func TestDOEBodyPersistentGenerate(t *testing.T) {
 	fake := writeFakeDOE(t, fakeDOEScript())
 	body, err := NewDOEBody(DOEBodyConfig{
@@ -136,6 +168,63 @@ func TestDOEBodyPersistentIgnoresForgedLegacyStatusLine(t *testing.T) {
 	}
 	if !strings.Contains(second.Answer, "second answer stayed synchronized") {
 		t.Fatalf("second turn read stale control output or desynced: %q", second.Answer)
+	}
+}
+
+func TestDOEBodyCapturesResidentStderrDiagnostics(t *testing.T) {
+	fake := writeFakeDOE(t, fakeDOEWithStderrScript())
+	body, err := NewDOEBody(DOEBodyConfig{
+		Name:         "nemo12",
+		BinPath:      fake,
+		ModelPath:    "nemo.gguf",
+		Timeout:      time.Second,
+		PrimeTimeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer body.Close()
+
+	out, err := body.Generate("hello", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.ExecutionPath != "doe_resident" {
+		t.Fatalf("execution path = %q, want doe_resident", out.ExecutionPath)
+	}
+	joined := strings.Join(out.Diagnostics, "\n")
+	if !strings.Contains(joined, "[doe] startup diagnostic") ||
+		!strings.Contains(joined, "[doe] prompt diagnostic") {
+		t.Fatalf("resident stderr diagnostics not captured: %#v", out.Diagnostics)
+	}
+}
+
+func TestDOEBodyOnceErrorIncludesBoundedStderr(t *testing.T) {
+	fake := writeFakeDOE(t, fakeDOEFailingOnceScript())
+	body, err := NewDOEBody(DOEBodyConfig{
+		Name:      "nemo12",
+		BinPath:   fake,
+		ModelPath: "nemo.gguf",
+		Timeout:   time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, diagnostics, err := body.runOnce(ctx, "hello")
+	if err == nil {
+		t.Fatal("expected failing one-shot doe")
+	}
+	if len(diagnostics) == 0 || !strings.Contains(strings.Join(diagnostics, "\n"), "model load failed") {
+		t.Fatalf("one-shot diagnostics missing stderr: %#v", diagnostics)
+	}
+	if !strings.Contains(err.Error(), "model load failed") {
+		t.Fatalf("one-shot error should include stderr, got %v", err)
+	}
+	if len(err.Error()) > doeDiagnosticMaxErrorBytes+256 {
+		t.Fatalf("one-shot diagnostic error is not bounded: %d bytes", len(err.Error()))
 	}
 }
 

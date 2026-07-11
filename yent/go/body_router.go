@@ -45,6 +45,12 @@ type BodyResult struct {
 	// Confidence is the body's self-signal in [0,1]. The router escalates when the
 	// fast body reports low confidence (its entropy / top-logit-margin proxy).
 	Confidence float64
+	// ExecutionPath names the concrete runtime path that produced this answer.
+	// Process-backed bodies use it for receipts such as "doe_resident" or "doe_once".
+	ExecutionPath string
+	// Diagnostics carries bounded runtime diagnostics from the body driver. The
+	// router records it in traces, but does not feed it back into model prompts.
+	Diagnostics []string
 	// Verdict is the deep body's reflection on the fast body's trace — set only when
 	// the deep body ran with that trace in ctx. The deep body scores agreement and
 	// tension and names the winner; the router copies it into the seam.
@@ -123,6 +129,10 @@ type RouteTrace struct {
 	Reason              string           `json:"reason,omitempty"`
 	FastConfidence      float64          `json:"fast_confidence"`
 	FastConfidenceValid bool             `json:"fast_confidence_valid"`
+	FastExecutionPath   string           `json:"fast_execution_path,omitempty"`
+	DeepExecutionPath   string           `json:"deep_execution_path,omitempty"`
+	FastDiagnostics     []string         `json:"fast_diagnostics,omitempty"`
+	DeepDiagnostics     []string         `json:"deep_diagnostics,omitempty"`
 	Agreement           float64          `json:"agreement,omitempty"`
 	Tension             float64          `json:"tension,omitempty"`
 	Complexity          PromptComplexity `json:"complexity"`
@@ -205,6 +215,8 @@ func (r *Router) Route(prompt string, st LimphaState) (Outcome, error) {
 		r.storeTurn(prompt, fast.Answer, st, nil)
 		return Outcome{Answer: fast.Answer, Body: r.fast.Name(), Escalated: true, Reason: reason, Trace: trace}, nil
 	}
+	trace.DeepExecutionPath = deep.ExecutionPath
+	trace.DeepDiagnostics = cloneDiagnostics(deep.Diagnostics)
 
 	winner := r.deep.Name()
 	agreement, tension := 0.0, 0.0
@@ -316,6 +328,8 @@ func (r *Router) newRouteTrace(fast BodyResult, complexity PromptComplexity, st 
 		Winner:              r.fast.Name(),
 		FastConfidence:      confidence,
 		FastConfidenceValid: validConfidence,
+		FastExecutionPath:   fast.ExecutionPath,
+		FastDiagnostics:     cloneDiagnostics(fast.Diagnostics),
 		Complexity:          complexity,
 		State:               st,
 	}
@@ -405,6 +419,15 @@ func positiveOrDefault(v, fallback int) int {
 		return v
 	}
 	return fallback
+}
+
+func cloneDiagnostics(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
 }
 
 func compactLine(s string, maxRunes int) string {
