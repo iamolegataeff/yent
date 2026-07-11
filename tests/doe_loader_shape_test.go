@@ -21,16 +21,32 @@ type doeFixtureTensor struct {
 	offset uint64
 }
 
+type doeLoaderFaultCase struct {
+	name       string
+	tensors    []doeFixtureTensor
+	want       string
+	wantNoText string
+}
+
 func TestDOEHostLoaderRejectsShapeAndCompletenessFaults(t *testing.T) {
 	exe := buildDOEForLoaderTest(t)
-	outDir := t.TempDir()
+	runDOEHostLoaderFaultCases(t, exe, nil)
+}
 
-	cases := []struct {
-		name       string
-		tensors    []doeFixtureTensor
-		want       string
-		wantNoText string
-	}{
+func TestDOEHostLoaderRejectsShapeAndCompletenessFaultsUnderASan(t *testing.T) {
+	exe := buildDOEForLoaderTestWithFlags(t, "asan", []string{
+		"-O1",
+		"-g",
+		"-fsanitize=address",
+		"-fno-omit-frame-pointer",
+	})
+	runDOEHostLoaderFaultCases(t, exe, []string{
+		"ASAN_OPTIONS=halt_on_error=1:abort_on_error=1",
+	})
+}
+
+func doeLoaderFaultCases() []doeLoaderFaultCase {
+	return []doeLoaderFaultCase{
 		{
 			name:       "bad_token_embedding_shape",
 			tensors:    mutateDOETensorDims(baseDOELoaderTensors(), "token_embd.weight", []uint64{65, 8}),
@@ -110,16 +126,23 @@ func TestDOEHostLoaderRejectsShapeAndCompletenessFaults(t *testing.T) {
 			wantNoText: "[sonar] profiling",
 		},
 	}
+}
 
-	for _, tc := range cases {
+func runDOEHostLoaderFaultCases(t *testing.T, exe string, env []string) {
+	t.Helper()
+	outDir := t.TempDir()
+	for _, tc := range doeLoaderFaultCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			modelPath := filepath.Join(outDir, tc.name+".gguf")
 			if err := writeMinimalDOEHostGGUF(modelPath, tc.tensors); err != nil {
 				t.Fatalf("write fixture: %v", err)
 			}
-			out, err := runDOEExpectingLoadFailure(t, exe, modelPath)
+			out, err := runDOEExpectingLoadFailure(t, exe, modelPath, env)
 			if err == nil {
 				t.Fatalf("doe_field accepted malformed GGUF; output:\n%s", out)
+			}
+			if strings.Contains(out, "ERROR: AddressSanitizer") {
+				t.Fatalf("ASan reported a loader memory error:\n%s", out)
 			}
 			if !strings.Contains(out, tc.want) {
 				t.Fatalf("missing diagnostic %q in output:\n%s", tc.want, out)
@@ -132,6 +155,11 @@ func TestDOEHostLoaderRejectsShapeAndCompletenessFaults(t *testing.T) {
 }
 
 func buildDOEForLoaderTest(t *testing.T) string {
+	t.Helper()
+	return buildDOEForLoaderTestWithFlags(t, "native", nil)
+}
+
+func buildDOEForLoaderTestWithFlags(t *testing.T, suffix string, extraFlags []string) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("doe.c loader smoke is POSIX-only")
@@ -151,17 +179,34 @@ float *pv_encode_image(const char *img_path, const char *mmproj_path, int *o_nto
 	if err := os.WriteFile(stubPath, []byte(stub), 0o600); err != nil {
 		t.Fatalf("write pixtral stub: %v", err)
 	}
-	exe := filepath.Join(dir, "doe_field_loader_test")
-	cmd := exec.Command("cc", "-O0", "-Wall", "-Wextra",
+	exe := filepath.Join(dir, "doe_field_loader_test_"+suffix)
+	args := []string{"-O0"}
+	if len(extraFlags) > 0 {
+		args = append([]string{}, extraFlags...)
+	}
+	args = append(args, "-Wall", "-Wextra",
 		filepath.Join(root, "DoE", "doe.c"),
 		stubPath,
 		"-lm", "-lpthread", "-o", exe)
+	cmd := exec.Command("cc", args...)
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if len(extraFlags) > 0 && sanitizerUnavailable(string(out)) {
+			t.Skipf("C sanitizer unavailable: %v\n%s", err, string(out))
+		}
 		t.Fatalf("compile doe loader test binary: %v\n%s", err, string(out))
 	}
 	return exe
+}
+
+func sanitizerUnavailable(out string) bool {
+	lower := strings.ToLower(out)
+	return strings.Contains(lower, "unsupported") ||
+		strings.Contains(lower, "unrecognized") ||
+		strings.Contains(lower, "unknown argument") ||
+		strings.Contains(lower, "invalid argument") ||
+		strings.Contains(lower, "fsanitize=address")
 }
 
 func repoRootForTest(t *testing.T) string {
@@ -182,7 +227,7 @@ func repoRootForTest(t *testing.T) string {
 	}
 }
 
-func runDOEExpectingLoadFailure(t *testing.T, exe, modelPath string) (string, error) {
+func runDOEExpectingLoadFailure(t *testing.T, exe, modelPath string, env []string) (string, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -196,6 +241,9 @@ func runDOEExpectingLoadFailure(t *testing.T, exe, modelPath string) (string, er
 		"--no-load-spore",
 		"--no-save-spore")
 	cmd.Dir = t.TempDir()
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
 		t.Fatalf("doe_field timed out; output:\n%s", string(out))
