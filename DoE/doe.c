@@ -1584,30 +1584,40 @@ static void doe_dequant_to_f32(const uint8_t *src, int dt, uint64_t n, float *ou
     else if (dt == 14) dequant_q6_k(src, out, n);
 }
 
-static void profile_weights(float *data, int rows, int cols, LayerProfile *out) {
-    int n = rows * cols;
-    if (n == 0) { memset(out, 0, sizeof(LayerProfile)); return; }
+static int profile_weight_shape_checked(size_t rows, size_t cols, size_t *out_n) {
+    if (!out_n || rows == 0 || cols == 0 || rows > SIZE_MAX / cols) return 0;
+    *out_n = rows * cols;
+    return 1;
+}
+
+static void profile_weights(float *data, size_t rows, size_t cols, LayerProfile *out) {
+    size_t n = 0;
+    if (!data || !out || !profile_weight_shape_checked(rows, cols, &n)) {
+        if (out) memset(out, 0, sizeof(LayerProfile));
+        return;
+    }
     float sum = 0, sum_sq = 0, sum_abs = 0;
-    int near_zero = 0;
-    for (int i = 0; i < n; i++) {
+    size_t near_zero = 0;
+    for (size_t i = 0; i < n; i++) {
         float v = data[i];
         sum += v; sum_sq += v*v; sum_abs += fabsf(v);
         if (fabsf(v) < 1e-6f) near_zero++;
     }
-    float mean = sum / n;
+    float nf = (float)n;
+    float mean = sum / nf;
     out->l2_norm = sqrtf(sum_sq);
-    out->mean_abs = sum_abs / n;
-    out->std_dev = sqrtf(sum_sq/n - mean*mean);
-    out->sparsity = (float)near_zero / n;
+    out->mean_abs = sum_abs / nf;
+    out->std_dev = sqrtf(sum_sq/nf - mean*mean);
+    out->sparsity = (float)near_zero / nf;
 
     /* Approximate spectral energy: sample random directions */
     float top_energy = 0;
     for (int trial = 0; trial < 8; trial++) {
         float dot = 0;
-        for (int j = 0; j < cols; j++) {
+        for (size_t j = 0; j < cols; j++) {
             float r = rand_normal();
             float proj = 0;
-            for (int i = 0; i < rows; i++) proj += data[i*cols+j] * r;
+            for (size_t i = 0; i < rows; i++) proj += data[i*cols+j] * r;
             dot += proj * proj;
         }
         top_energy += sqrtf(dot);
@@ -1616,14 +1626,14 @@ static void profile_weights(float *data, int rows, int cols, LayerProfile *out) 
 
     /* Dead neurons: rows with near-zero norm */
     out->dead_neurons = 0;
-    for (int r = 0; r < rows; r++) {
+    for (size_t r = 0; r < rows; r++) {
         float rn = 0;
-        for (int c = 0; c < cols; c++) rn += data[r*cols+c] * data[r*cols+c];
+        for (size_t c = 0; c < cols; c++) rn += data[r*cols+c] * data[r*cols+c];
         if (sqrtf(rn) < 1e-4f) out->dead_neurons++;
     }
 
     /* Composite health */
-    float alive_ratio = 1.0f - (float)out->dead_neurons / (rows > 0 ? rows : 1);
+    float alive_ratio = 1.0f - (float)out->dead_neurons / (float)rows;
     float activity = fminf(1.0f, out->std_dev * 10.0f);
     float density = 1.0f - out->sparsity;
     out->health = alive_ratio * 0.4f + activity * 0.3f + density * 0.3f;
@@ -2758,15 +2768,19 @@ static int index_load(GGUFIndex *ps, const char *path) {
             int gdt = ps->host_layers[l].ffn_gate_dt;
             if (gdt) {
                 /* weight kept packed — dequant a temp f32 copy just for profiling */
-                uint64_t ne = (uint64_t)ps->host_hidden * ps->host_dim;
-                float *tmp = malloc(ne * sizeof(float));
+                size_t ne = 0;
+                float *tmp = NULL;
+                if (profile_weight_shape_checked((size_t)ps->host_hidden, (size_t)ps->host_dim, &ne) &&
+                    ne <= SIZE_MAX / sizeof(float)) {
+                    tmp = malloc(ne * sizeof(float));
+                }
                 if (tmp) {
-                    doe_dequant_to_f32((const uint8_t*)ps->host_layers[l].ffn_gate, gdt, ne, tmp);
-                    profile_weights(tmp, ps->host_hidden, ps->host_dim, &ps->profile.layers[l]);
+                    doe_dequant_to_f32((const uint8_t*)ps->host_layers[l].ffn_gate, gdt, (uint64_t)ne, tmp);
+                    profile_weights(tmp, (size_t)ps->host_hidden, (size_t)ps->host_dim, &ps->profile.layers[l]);
                     free(tmp);
                 } else memset(&ps->profile.layers[l], 0, sizeof(LayerProfile));
             } else {
-                profile_weights(ps->host_layers[l].ffn_gate, ps->host_hidden, ps->host_dim, &ps->profile.layers[l]);
+                profile_weights(ps->host_layers[l].ffn_gate, (size_t)ps->host_hidden, (size_t)ps->host_dim, &ps->profile.layers[l]);
             }
         } else {
             memset(&ps->profile.layers[l], 0, sizeof(LayerProfile));
