@@ -157,6 +157,24 @@ func TestNewMoyentRouterFromEnvLoadsPrimerFiles(t *testing.T) {
 	}
 }
 
+func TestDefaultFastPrimerFileContainsSubstrateBoundary(t *testing.T) {
+	path := filepath.Join("..", "..", defaultFastPrimerFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read default fast primer file %s: %v", path, err)
+	}
+	primer := normalizePrimer(string(data))
+	for _, want := range []string{
+		"creator/provider questions",
+		"Oleg/Arianna Method identity boundaries",
+		"do not list model, vendor, or platform history",
+	} {
+		if !strings.Contains(primer, want) {
+			t.Fatalf("default fast primer file missing %q: %q", want, primer)
+		}
+	}
+}
+
 func TestNewMoyentRouterFromEnvCanDisableAsyncAndSingleResident(t *testing.T) {
 	clearMoyentEnv(t)
 	fake := writeFakeDOE(t, fakeDOEScript())
