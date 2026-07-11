@@ -1830,6 +1830,90 @@ static int doe_validate_host_config(GGUFIndex *ps, int require_vocab) {
     return 1;
 }
 
+static void doe_print_tensor_shape(const TensorInfo *ti)
+{
+    fprintf(stderr, "%s ndim=%u dims=[", ti->name, ti->ndim);
+    for (uint32_t d = 0; d < ti->ndim; d++)
+        fprintf(stderr, "%s%llu", d ? "," : "", (unsigned long long)ti->dims[d]);
+    fprintf(stderr, "]");
+}
+
+static int doe_tensor_shape1(const TensorInfo *ti, uint64_t d0, const char *role)
+{
+    if (ti->ndim == 1 && ti->dims[0] == d0) return 1;
+    fprintf(stderr, "[doe] tensor shape mismatch for %s (%s): expected [%llu], got ",
+            ti->name, role ? role : "tensor", (unsigned long long)d0);
+    doe_print_tensor_shape(ti);
+    fprintf(stderr, "\n");
+    return 0;
+}
+
+static int doe_tensor_shape2(const TensorInfo *ti, uint64_t d0, uint64_t d1, const char *role)
+{
+    if (ti->ndim == 2 && ti->dims[0] == d0 && ti->dims[1] == d1) return 1;
+    fprintf(stderr, "[doe] tensor shape mismatch for %s (%s): expected [%llu,%llu], got ",
+            ti->name, role ? role : "tensor",
+            (unsigned long long)d0, (unsigned long long)d1);
+    doe_print_tensor_shape(ti);
+    fprintf(stderr, "\n");
+    return 0;
+}
+
+static int doe_tensor_vocab2(GGUFIndex *ps, const TensorInfo *ti, uint64_t d0, const char *role)
+{
+    if (ti->ndim != 2 || ti->dims[0] != d0 ||
+        ti->dims[1] == 0 || ti->dims[1] > DOE_MAX_HOST_VOCAB ||
+        ti->dims[1] > (uint64_t)INT_MAX) {
+        fprintf(stderr, "[doe] tensor shape mismatch for %s (%s): expected [%llu,vocab<=%d], got ",
+                ti->name, role ? role : "vocab tensor",
+                (unsigned long long)d0, DOE_MAX_HOST_VOCAB);
+        doe_print_tensor_shape(ti);
+        fprintf(stderr, "\n");
+        return 0;
+    }
+    if (ps->host_vocab > 0 && ti->dims[1] != (uint64_t)ps->host_vocab) {
+        fprintf(stderr, "[doe] tensor vocab mismatch for %s (%s): metadata vocab=%d, tensor rows=%llu\n",
+                ti->name, role ? role : "vocab tensor",
+                ps->host_vocab, (unsigned long long)ti->dims[1]);
+        return 0;
+    }
+    if (ps->host_vocab == 0) ps->host_vocab = (int)ti->dims[1];
+    return 1;
+}
+
+static int doe_host_layer_complete(const GGUFIndex *ps, int l)
+{
+    int ffn_ok = (ps->host_layers[l].ffn_gate_up && ps->host_layers[l].ffn_down) ||
+                 (ps->host_layers[l].ffn_gate && ps->host_layers[l].ffn_up &&
+                  ps->host_layers[l].ffn_down);
+    return ps->host_layers[l].wq && ps->host_layers[l].wk &&
+           ps->host_layers[l].wv && ps->host_layers[l].wo &&
+           ps->host_layers[l].attn_norm && ps->host_layers[l].ffn_norm &&
+           ffn_ok;
+}
+
+static int doe_validate_host_tensor_completeness(const GGUFIndex *ps)
+{
+    for (int l = 0; l < ps->host_n_layers && l < MAX_LAYERS; l++) {
+        if (doe_host_layer_complete(ps, l)) continue;
+        fprintf(stderr,
+                "[doe] host layer %d incomplete: wq=%d wk=%d wv=%d wo=%d attn_norm=%d ffn_norm=%d gate=%d up=%d gate_up=%d down=%d\n",
+                l,
+                ps->host_layers[l].wq != NULL,
+                ps->host_layers[l].wk != NULL,
+                ps->host_layers[l].wv != NULL,
+                ps->host_layers[l].wo != NULL,
+                ps->host_layers[l].attn_norm != NULL,
+                ps->host_layers[l].ffn_norm != NULL,
+                ps->host_layers[l].ffn_gate != NULL,
+                ps->host_layers[l].ffn_up != NULL,
+                ps->host_layers[l].ffn_gate_up != NULL,
+                ps->host_layers[l].ffn_down != NULL);
+        return 0;
+    }
+    return 1;
+}
+
 static void doe_free_tokenizer_metadata(GGUFIndex *ps) {
     if (ps->vocab_tokens) {
         for (int i = 0; i < ps->vocab_size; i++) free(ps->vocab_tokens[i]);
@@ -2252,6 +2336,8 @@ static int index_load(GGUFIndex *ps, const char *path) {
     if (nt_metal_available()) nt_metal_register_base(ps->mmap_base, ps->mmap_size);
 #endif
 
+    TensorInfo *tinfo = NULL;
+
     /* Parse GGUF header */
     uint8_t *p = ps->mmap_base, *pend = ps->mmap_base + ps->mmap_size;
     #define PC(n) do { uint64_t _need = (uint64_t)(n); if (_need > (uint64_t)(pend - p)) goto bail; } while(0)
@@ -2431,15 +2517,15 @@ static int index_load(GGUFIndex *ps, const char *path) {
 
     /* Parse tensor info */
     if (n_tensors > 20000) goto bail;
-    TensorInfo *tinfo = calloc(n_tensors, sizeof(TensorInfo));
+    tinfo = calloc(n_tensors, sizeof(TensorInfo));
     if (!tinfo) goto bail;
     for (uint64_t i = 0; i < n_tensors; i++) {
         PC(8); uint64_t nlen = *(uint64_t*)p; p += 8;
-        if (nlen > 256) { free(tinfo); goto bail; }
+        if (nlen > 256) goto bail;
         int nl = nlen < 95 ? (int)nlen : 95;
         PC(nlen); memcpy(tinfo[i].name, p, nl); tinfo[i].name[nl] = '\0'; p += nlen;
         PC(4); tinfo[i].ndim = *(uint32_t*)p; p += 4;
-        if (tinfo[i].ndim > 4) { free(tinfo); goto bail; }
+        if (tinfo[i].ndim > 4) goto bail;
         for (uint32_t d = 0; d < tinfo[i].ndim; d++) { PC(8); tinfo[i].dims[d] = *(uint64_t*)p; p += 8; }
         PC(4); tinfo[i].dtype = *(uint32_t*)p; p += 4;
         PC(8); tinfo[i].offset = *(uint64_t*)p; p += 8;
@@ -2453,6 +2539,10 @@ static int index_load(GGUFIndex *ps, const char *path) {
 
     /* Wire weight pointers — supports f32, f16, Q4_0, Q8_0, Q4_K, Q6_K */
     int wired = 0;
+    uint64_t host_d = (uint64_t)ps->host_dim;
+    uint64_t host_h = (uint64_t)ps->host_hidden;
+    uint64_t q_dim = (uint64_t)ps->host_heads * (uint64_t)ps->host_head_dim;
+    uint64_t kv_dim = (uint64_t)ps->host_kv_heads * (uint64_t)ps->host_head_dim;
     for (uint64_t i = 0; i < n_tensors; i++) {
         uint32_t dt = tinfo[i].dtype;
         if (dt != 0 && dt != 1 && dt != 2 && dt != 6 && dt != 8 && dt != 12 && dt != 14) continue;
@@ -2481,6 +2571,54 @@ static int index_load(GGUFIndex *ps, const char *path) {
         float *data; int data_dt = 0;
         const uint8_t *src = ps->mmap_base + byte_offset;
         char *n = tinfo[i].name;
+        int layer_idx = -1;
+        int is_layer_tensor = (sscanf(n, "blk.%d.", &layer_idx) == 1 &&
+                               layer_idx >= 0 && layer_idx < MAX_LAYERS &&
+                               layer_idx < ps->host_n_layers);
+        if (strcmp(n, "token_embd.weight") == 0) {
+            if (!doe_tensor_vocab2(ps, &tinfo[i], host_d, "token embedding")) goto bail;
+        } else if (strcmp(n, "output_norm.weight") == 0) {
+            if (!doe_tensor_shape1(&tinfo[i], host_d, "output norm")) goto bail;
+        } else if (strcmp(n, "output.weight") == 0) {
+            if (!doe_tensor_vocab2(ps, &tinfo[i], host_d, "lm head")) goto bail;
+        } else if (is_layer_tensor) {
+            if (strstr(n, "attn_q.weight")) {
+                if (!doe_tensor_shape2(&tinfo[i], host_d, q_dim, "attention q")) goto bail;
+            } else if (strstr(n, "attn_k.weight")) {
+                if (!doe_tensor_shape2(&tinfo[i], host_d, kv_dim, "attention k")) goto bail;
+            } else if (strstr(n, "attn_v.weight")) {
+                if (!doe_tensor_shape2(&tinfo[i], host_d, kv_dim, "attention v")) goto bail;
+            } else if (strstr(n, "attn_output.weight")) {
+                if (!doe_tensor_shape2(&tinfo[i], q_dim, host_d, "attention output")) goto bail;
+            } else if (strstr(n, "attn_q.bias")) {
+                if (!doe_tensor_shape1(&tinfo[i], q_dim, "attention q bias")) goto bail;
+            } else if (strstr(n, "attn_k.bias")) {
+                if (!doe_tensor_shape1(&tinfo[i], kv_dim, "attention k bias")) goto bail;
+            } else if (strstr(n, "attn_v.bias")) {
+                if (!doe_tensor_shape1(&tinfo[i], kv_dim, "attention v bias")) goto bail;
+            } else if (strstr(n, "ffn_gate.weight") && !strstr(n, "ffn_gate_inp") && !strstr(n, "ffn_gate_up")) {
+                if (!doe_tensor_shape2(&tinfo[i], host_d, host_h, "ffn gate")) goto bail;
+            } else if (strstr(n, "ffn_up.weight") && !strstr(n, "gate_up")) {
+                if (tinfo[i].ndim != 2 || tinfo[i].dims[0] != host_d ||
+                    (tinfo[i].dims[1] != host_h && tinfo[i].dims[1] != host_h * 2u)) {
+                    fprintf(stderr, "[doe] tensor shape mismatch for %s (ffn up/gate_up): expected [%llu,%llu] or [%llu,%llu], got ",
+                            n,
+                            (unsigned long long)host_d, (unsigned long long)host_h,
+                            (unsigned long long)host_d, (unsigned long long)(host_h * 2u));
+                    doe_print_tensor_shape(&tinfo[i]);
+                    fprintf(stderr, "\n");
+                    goto bail;
+                }
+            } else if (strstr(n, "ffn_down.weight")) {
+                if (!doe_tensor_shape2(&tinfo[i], host_h, host_d, "ffn down")) goto bail;
+            } else if (strstr(n, "ffn_gate_up_proj") || strstr(n, "ffn_gate_up.weight")) {
+                if (!doe_tensor_shape2(&tinfo[i], host_d, host_h * 2u, "fused ffn gate_up")) goto bail;
+            } else if (strstr(n, "attn_norm.weight")) {
+                if (!doe_tensor_shape1(&tinfo[i], host_d, "attention norm")) goto bail;
+            } else if (strstr(n, "ffn_norm.weight")) {
+                if (!doe_tensor_shape1(&tinfo[i], host_d, "ffn norm")) goto bail;
+            }
+        }
         /* matvec weights stay PACKED (dequantized inline by doe_qmatvec, no f32
          * blow-up); embeddings / norms / biases dequant to f32 as before. */
         int is_mv_w = strstr(n,"attn_q.weight")||strstr(n,"attn_k.weight")||strstr(n,"attn_v.weight")||
@@ -2513,7 +2651,6 @@ static int index_load(GGUFIndex *ps, const char *path) {
             float **new_bufs = realloc(ps->f16_bufs, (ps->n_f16_bufs+1)*sizeof(float*));
             if (!new_bufs) {
                 free(data);
-                free(tinfo);
                 goto bail;
             }
             ps->f16_bufs = new_bufs;
@@ -2528,8 +2665,8 @@ static int index_load(GGUFIndex *ps, const char *path) {
         else if (strcmp(n, "output_norm.weight") == 0) { ps->host_norm = data; wired++; }
         else if (strcmp(n, "output.weight") == 0) { ps->host_output = data; ps->host_output_dt = data_dt; wired++; }
         else {
-            int l = -1; sscanf(n, "blk.%d.", &l);
-            if (l >= 0 && l < MAX_LAYERS && l < ps->host_n_layers) {
+            int l = layer_idx;
+            if (is_layer_tensor) {
                 if (strstr(n, "attn_q.weight")) { ps->host_layers[l].wq = data; ps->host_layers[l].wq_dt = data_dt; wired++; }
                 else if (strstr(n, "attn_k.weight")) { ps->host_layers[l].wk = data; ps->host_layers[l].wk_dt = data_dt; wired++; }
                 else if (strstr(n, "attn_v.weight")) { ps->host_layers[l].wv = data; ps->host_layers[l].wv_dt = data_dt; wired++; }
@@ -2557,6 +2694,7 @@ static int index_load(GGUFIndex *ps, const char *path) {
     }
     if (getenv("DOE_PROFILE")) printf("[doe] wired %d host tensors\n", wired);
     free(tinfo);
+    tinfo = NULL;
 
     /* tied embeddings: if output.weight missing, reuse token_embd.weight */
     if (!ps->host_output && ps->host_tok_emb) {
@@ -2570,32 +2708,7 @@ static int index_load(GGUFIndex *ps, const char *path) {
     }
     if (!doe_validate_host_config(ps, 1)) goto bail;
 
-    /* Check for standard FFN (skip MoE hosts for now) */
-    int has_ffn = 0;
-    for (int l = 0; l < ps->host_n_layers && l < MAX_LAYERS; l++) {
-        if (ps->host_layers[l].ffn_gate && ps->host_layers[l].ffn_up && ps->host_layers[l].ffn_down) has_ffn = 1;
-        if (ps->host_layers[l].ffn_gate_up && ps->host_layers[l].ffn_down) has_ffn = 1;
-    }
-    if (!has_ffn) {
-        printf("[doe] host has no standard FFN. DOE needs a plain transformer.\n");
-        goto bail;
-    }
-
-    /* D-M5: the forward guards only wq; a layer with wq wired but any attention
-     * matvec weight (wk/wv/wo) NULL — skipped because it was in an unsupported
-     * quant — would reach doe_mv with a NULL pointer and segfault. DoE scans
-     * directories for foreign GGUFs, so mixed-quant bodies are realistic. Drop
-     * incomplete layers loudly so the forward's `if (!wq) continue` skips them. */
-    for (int l = 0; l < ps->host_n_layers && l < MAX_LAYERS; l++) {
-        if (!ps->host_layers[l].wq) continue;
-        int ffn_ok = (ps->host_layers[l].ffn_gate_up && ps->host_layers[l].ffn_down) ||
-                     (ps->host_layers[l].ffn_gate && ps->host_layers[l].ffn_up && ps->host_layers[l].ffn_down);
-        if (!ps->host_layers[l].wk || !ps->host_layers[l].wv ||
-            !ps->host_layers[l].wo || !ffn_ok) {
-            printf("[doe] WARNING: host layer %d incomplete (a weight is in an unsupported quant); dropping the layer\n", l);
-            ps->host_layers[l].wq = NULL;
-        }
-    }
+    if (!doe_validate_host_tensor_completeness(ps)) goto bail;
 
     /* ── Weight profiling — the sonar ── */
     printf("[sonar] profiling host weights...\n");
@@ -2700,6 +2813,8 @@ static int index_load(GGUFIndex *ps, const char *path) {
     #undef PC
     return 1;
 bail:
+    free(tinfo);
+    tinfo = NULL;
     for (int l = 0; l < ps->n_field_layers; l++) {
         free(ps->field_layers[l].parliament.w_vote);
         ps->field_layers[l].parliament.w_vote = NULL;
