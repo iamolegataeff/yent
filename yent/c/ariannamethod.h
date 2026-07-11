@@ -263,6 +263,10 @@ typedef struct {
   float weave;       // pattern-binding, threads cohering into a whole (COMPLEX)
   float valence;     // emotional lean of the current thought (-1..1), written by the High brain
   float arousal;     // emotional intensity of the current thought (0..1), written by the High brain
+  // MetaJanus — the self-LOCATION anchor: WHEN this organism began, and how far the world's
+  // calendars have drifted from that origin since. APPEND-ONLY (soma prefix-migration holds).
+  float birth_drift;         // cumulative Hebrew-Gregorian drift at THIS organism's birth — the fixed origin. Set once via BIRTH; 0 until born.
+  float personal_dissonance; // |drift(now) - birth_drift| / AM_MAX_UNCORRECTED, clamped — the growing (Metonic-nonlinear) distance from origin. 0 until born.
 } AM_State;
 
 // Temporal modes

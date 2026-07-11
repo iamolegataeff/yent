@@ -36,6 +36,10 @@ type AMState struct {
 	Wormhole      float32
 	CalendarDrift float32
 
+	// MetaJanus — the self-location anchor
+	BirthDrift         float32
+	PersonalDissonance float32
+
 	// Attention
 	AttendFocus  float32
 	AttendSpread float32
@@ -137,6 +141,8 @@ func (a *AMK) GetState() AMState {
 		Destiny:           float32(s.destiny),
 		Wormhole:          float32(s.wormhole),
 		CalendarDrift:     float32(s.calendar_drift),
+		BirthDrift:         float32(s.birth_drift),
+		PersonalDissonance: float32(s.personal_dissonance),
 		AttendFocus:       float32(s.attend_focus),
 		AttendSpread:      float32(s.attend_spread),
 		TunnelThreshold:   float32(s.tunnel_threshold),
