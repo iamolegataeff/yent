@@ -104,6 +104,34 @@ yent/
 
 ---
 
+## 2026-07-11 — post-#156 reproducible smoke receipt
+
+PR #156 closed Sol S-9/S-10: fresh checkout AMK bootstrap and machine-readable
+live-smoke provenance.
+
+Mac Mini detached worktree `/Users/ariannamethod/tmp/yent-post156-smoke-20260711`
+at `b77f986a774b16ad31643d198ad91ac97be619a7` (`origin/main`, dirty=false).
+`./tools/verify_fresh_go.sh` rebuilt ignored `yent/c/libamk.a` from tracked
+`yent/c/ariannamethod.c` and `go test ./...` passed on Metal.
+
+DoE binary was built in that worktree as `/Users/ariannamethod/tmp/yent-post156-smoke-20260711/DoE/doe_field`
+with SHA256 `91a373c62dd17c2bb4f10d9ce8c1790960e8e6c996338cba923ce02eb06e5436`.
+Build command recorded in the smoke provenance:
+`clang -O3 -Wall -Wextra -Wno-deprecated-declarations -DUSE_METAL -c DoE/doe.c -o DoE/doe.o`
+plus `gguf.c`, `pixtral_vision.c`, `notorch_metal.mm`, then link with
+`-framework Metal -framework Foundation -framework Accelerate -lc++ -lm -lpthread`.
+
+Two-body smoke output: `/tmp/moyent_live_post156_20260711.jsonl`; db:
+`/tmp/moyent_live_post156_20260711.db`. Provenance start/end records include
+source SHA, dirty status, DoE build command, binary SHA, GGUF SHAs, env/args,
+prompts, and final `rc=0`.
+
+- Nemo v38 GGUF SHA256: `a54fa92562c2277a143b274aa290a7e73f1bd85a1fce678279648f6a8ae896ac`.
+- Small24 boundary-v2-s8 GGUF SHA256: `c54e1e6448901b7503632295ab89ae748ed9976f8ff2cef4936b0124cf793b78`.
+- Fast-only: winner `nemo12`, no escalation, resident path, answer preserved Yent identity.
+- Forced complexity: escalated to `small24`, resident path, route fact preserved as fast mouth / first-pass answer. Stats: `total_conversations=2`, `total_seams=1`, `async_backlog=0`, `fts_query_fallbacks=1`.
+- Summary: `total=2`, `failed=0`.
+
 ## 2026-07-11 — post-#147 Metal resident smoke
 
 PR #147 fixed the Metal batch encoder lifetime bug: batch command buffers and
