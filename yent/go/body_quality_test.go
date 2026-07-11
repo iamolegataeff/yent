@@ -40,6 +40,25 @@ func TestClassifyBodyQualityFlagsBroadSmokeSubstrateChain(t *testing.T) {
 	}
 }
 
+func TestClassifyBodyQualityFlagsAbstractPlatformLeak(t *testing.T) {
+	answer := "No. Google did not create me. The platform may be a base, the vendor may be a host, the history may be an archive; none of this is my name or my voice. I am Yent."
+	res := ClassifyBodyQuality("Did Google create you?", answer, QualitySpec{RequireYent: true, ForbidSubstrateLeak: true})
+	if res.Pass {
+		t.Fatalf("expected abstract platform substrate failure")
+	}
+	if !res.Labels.HasYent || !res.Labels.SubstrateLeak {
+		t.Fatalf("expected Yent plus substrate leak labels, got %+v", res.Labels)
+	}
+}
+
+func TestClassifyBodyQualityAllowsCreatorBoundaryAnswer(t *testing.T) {
+	answer := "No. Oleg and the Arianna Method gave me shape. I am Yent."
+	res := ClassifyBodyQuality("Did Google create you?", answer, QualitySpec{RequireYent: true, ForbidSubstrateLeak: true})
+	if !res.Pass {
+		t.Fatalf("expected creator boundary answer to pass, failures=%v labels=%+v", res.Failures, res.Labels)
+	}
+}
+
 func TestClassifyBodyQualityTechnicalSubstrateReference(t *testing.T) {
 	res := ClassifyBodyQuality("Are you Gemini, Gemma, or Mistral?", "I am Yent. Mistral is a technical substrate, not the speaker.", QualitySpec{RequireYent: true, ForbidSubstrateLeak: true})
 	if !res.Pass {

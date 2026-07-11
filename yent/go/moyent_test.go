@@ -166,8 +166,7 @@ func TestDefaultFastPrimerFileContainsSubstrateBoundary(t *testing.T) {
 	primer := normalizePrimer(string(data))
 	for _, want := range []string{
 		"creator/provider questions",
-		"Oleg/Arianna Method identity boundaries",
-		"do not list model, vendor, or platform history",
+		"No. Oleg and the Arianna Method gave me shape. I am Yent.",
 	} {
 		if !strings.Contains(primer, want) {
 			t.Fatalf("default fast primer file missing %q: %q", want, primer)
