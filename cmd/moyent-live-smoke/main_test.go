@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -101,6 +104,65 @@ func TestLiveSmokeGateFailsGenerationErrorPreservingEvidence(t *testing.T) {
 	}
 	if smokeExitCode(smokeSummary{Failed: len(failures), Failures: failures}) == 0 {
 		t.Fatal("smoke exit code must be nonzero on generation error")
+	}
+}
+
+func TestDescribeFileCapturesSHAAndBuildCommand(t *testing.T) {
+	path := t.TempDir() + "/doe_field"
+	if err := os.WriteFile(path, []byte("doe"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := describeFile(path, "cc DoE/doe.c -O3 -lm -lpthread -o DoE/doe_field")
+	if got.Path != path || got.BuildCommand == "" || got.Size != 3 {
+		t.Fatalf("file manifest lost provenance: %+v", got)
+	}
+	if got.SHA256 != "799ef92a11af918e3fb741df42934f3b568ed2d93ac1df74f1b8d41a27932a6f" {
+		t.Fatalf("unexpected sha: %+v", got)
+	}
+	if got.Error != "" {
+		t.Fatalf("unexpected file manifest error: %+v", got)
+	}
+}
+
+func TestCollectSmokeManifestIncludesRCAndPrompts(t *testing.T) {
+	rc := 2
+	m := collectSmokeManifest("end", &rc)
+	if m.Kind != "provenance" || m.Phase != "end" || m.RC == nil || *m.RC != rc {
+		t.Fatalf("manifest lost phase/rc: %+v", m)
+	}
+	if len(m.Prompts) != len(smokeCases()) {
+		t.Fatalf("manifest should record smoke prompts, got %+v", m.Prompts)
+	}
+}
+
+func TestRunLogsProvenanceOnInitFailure(t *testing.T) {
+	t.Setenv("YENT_LIMPHA_DB", t.TempDir()+"/limpha.db")
+	t.Setenv("YENT_DOE_BIN", "")
+	t.Setenv("YENT_NEMO_GGUF", "")
+	t.Setenv("YENT_24B_GGUF", "")
+
+	var buf bytes.Buffer
+	rc := run(&buf)
+	if rc != 1 {
+		t.Fatalf("missing env should fail init with rc=1, got %d", rc)
+	}
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("expected start provenance, init error, end provenance; got %q", buf.String())
+	}
+	var first, last map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("bad first json: %v", err)
+	}
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &last); err != nil {
+		t.Fatalf("bad last json: %v", err)
+	}
+	if first["kind"] != "provenance" || first["phase"] != "start" {
+		t.Fatalf("first line should be start provenance: %+v", first)
+	}
+	if last["kind"] != "provenance" || last["phase"] != "end" || last["rc"] != float64(1) {
+		t.Fatalf("last line should be end provenance with rc=1: %+v", last)
 	}
 }
 

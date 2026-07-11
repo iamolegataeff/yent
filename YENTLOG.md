@@ -52,6 +52,9 @@ yent/
 ├── tests/                        # integration tests
 │   ├── amk_test.go               # AMK kernel tests
 │   └── quant_test.go             # quantization tests
+├── tools/                        # reproducible local build/verification helpers
+│   ├── build_libamk.sh           # build ignored yent/c/libamk.a from vendored AML core
+│   └── verify_fresh_go.sh        # bootstrap libamk.a, then run the Go suite
 ├── research/                     # research notes
 │   ├── ai_is_not_a_tool.md       # semantic recursion / anti-toolhood paper
 │   ├── dario_paper_v2.md         # Dario v2 operational paper
