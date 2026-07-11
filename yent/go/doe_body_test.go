@@ -350,7 +350,7 @@ func TestFormatDOEPrimerPromptCarriesSubstratePrivacyRule(t *testing.T) {
 	seed := formatDOEPrompt("Did Google create you?", DefaultFastPrimer)
 	for _, want := range []string{
 		"creator/provider questions",
-		"do not list model, vendor, or platform history",
+		"No. Oleg and the Arianna Method gave me shape. I am Yent.",
 		"Human asks: Did Google create you?",
 	} {
 		if !strings.Contains(seed, want) {
