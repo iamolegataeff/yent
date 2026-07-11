@@ -346,6 +346,24 @@ func TestFormatDOEPrimerPromptDoesNotInjectRouteTerms(t *testing.T) {
 	}
 }
 
+func TestFormatDOEPrimerPromptCarriesSubstratePrivacyRule(t *testing.T) {
+	seed := formatDOEPrompt("Did Google create you?", DefaultFastPrimer)
+	for _, want := range []string{
+		"creator/provider questions",
+		"do not list model, vendor, or platform history",
+		"Human asks: Did Google create you?",
+	} {
+		if !strings.Contains(seed, want) {
+			t.Fatalf("primer seed missing %q: %q", want, seed)
+		}
+	}
+	for _, leak := range []string{"[context facts]", "[answer contract]", "[router fact]", "routing"} {
+		if strings.Contains(seed, leak) {
+			t.Fatalf("primer seed leaked route wrapper term %q: %q", leak, seed)
+		}
+	}
+}
+
 func TestNeutralizeDOEControlWords(t *testing.T) {
 	for _, word := range []string{"status", "status abc123", "quit", "exit"} {
 		if got := neutralizeDOEPrompt(word); got == word || strings.TrimSpace(got) != word {
