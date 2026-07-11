@@ -10,13 +10,15 @@ import (
 
 // fakeBody is a deterministic Body for router tests (no model, no doe).
 type fakeBody struct {
-	name       string
-	answer     string
-	confidence float64
-	verdict    *Verdict
-	calls      int
-	lastPrompt string
-	lastCtx    string
+	name          string
+	answer        string
+	confidence    float64
+	executionPath string
+	diagnostics   []string
+	verdict       *Verdict
+	calls         int
+	lastPrompt    string
+	lastCtx       string
 }
 
 func (b *fakeBody) Name() string { return b.name }
@@ -24,7 +26,13 @@ func (b *fakeBody) Generate(prompt, ctx string) (BodyResult, error) {
 	b.calls++
 	b.lastPrompt = prompt
 	b.lastCtx = ctx
-	return BodyResult{Answer: b.answer, Confidence: b.confidence, Verdict: b.verdict}, nil
+	return BodyResult{
+		Answer:        b.answer,
+		Confidence:    b.confidence,
+		ExecutionPath: b.executionPath,
+		Diagnostics:   cloneDiagnostics(b.diagnostics),
+		Verdict:       b.verdict,
+	}, nil
 }
 
 type closableFakeBody struct {
@@ -115,6 +123,48 @@ func TestRouterEscalatesOnLowConfidence(t *testing.T) {
 	rec, _ := lc.Recent(1, false)
 	if len(rec) != 1 || rec[0]["response"] != "considered answer" {
 		t.Errorf("winning answer should be stored, got %v", rec)
+	}
+}
+
+func TestRouterTraceCarriesBodyDiagnostics(t *testing.T) {
+	lc := newRouterLimpha(t)
+	fast := &fakeBody{
+		name:          "nemo12",
+		answer:        "unsure",
+		confidence:    0.2,
+		executionPath: "doe_resident",
+		diagnostics:   []string{"[doe] Metal fallback armed"},
+	}
+	deep := &fakeBody{
+		name:          "small24",
+		answer:        "considered answer",
+		executionPath: "doe_once",
+		diagnostics:   []string{"[gamma] loaded personality"},
+		verdict:       &Verdict{Agreement: 0.6, Tension: 0.4, Winner: "small24"},
+	}
+	r := NewRouter(fast, deep, lc)
+	out, err := r.Route("what changed in the runtime", LimphaState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Trace.FastExecutionPath != "doe_resident" || out.Trace.DeepExecutionPath != "doe_once" {
+		t.Fatalf("trace execution paths missing: %+v", out.Trace)
+	}
+	if strings.Join(out.Trace.FastDiagnostics, "\n") != "[doe] Metal fallback armed" ||
+		strings.Join(out.Trace.DeepDiagnostics, "\n") != "[gamma] loaded personality" {
+		t.Fatalf("trace diagnostics missing: %+v", out.Trace)
+	}
+	rs, _ := lc.RecentSeams(1)
+	if len(rs) != 1 {
+		t.Fatalf("want seam, got %d", len(rs))
+	}
+	var trace RouteTrace
+	if err := json.Unmarshal([]byte(rs[0]["memory_delta"].(string)), &trace); err != nil {
+		t.Fatalf("memory_delta trace must decode: %v", err)
+	}
+	if strings.Join(trace.FastDiagnostics, "\n") != "[doe] Metal fallback armed" ||
+		strings.Join(trace.DeepDiagnostics, "\n") != "[gamma] loaded personality" {
+		t.Fatalf("seam trace diagnostics missing: %+v", trace)
 	}
 }
 

@@ -2,6 +2,7 @@ package yent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -23,6 +24,12 @@ const (
 	defaultDOEPrime    = 90 * time.Second
 	maxDOEPromptBytes  = 1800 // doe.c wraps chat prompts into a 2048-byte buffer.
 	doeScannerMaxBytes = 4 << 20
+)
+
+const (
+	doeDiagnosticMaxLines      = 24
+	doeDiagnosticMaxLineBytes  = 2048
+	doeDiagnosticMaxErrorBytes = 4096
 )
 
 const (
@@ -97,25 +104,27 @@ func (b *DOEBody) Generate(prompt, ctx string) (BodyResult, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	daemonReady := b.ensureDaemonLocked() == nil && b.daemon != nil && !b.daemon.dead
+	daemonDiagnostics, daemonErr := b.ensureDaemonLocked()
+	daemonReady := daemonErr == nil && b.daemon != nil && !b.daemon.dead
 	genCtx, cancel := context.WithTimeout(context.Background(), b.cfg.Timeout)
 	defer cancel()
 
 	if daemonReady {
 		if raw, ok := b.daemon.exchange(genCtx, seed); ok {
 			if answer := parseDOEReply(raw); answer != "" {
-				return b.result(answer), nil
+				return b.result(answer, b.daemon.diagnostics(), "doe_resident"), nil
 			}
 		}
+		daemonDiagnostics = b.daemon.diagnostics()
 	}
 	if genCtx.Err() != nil {
 		return BodyResult{}, genCtx.Err()
 	}
-	answer, err := b.runOnce(genCtx, seed)
+	answer, diagnostics, err := b.runOnce(genCtx, seed)
 	if err != nil {
 		return BodyResult{}, err
 	}
-	return b.result(answer), nil
+	return b.result(answer, mergeDOEDiagnostics(daemonDiagnostics, diagnostics), "doe_once"), nil
 }
 
 // Close stops the resident doe process, if one was started.
@@ -133,15 +142,17 @@ func (b *DOEBody) Close() error {
 	return nil
 }
 
-func (b *DOEBody) result(answer string) BodyResult {
+func (b *DOEBody) result(answer string, diagnostics []string, executionPath string) BodyResult {
 	conf := EstimateBodyConfidence(answer)
 	if b.cfg.Confidence != nil {
 		conf = b.cfg.Confidence(answer)
 	}
 	return BodyResult{
-		Answer:     answer,
-		Confidence: conf,
-		Verdict:    parseVerdictHook(b.cfg.Verdict, answer),
+		Answer:        answer,
+		Confidence:    conf,
+		ExecutionPath: executionPath,
+		Diagnostics:   cloneDiagnostics(diagnostics),
+		Verdict:       parseVerdictHook(b.cfg.Verdict, answer),
 	}
 }
 
@@ -152,9 +163,9 @@ func parseVerdictHook(fn func(string) *Verdict, answer string) *Verdict {
 	return fn(answer)
 }
 
-func (b *DOEBody) ensureDaemonLocked() error {
+func (b *DOEBody) ensureDaemonLocked() ([]string, error) {
 	if b.daemon != nil && !b.daemon.dead {
-		return nil
+		return nil, nil
 	}
 	if b.daemon != nil {
 		b.daemon.close()
@@ -164,17 +175,18 @@ func (b *DOEBody) ensureDaemonLocked() error {
 	defer cancel()
 	d, err := b.startProcess(false)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if _, ok := d.exchange(ctx, ""); !ok {
+		diagnostics := d.diagnostics()
 		d.close()
-		return errors.New("doe daemon did not reach status sentinel")
+		return diagnostics, errors.New("doe daemon did not reach status sentinel")
 	}
 	b.daemon = d
-	return nil
+	return nil, nil
 }
 
-func (b *DOEBody) runOnce(ctx context.Context, seed string) (string, error) {
+func (b *DOEBody) runOnce(ctx context.Context, seed string) (string, []string, error) {
 	cmd := exec.CommandContext(ctx, b.cfg.BinPath, b.commandArgs(true)...)
 	if b.cfg.WorkDir != "" {
 		cmd.Dir = b.cfg.WorkDir
@@ -183,15 +195,21 @@ func (b *DOEBody) runOnce(ctx context.Context, seed string) (string, error) {
 		cmd.Env = append(os.Environ(), b.cfg.Env...)
 	}
 	cmd.Stdin = strings.NewReader(seed + "\n")
-	out, err := cmd.Output()
+	var out bytes.Buffer
+	diagnostics := newDOEDiagnosticCapture()
+	cmd.Stdout = &out
+	cmd.Stderr = diagnostics
+	err := cmd.Run()
 	if err != nil {
-		return "", fmt.Errorf("doe once: %w", err)
+		diags := diagnostics.Snapshot()
+		return "", diags, fmt.Errorf("doe once: %w%s", err, doeDiagnosticsErrorSuffix(diags))
 	}
-	answer := parseDOEReply(string(out))
+	diags := diagnostics.Snapshot()
+	answer := parseDOEReply(out.String())
 	if answer == "" {
-		return "", errors.New("doe once produced no parseable answer")
+		return "", diags, fmt.Errorf("doe once produced no parseable answer%s", doeDiagnosticsErrorSuffix(diags))
 	}
-	return answer, nil
+	return answer, diags, nil
 }
 
 func (b *DOEBody) startProcess(once bool) (*doeProcess, error) {
@@ -211,14 +229,15 @@ func (b *DOEBody) startProcess(once bool) (*doeProcess, error) {
 		_ = in.Close()
 		return nil, err
 	}
-	cmd.Stderr = io.Discard
+	diagnostics := newDOEDiagnosticCapture()
+	cmd.Stderr = diagnostics
 	if err := cmd.Start(); err != nil {
 		_ = in.Close()
 		return nil, err
 	}
 	sc := bufio.NewScanner(outPipe)
 	sc.Buffer(make([]byte, 64*1024), doeScannerMaxBytes)
-	return &doeProcess{cmd: cmd, in: in, out: sc}, nil
+	return &doeProcess{cmd: cmd, in: in, out: sc, diag: diagnostics}, nil
 }
 
 func (b *DOEBody) commandArgs(once bool) []string {
@@ -244,6 +263,7 @@ type doeProcess struct {
 	cmd    *exec.Cmd
 	in     io.WriteCloser
 	out    *bufio.Scanner
+	diag   *doeDiagnosticCapture
 	dead   bool
 	reaped sync.Once
 }
@@ -324,6 +344,124 @@ func (d *doeProcess) reap() {
 	if d != nil {
 		d.reaped.Do(func() { _ = d.cmd.Wait() })
 	}
+}
+
+func (d *doeProcess) diagnostics() []string {
+	if d == nil || d.diag == nil {
+		return nil
+	}
+	return d.diag.Snapshot()
+}
+
+type doeDiagnosticCapture struct {
+	mu      sync.Mutex
+	lines   []string
+	partial string
+}
+
+func newDOEDiagnosticCapture() *doeDiagnosticCapture {
+	return &doeDiagnosticCapture{}
+}
+
+func (c *doeDiagnosticCapture) Write(p []byte) (int, error) {
+	if c == nil {
+		return len(p), nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	text := string(p)
+	for len(text) > 0 {
+		if i := strings.IndexByte(text, '\n'); i >= 0 {
+			c.appendLocked(c.partial + text[:i])
+			c.partial = ""
+			text = text[i+1:]
+			continue
+		}
+		c.partial = compactDOEDiagnosticLine(c.partial + text)
+		break
+	}
+	return len(p), nil
+}
+
+func (c *doeDiagnosticCapture) Snapshot() []string {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, 0, len(c.lines)+1)
+	out = append(out, c.lines...)
+	if strings.TrimSpace(c.partial) != "" {
+		out = append(out, compactDOEDiagnosticLine(c.partial))
+	}
+	if len(out) > doeDiagnosticMaxLines {
+		out = out[len(out)-doeDiagnosticMaxLines:]
+	}
+	return out
+}
+
+func (c *doeDiagnosticCapture) appendLocked(line string) {
+	line = compactDOEDiagnosticLine(line)
+	if strings.TrimSpace(line) == "" {
+		return
+	}
+	if len(c.lines) >= doeDiagnosticMaxLines {
+		copy(c.lines, c.lines[1:])
+		c.lines[len(c.lines)-1] = line
+		return
+	}
+	c.lines = append(c.lines, line)
+}
+
+func compactDOEDiagnosticLine(s string) string {
+	s = strings.TrimRight(strings.ToValidUTF8(s, ""), "\r")
+	if len(s) <= doeDiagnosticMaxLineBytes {
+		return s
+	}
+	cut := doeDiagnosticMaxLineBytes - 3
+	if cut < 1 {
+		cut = doeDiagnosticMaxLineBytes
+	}
+	for cut > 0 && !utf8.ValidString(s[:cut]) {
+		cut--
+	}
+	if cut <= 0 {
+		return "..."
+	}
+	return s[:cut] + "..."
+}
+
+func mergeDOEDiagnostics(a, b []string) []string {
+	if len(a) == 0 {
+		return cloneDiagnostics(b)
+	}
+	if len(b) == 0 {
+		return cloneDiagnostics(a)
+	}
+	merged := make([]string, 0, len(a)+len(b))
+	merged = append(merged, a...)
+	merged = append(merged, b...)
+	if len(merged) > doeDiagnosticMaxLines {
+		merged = merged[len(merged)-doeDiagnosticMaxLines:]
+	}
+	return merged
+}
+
+func doeDiagnosticsErrorSuffix(lines []string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	text := strings.Join(lines, " | ")
+	if len(text) > doeDiagnosticMaxErrorBytes {
+		cut := doeDiagnosticMaxErrorBytes - 3
+		for cut > 0 && !utf8.ValidString(text[:cut]) {
+			cut--
+		}
+		if cut > 0 {
+			text = text[:cut] + "..."
+		}
+	}
+	return ": stderr: " + text
 }
 
 func newDOEStatusNonce() string {
