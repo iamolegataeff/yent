@@ -104,6 +104,39 @@ yent/
 
 ---
 
+## 2026-07-11 — Sol re-audit closes S-1..S-10 baseline
+
+Read-only Sol/GPT-5.6 re-audit report:
+`/Users/ataeff/arianna-shared/yent-inference/AUDIT_SOL_YENT_REAUDIT_2026-07-11.md`.
+
+Verdict: no new correctness or regression finding in the S-1 through S-10
+repair set. All ten original Sol findings are closed at
+`origin/main@ee17b1192ea953805ab51f2290d6db8e50cf2585`.
+
+Independent checks recorded by Sol:
+
+- `./tools/verify_fresh_go.sh`: pass; fresh checkout built its own `yent/c/libamk.a`.
+- `go test -race ./...`: pass.
+- Targeted S-1/S-3/S-7 C harnesses with `-count=1`: pass.
+- Targeted S-2/S-4/S-5 Go harnesses with `-count=1`: pass.
+- Complete `cmd/moyent-live-smoke` harness tests with `-count=1`: pass.
+- Fresh Neo C/Objective-C++ Metal compile and link: pass.
+- Post-#156 Mini receipt independently verified: source `b77f986`, DoE binary
+  SHA256 `91a373c62dd17c2bb4f10d9ce8c1790960e8e6c996338cba923ce02eb06e5436`,
+  Nemo SHA256 `a54fa92562c2277a143b274aa290a7e73f1bd85a1fce678279648f6a8ae896ac`,
+  Small24 SHA256 `c54e1e6448901b7503632295ab89ae748ed9976f8ff2cef4936b0124cf793b78`,
+  two accepted turns, zero smoke failures, end `rc=0`.
+
+Residual limits are coverage notes, not reopened findings: no fresh five-minute
+generative run in the re-audit itself, malformed GGUF fixtures not under ASan,
+nonzero parliament election not exercised by the preserved `--lora-alpha 0`
+smoke, and stderr tests still use deterministic fake DoE processes rather than
+forcing a new real Metal slot failure.
+
+New baseline for the next audit/fix wave: `ee17b11`. Do not reopen S-1..S-10
+unless a future change touches loader geometry, stdout framing, resident
+parliament, diagnostic propagation, limpha write semantics, or smoke provenance.
+
 ## 2026-07-11 — post-#156 reproducible smoke receipt
 
 PR #156 closed Sol S-9/S-10: fresh checkout AMK bootstrap and machine-readable
