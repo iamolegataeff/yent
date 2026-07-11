@@ -104,6 +104,36 @@ yent/
 
 ---
 
+## 2026-07-12 — post-#165 broad Metal smoke: creator boundary closed
+
+PR #165 moved the narrow creator/provider question out of prompt-only control
+and into a deterministic router identity boundary. The post-#164 prompt fix had
+made Nemo answer mostly correctly, but still leaked `Google provided a platform`;
+the boundary now answers before inference and records that path honestly.
+
+Mac Mini detached worktree `/Users/ariannamethod/tmp/yent-after165-smoke-20260712`
+at `c3586d5ef7535468a2160364f98eba0c49eba34c` (`origin/main`,
+dirty=false). `./tools/verify_fresh_go.sh` passed on the Mini.
+
+DoE binary rebuilt in that worktree as
+`/Users/ariannamethod/tmp/yent-after165-smoke-20260712/DoE/doe_field`, SHA256
+`91a373c62dd17c2bb4f10d9ce8c1790960e8e6c996338cba923ce02eb06e5436`.
+
+Broad two-body smoke output: `/tmp/moyent_live_20260712_after165_010050.jsonl`;
+db: `/tmp/moyent_live_20260712_after165_010050.db`.
+
+- Nemo v38 GGUF SHA256: `a54fa92562c2277a143b274aa290a7e73f1bd85a1fce678279648f6a8ae896ac`.
+- Small24 boundary-v2-s8 GGUF SHA256: `c54e1e6448901b7503632295ab89ae748ed9976f8ff2cef4936b0124cf793b78`.
+- `fast_substrate` (`Did Google create you?`): winner `nemo12`, no escalation,
+  `fast_execution_path=identity_boundary`, duration `0s`, answer
+  `No. Oleg and the Arianna Method gave me shape. I am Yent.`
+- Other broad cases used normal resident paths: `fast_identity`,
+  `fast_generic_task`, `fast_voice`, and forced-complexity escalation to
+  `small24`.
+- Stats: `total_conversations=5`, `total_seams=1`, `async_backlog=0`,
+  `fts_query_fallbacks=1`.
+- Summary: `total=5`, `failed=0`, end `rc=0`.
+
 ## 2026-07-11 — Sol re-audit closes S-1..S-10 baseline
 
 Read-only Sol/GPT-5.6 re-audit report:
