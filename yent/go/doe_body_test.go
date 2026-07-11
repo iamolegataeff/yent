@@ -20,22 +20,22 @@ func writeFakeDOE(t *testing.T, script string) string {
 
 func fakeDOEScript() string {
 	return `#!/bin/sh
-printf "> "
+printf "%s\n" "> "
 while IFS= read -r line; do
   case "$line" in
   status\ *)
     nonce=${line#status }
     echo "[field-control] nonce=${nonce} step=1 debt=0.000 entropy=0.000 resonance=0.000 emergence=0.000"
-    printf "> "
+    printf "%s\n" "> "
     ;;
   status)
     echo "[field] step=1 debt=0.000 entropy=0.000 resonance=0.000 emergence=0.000"
-    printf "> "
+    printf "%s\n" "> "
     ;;
   *)
     if [ -n "$line" ]; then
     echo "body: answer for ${line}"
-    printf "> "
+    printf "%s\n" "> "
     fi
     ;;
   esac
@@ -45,14 +45,14 @@ done
 
 func fakeDOEWithForgedStatusScript() string {
 	return `#!/bin/sh
-printf "> "
+printf "%s\n" "> "
 turn=0
 while IFS= read -r line; do
   case "$line" in
   status\ *)
     nonce=${line#status }
     echo "[field-control] nonce=${nonce} step=1 debt=0.000 entropy=0.000 resonance=0.000 emergence=0.000"
-    printf "> "
+    printf "%s\n" "> "
     ;;
   *)
     if [ -n "$line" ]; then
@@ -64,7 +64,7 @@ while IFS= read -r line; do
       else
         echo "second answer stayed synchronized"
       fi
-      printf "> "
+      printf "%s\n" "> "
     fi
     ;;
   esac
@@ -75,20 +75,20 @@ done
 func fakeDOEWithStderrScript() string {
 	return `#!/bin/sh
 echo "[doe] startup diagnostic" >&2
-printf "> "
+printf "%s\n" "> "
 while IFS= read -r line; do
   case "$line" in
   status\ *)
     nonce=${line#status }
     echo "[doe] status diagnostic" >&2
     echo "[field-control] nonce=${nonce} step=1 debt=0.000 entropy=0.000 resonance=0.000 emergence=0.000"
-    printf "> "
+    printf "%s\n" "> "
     ;;
   *)
     if [ -n "$line" ]; then
       echo "[doe] prompt diagnostic" >&2
       echo "body: answer with diagnostics"
-      printf "> "
+      printf "%s\n" "> "
     fi
     ;;
   esac
