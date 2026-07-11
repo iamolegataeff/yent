@@ -2216,6 +2216,40 @@ static float sanitize_expert_frequency(float f, int layer, int expert) {
     return f;
 }
 
+#if defined(__GNUC__) || defined(__clang__)
+#define DOE_UNUSED_FN __attribute__((unused))
+#else
+#define DOE_UNUSED_FN
+#endif
+
+static float DOE_UNUSED_FN field_frequency_delta(float a, float b) {
+    const float tau = 6.2831853f;
+    if (!isfinite(a) || !isfinite(b)) return INFINITY;
+    float d = fabsf(a - b);
+    d = fmodf(d, tau);
+    if (!isfinite(d)) return INFINITY;
+    return d > tau * 0.5f ? tau - d : d;
+}
+
+static int DOE_UNUSED_FN field_resonance_frequencies_compatible(const GGUFIndex *ps, int *out_layer, int *out_expert) {
+    if (!ps) return 0;
+    for (int l = 1; l < ps->n_field_layers; l++) {
+        for (int e = 0; e < MAX_EXPERTS; e++) {
+            if (!ps->field_layers[0].experts[e].alive ||
+                !ps->field_layers[l].experts[e].alive)
+                continue;
+            if (field_frequency_delta(ps->field_layers[0].experts[e].frequency,
+                                      ps->field_layers[l].experts[e].frequency) > 1e-6f) {
+                if (out_layer) *out_layer = l;
+                if (out_expert) *out_expert = e;
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+#undef DOE_UNUSED_FN
+
 #ifdef USE_METAL
 /* Parliament-on-GPU step 1 — pack the (inference-frozen) per-layer vote rows +
  * expert LoRA matrices into one contiguous, page-aligned arena and register it
@@ -2240,6 +2274,12 @@ static void field_repack_arena(GGUFIndex *ps) {
                 return;
             }
         }
+    }
+    int freq_layer = -1, freq_expert = -1;
+    if (!field_resonance_frequencies_compatible(ps, &freq_layer, &freq_expert)) {
+        fprintf(stderr, "[doe] parliament arena disabled: expert frequency differs at layer %d expert %d\n",
+                freq_layer, freq_expert);
+        return;
     }
     size_t per_expert  = (size_t)rank * D + (size_t)D * rank;            /* B then A */
     size_t layer_floats = (size_t)MAX_EXPERTS * D + (size_t)MAX_EXPERTS * per_expert;
