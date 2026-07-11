@@ -3648,10 +3648,26 @@ static void infer_clear_image_embeds(InferState *s) {
     s->img_count = 0;
 }
 
-#ifdef USE_METAL
-static void doe_metal_slot_fail(GGUFIndex *ps, int *disabled, const char *scope, const char *op, int rc) {
+#if defined(USE_METAL) || defined(DOE_TESTING)
+static void doe_metal_slot_failure_diagnostic(const char *scope, const char *op, int rc) {
     fprintf(stderr, "[doe] Metal slot path failed in %s at %s (rc=%d); aborting batch and falling back to CPU\n",
             scope, op ? op : "(unknown)", rc);
+}
+#endif
+
+#ifdef DOE_TESTING
+static int g_test_forced_slot_fail_emitted = 0;
+static void doe_test_maybe_force_slot_failure(void) {
+    const char *op = getenv("DOE_TEST_FORCE_SLOT_FAIL");
+    if (!op || !*op || g_test_forced_slot_fail_emitted) return;
+    g_test_forced_slot_fail_emitted = 1;
+    doe_metal_slot_failure_diagnostic("test-forced slot path", op, 77);
+}
+#endif
+
+#ifdef USE_METAL
+static void doe_metal_slot_fail(GGUFIndex *ps, int *disabled, const char *scope, const char *op, int rc) {
+    doe_metal_slot_failure_diagnostic(scope, op, rc);
     nt_metal_abort_slots(); /* drops the active slot batch/table without tearing down registered Metal regions */
     if (ps) ps->cons_slot_init = 0;
     if (disabled) *disabled = 1;
@@ -3669,6 +3685,9 @@ static float *doe_forward(GGUFIndex *ps, InferState *s, int token, int pos) {
     int H = ps->host_hidden;
     int hg = ps->host_heads / ps->host_kv_heads;
     float sc = 1.0f / sqrtf((float)hd);
+#ifdef DOE_TESTING
+    doe_test_maybe_force_slot_failure();
+#endif
     /* per-shape dims for DOE_PERSHAPE matvec grouping (keys pershape_group). */
     g_ps_D = D; g_ps_qn = ps->host_heads*hd; g_ps_kd = kd; g_ps_H = H; g_ps_H2 = H*2; g_ps_vocab = ps->host_vocab;
 
