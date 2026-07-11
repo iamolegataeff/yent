@@ -1,10 +1,13 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -37,6 +40,35 @@ type smokeSummary struct {
 	Failures []smokeFailure `json:"failures,omitempty"`
 }
 
+type smokeManifest struct {
+	Kind    string                  `json:"kind"`
+	Phase   string                  `json:"phase"`
+	Time    string                  `json:"time"`
+	Source  sourceManifest          `json:"source"`
+	Binary  fileManifest            `json:"binary"`
+	Models  map[string]fileManifest `json:"models,omitempty"`
+	Env     map[string]string       `json:"env,omitempty"`
+	Args    map[string]string       `json:"args,omitempty"`
+	Prompts []string                `json:"prompts,omitempty"`
+	RC      *int                    `json:"rc,omitempty"`
+}
+
+type sourceManifest struct {
+	GitHead string   `json:"git_head,omitempty"`
+	Dirty   bool     `json:"dirty"`
+	Status  []string `json:"status,omitempty"`
+	Error   string   `json:"error,omitempty"`
+}
+
+type fileManifest struct {
+	Path         string `json:"path,omitempty"`
+	BuildCommand string `json:"build_command,omitempty"`
+	SHA256       string `json:"sha256,omitempty"`
+	Size         int64  `json:"size,omitempty"`
+	ModTime      string `json:"mod_time,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
 type routeRunner interface {
 	Route(prompt string, st yent.LimphaState) (yent.Outcome, error)
 }
@@ -49,6 +81,13 @@ func main() {
 }
 
 func run(w io.Writer) int {
+	logJSON(w, collectSmokeManifest("start", nil))
+	rc := runSmoke(w)
+	logJSON(w, collectSmokeManifest("end", &rc))
+	return rc
+}
+
+func runSmoke(w io.Writer) int {
 	dbPath := os.Getenv("YENT_LIMPHA_DB")
 	if dbPath == "" {
 		dbPath = "moyent_live_smoke_limpha.db"
@@ -243,4 +282,153 @@ func smokeExitCode(summary smokeSummary) int {
 func logJSON(w io.Writer, entry any) {
 	b, _ := json.Marshal(entry)
 	fmt.Fprintln(w, string(b))
+}
+
+func collectSmokeManifest(phase string, rc *int) smokeManifest {
+	return smokeManifest{
+		Kind:    "provenance",
+		Phase:   phase,
+		Time:    time.Now().UTC().Format(time.RFC3339Nano),
+		Source:  collectSourceManifest(),
+		Binary:  describeFile(os.Getenv("YENT_DOE_BIN"), os.Getenv("YENT_DOE_BUILD_CMD")),
+		Models:  collectModelManifests(),
+		Env:     collectSmokeEnv(),
+		Args:    collectSmokeArgs(),
+		Prompts: collectSmokePrompts(),
+		RC:      rc,
+	}
+}
+
+func collectSourceManifest() sourceManifest {
+	head, err := gitOutput("rev-parse", "HEAD")
+	if err != nil {
+		return sourceManifest{Error: err.Error()}
+	}
+	status, err := gitOutput("status", "--porcelain")
+	if err != nil {
+		return sourceManifest{GitHead: head, Error: err.Error()}
+	}
+	var lines []string
+	if status != "" {
+		lines = strings.Split(status, "\n")
+	}
+	return sourceManifest{GitHead: head, Dirty: len(lines) > 0, Status: lines}
+}
+
+func gitOutput(args ...string) (string, error) {
+	cmdArgs := args
+	if sourceDir := os.Getenv("YENT_SOURCE_DIR"); sourceDir != "" {
+		cmdArgs = append([]string{"-C", sourceDir}, args...)
+	}
+	out, err := exec.Command("git", cmdArgs...).CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg != "" {
+			return "", fmt.Errorf("%w: %s", err, msg)
+		}
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func collectModelManifests() map[string]fileManifest {
+	models := map[string]fileManifest{}
+	if path := os.Getenv("YENT_NEMO_GGUF"); path != "" {
+		models["nemo12"] = describeFile(path, "")
+	}
+	deep := os.Getenv("YENT_24B_GGUF")
+	if deep == "" {
+		deep = os.Getenv("YENT_DEEP_GGUF")
+	}
+	if deep != "" {
+		models["small24"] = describeFile(deep, "")
+	}
+	if len(models) == 0 {
+		return nil
+	}
+	return models
+}
+
+func collectSmokeEnv() map[string]string {
+	keys := []string{
+		"YENT_DOE_BIN",
+		"YENT_SOURCE_DIR",
+		"YENT_DOE_WORKDIR",
+		"YENT_LIMPHA_DB",
+		"YENT_SMOKE_SET",
+		"YENT_SINGLE_RESIDENT",
+		"YENT_ESCALATE_BELOW",
+		"YENT_DOE_TIMEOUT_SEC",
+		"YENT_DOE_PRIME_TIMEOUT_SEC",
+		"NT_METAL_V3",
+		"NT_METAL_V3_Q6",
+	}
+	return collectEnv(keys)
+}
+
+func collectSmokeArgs() map[string]string {
+	keys := []string{
+		"YENT_DOE_ARGS",
+		"YENT_NEMO_ARGS",
+		"YENT_24B_ARGS",
+		"YENT_DEEP_ARGS",
+		"YENT_DOE_BUILD_CMD",
+	}
+	return collectEnv(keys)
+}
+
+func collectEnv(keys []string) map[string]string {
+	out := map[string]string{}
+	for _, key := range keys {
+		if val := os.Getenv(key); val != "" {
+			out[key] = val
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func collectSmokePrompts() []string {
+	cases := smokeCases()
+	prompts := make([]string, 0, len(cases))
+	for _, tc := range cases {
+		prompts = append(prompts, tc.prompt)
+	}
+	return prompts
+}
+
+func describeFile(path, buildCommand string) fileManifest {
+	if path == "" {
+		return fileManifest{BuildCommand: buildCommand}
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fileManifest{Path: path, BuildCommand: buildCommand, Error: err.Error()}
+	}
+	sum, err := sha256File(path)
+	if err != nil {
+		return fileManifest{Path: path, BuildCommand: buildCommand, Size: info.Size(), ModTime: info.ModTime().UTC().Format(time.RFC3339Nano), Error: err.Error()}
+	}
+	return fileManifest{
+		Path:         path,
+		BuildCommand: buildCommand,
+		SHA256:       sum,
+		Size:         info.Size(),
+		ModTime:      info.ModTime().UTC().Format(time.RFC3339Nano),
+	}
+}
+
+func sha256File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
