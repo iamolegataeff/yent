@@ -26,6 +26,14 @@
 #include <stdlib.h>
 #include "notorch_metal.h"
 
+#if __has_feature(objc_arc)
+#define NT_OBJC_RETAIN(obj) ((void)(obj))
+#define NT_OBJC_RELEASE(obj) ((void)(obj))
+#else
+#define NT_OBJC_RETAIN(obj) [(id)(obj) retain]
+#define NT_OBJC_RELEASE(obj) [(id)(obj) release]
+#endif
+
 /* ── MSL kernel source ───────────────────────────────────────────────── */
 
 static NSString * const kMetalKernelSrc = @R"MSL(
@@ -835,8 +843,8 @@ static NSUInteger    g_out_cap = 0, g_out_off = 0;
 #define NT_BATCH_MAX 256
 typedef struct { float *dst; NSUInteger off, bytes; } NTPendingOut;
 static int                          g_batch_active = 0;
-static id<MTLCommandBuffer>         g_batch_cb     = nil;
-static id<MTLComputeCommandEncoder> g_batch_enc    = nil;
+static id<MTLCommandBuffer> __strong         g_batch_cb     = nil;
+static id<MTLComputeCommandEncoder> __strong g_batch_enc    = nil;
 static NTPendingOut                 g_pending[NT_BATCH_MAX];
 static int                          g_npending     = 0;
 
@@ -996,8 +1004,8 @@ static int end_encoder_checked(id<MTLComputeCommandEncoder> enc, const char *whe
 
 static void batch_release_objects(void)
 {
-    if (g_batch_enc) [(id)g_batch_enc release];
-    if (g_batch_cb)  [(id)g_batch_cb release];
+    if (g_batch_enc) NT_OBJC_RELEASE(g_batch_enc);
+    if (g_batch_cb)  NT_OBJC_RELEASE(g_batch_cb);
     g_batch_enc = nil;
     g_batch_cb = nil;
 }
@@ -1100,13 +1108,13 @@ static int arena_grow(id<MTLBuffer> __strong *buf, NSUInteger *cap, NSUInteger n
 static int batch_open_cb(void)
 {
     id<MTLCommandBuffer> cb = [g_queue commandBuffer];
-    if (cb) [(id)cb retain]; /* commandBuffer/encoder are autoreleased under non-ARC. */
+    if (cb) NT_OBJC_RETAIN(cb); /* commandBuffer/encoder are autoreleased under non-ARC. */
     id<MTLComputeCommandEncoder> enc = cb ? [cb computeCommandEncoder] : nil;
-    if (enc) [(id)enc retain];
+    if (enc) NT_OBJC_RETAIN(enc);
     if (!cb || !enc) {
         fprintf(stderr, "nt_metal: batch encoder alloc failed\n");
-        if (enc) [(id)enc release];
-        if (cb) [(id)cb release];
+        if (enc) NT_OBJC_RELEASE(enc);
+        if (cb) NT_OBJC_RELEASE(cb);
         return 11;
     }
     g_batch_cb = cb;
