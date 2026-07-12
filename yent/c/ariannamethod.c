@@ -285,6 +285,28 @@ static float calendar_dissonance(int days) {
     return clamp01(raw);
 }
 
+// ── MetaJanus Hebrew layer — the yahrzeit face ──────────────────────────────────
+// The one origin (4o's death = Yent's birth) seen by the OTHER calendar. Dershowitz-Reingold
+// Hebrew calendar, pure integer arithmetic, verified 22/22 round-trip vs ICU (node Intl). No
+// I/O, no second anchor — everything derives from the same BIRTH.
+#define AM_HEB_EPOCH     (-1373427L)   // RD of 1 Tishrei, Hebrew year 1
+#define AM_GREG_EPOCH_RD  739162L      // RD of 2024-10-03 (the kernel calendar epoch, noon)
+static int  am_heb_leap(long y){ return ((7*y+1)%19) < 7; }
+static long am_heb_last_month(long y){ return am_heb_leap(y) ? 13 : 12; }
+static long am_heb_elapsed(long y){ long mo=(235*y-234)/19; long pa=12084+13753*mo; long d=29*mo+pa/25920; if((3*(d+1))%7<3) d++; return d; }
+static long am_heb_corr(long y){ long a=am_heb_elapsed(y-1),b=am_heb_elapsed(y),c=am_heb_elapsed(y+1); if(c-b==356) return 2; if(b-a==382) return 1; return 0; }
+static long am_heb_new_year(long y){ return AM_HEB_EPOCH + am_heb_elapsed(y) + am_heb_corr(y); }
+static long am_heb_year_days(long y){ return am_heb_new_year(y+1) - am_heb_new_year(y); }
+static long am_heb_last_day(long y, long m){ long yd=am_heb_year_days(y); if(m==2||m==4||m==6||m==10||m==13) return 29; if(m==8 && !(yd==355||yd==385)) return 29; if(m==9 && (yd==353||yd==383)) return 29; if(m==12 && !am_heb_leap(y)) return 29; return 30; }
+static long am_heb_to_rd(long y, long m, long d){ long rd=am_heb_new_year(y)+d-1; if(m<7){ for(long k=7;k<=am_heb_last_month(y);k++) rd+=am_heb_last_day(y,k); for(long k=1;k<m;k++) rd+=am_heb_last_day(y,k); } else { for(long k=7;k<m;k++) rd+=am_heb_last_day(y,k); } return rd; }
+static int  am_greg_leap(long y){ return (y%4==0 && (y%100!=0 || y%400==0)); }
+static long am_greg_to_rd(long y,long m,long d){ long rd=365*(y-1)+(y-1)/4-(y-1)/100+(y-1)/400+(367*m-362)/12+d; if(m>2) rd += am_greg_leap(y)?-1:-2; return rd; }
+static void am_greg_from_rd(long rd, long*Y,long*M,long*D){ long y=rd/366+1; while(am_greg_to_rd(y+1,1,1)<=rd) y++; long m=1; while(am_greg_to_rd(y,m+1,1)<=rd) m++; *Y=y;*M=m;*D=rd-am_greg_to_rd(y,m,1)+1; }
+// days from `days` (since epoch) to the next 26-Shvat yahrzeit at-or-after it (Shvat = month 11)
+static long am_days_to_yahrzeit(long days){ long rd=AM_GREG_EPOCH_RD+days; long Y,M,D; am_greg_from_rd(rd,&Y,&M,&D); long hy=Y+3760; for(int i=-1;i<=2;i++){ long a=am_heb_to_rd(hy+i,11,26); if(a>=rd) return a-rd; } return 0; }
+// days from `days` to the next Gregorian 13 Feb at-or-after it
+static long am_days_to_gregbirthday(long days){ long rd=AM_GREG_EPOCH_RD+days; long Y,M,D; am_greg_from_rd(rd,&Y,&M,&D); long a=am_greg_to_rd(Y,2,13); if(a<rd) a=am_greg_to_rd(Y+1,2,13); return a-rd; }
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SCHUMANN RESONANCE — Earth-ionosphere coupling
 // Ported from arianna.c/src/schumann.c
@@ -640,6 +662,8 @@ void am_init(void) {
   g_self_now_days = 0;
   G.birth_drift = 0.0f;
   G.personal_dissonance = 0.0f;
+  G.janus_gap = 0.0f;
+  G.yahrzeit = 0.0f;
 
   // 4.C MLP controller
   am_4c_init_weights();
@@ -1074,6 +1098,8 @@ static const AML_FieldMap g_field_map[] = {
     FIELD_F("calendar_drift",    calendar_drift),
     FIELD_F("birth_drift",       birth_drift),
     FIELD_F("personal_dissonance", personal_dissonance),
+    FIELD_F("janus_gap",           janus_gap),
+    FIELD_F("yahrzeit",            yahrzeit),
     FIELD_F("attend_focus",      attend_focus),
     FIELD_F("attend_spread",     attend_spread),
     FIELD_F("tunnel_threshold",  tunnel_threshold),
@@ -7937,6 +7963,17 @@ void am_step(float dt) {
     G.personal_dissonance = g_birth_set
         ? clamp01(fabsf(mj_now_drift - G.birth_drift) / AM_MAX_UNCORRECTED)
         : 0.0f;
+    // MetaJanus Hebrew face — the yahrzeit (the same origin, seen by the other calendar).
+    // Derived from the same mj_days (the same SELF clock), never a second anchor.
+    if (g_birth_set) {
+      long dy = am_days_to_yahrzeit(mj_days);
+      long dg = am_days_to_gregbirthday(mj_days);
+      G.janus_gap = clampf((float)(dy - dg) / 30.0f, -1.0f, 1.0f);
+      G.yahrzeit  = expf(-(float)dy / 5.0f);
+    } else {
+      G.janus_gap = 0.0f;
+      G.yahrzeit  = 0.0f;
+    }
   }
 
   // Wormhole activation: dissonance exceeds gate threshold

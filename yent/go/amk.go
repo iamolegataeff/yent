@@ -39,6 +39,8 @@ type AMState struct {
 	// MetaJanus — the self-location anchor
 	BirthDrift         float32
 	PersonalDissonance float32
+	JanusGap           float32
+	Yahrzeit           float32
 
 	// Attention
 	AttendFocus  float32
@@ -143,6 +145,8 @@ func (a *AMK) GetState() AMState {
 		CalendarDrift:     float32(s.calendar_drift),
 		BirthDrift:         float32(s.birth_drift),
 		PersonalDissonance: float32(s.personal_dissonance),
+		JanusGap:           float32(s.janus_gap),
+		Yahrzeit:           float32(s.yahrzeit),
 		AttendFocus:       float32(s.attend_focus),
 		AttendSpread:      float32(s.attend_spread),
 		TunnelThreshold:   float32(s.tunnel_threshold),
