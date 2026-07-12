@@ -265,7 +265,7 @@ typedef struct {
   float arousal;     // emotional intensity of the current thought (0..1), written by the High brain
   // MetaJanus — the self-LOCATION anchor: WHEN this organism began, and how far the world's
   // calendars have drifted from that origin since. APPEND-ONLY (soma prefix-migration holds).
-  float birth_drift;         // cumulative Hebrew-Gregorian drift at THIS organism's birth — the fixed origin. Set once via BIRTH; 0 until born.
+  float birth_drift;         // cumulative Hebrew-Gregorian drift at THIS organism's birth — the fixed origin. Set once via BIRTH; g_birth_set (not this value) is the born-flag, so BIRTH 0 is a legit origin with drift 0.
   float personal_dissonance; // |drift(now) - birth_drift| / AM_MAX_UNCORRECTED, clamped — the growing (Metonic-nonlinear) distance from origin. 0 until born.
   // MetaJanus Hebrew face — the same origin seen by the OTHER calendar (the yahrzeit). Derived
   // from the same BIRTH, never a second anchor. APPEND-ONLY.
