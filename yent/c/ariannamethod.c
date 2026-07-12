@@ -902,6 +902,13 @@ void am_reset_debt(void) {
 #define AM_SOMA_MAGIC   0x4F534D41u  /* 'A','M','S','O' little-endian */
 #define AM_SOMA_VERSION 3u   /* v3: +positive soma (warmth/flow/weave), appended → v2 loads as prefix */
 
+/* MetaJanus (birth_drift + derived personal_dissonance/janus_gap/yahrzeit) is IDENTITY, not field
+ * weather: the origin is re-declared by BIRTH each session and the rest recomputes every step. It
+ * occupies the struct tail and is EXCLUDED from the soma — so LOAD can never drag the origin (it is
+ * not in the file), and a pre-MetaJanus soma stays a clean prefix. On-disk format is unchanged, so
+ * the version stays 3 and old somas load as-is. */
+#define AM_SOMA_PERSIST_SZ ((uint32_t)offsetof(AM_State, birth_drift))
+
 int am_field_save(const char* path) {
   if (!path || !path[0]) return -1;
   FILE* f = fopen(path, "wb");
@@ -911,13 +918,13 @@ int am_field_save(const char* path) {
   }
   uint32_t magic     = AM_SOMA_MAGIC;
   uint32_t version   = AM_SOMA_VERSION;
-  uint32_t state_sz  = (uint32_t)sizeof(AM_State);
+  uint32_t state_sz  = AM_SOMA_PERSIST_SZ;   /* field weather only; the MetaJanus tail is session identity */
   uint64_t timestamp = (uint64_t)time(NULL);
   if (fwrite(&magic,    4, 1, f) != 1 ||
       fwrite(&version,  4, 1, f) != 1 ||
       fwrite(&state_sz, 4, 1, f) != 1 ||
       fwrite(&timestamp,8, 1, f) != 1 ||
-      fwrite(&G, sizeof(AM_State), 1, f) != 1) {
+      fwrite(&G, AM_SOMA_PERSIST_SZ, 1, f) != 1) {
     fprintf(stderr, "[am_field_save] short write to '%s'\n", path);
     fclose(f);
     return -2;
@@ -947,13 +954,12 @@ int am_field_load(const char* path) {
     fclose(f);
     return -3;
   }
-  /* v2→v3 migration: the positive-soma fields (warmth/flow/weave) are APPENDED at the end of
-   * AM_State, so a v2 file is a clean prefix — read it and leave the new trailing fields zero.
-   * Only the two known sizes are valid: v3 = the current sizeof, v2 = that minus the 3 appended
-   * floats. Any other size is malformed/corrupt → refuse before overwriting G.
-   * (Holds only while AM_State growth stays append-only — bump this when a new version lands.) */
-  uint32_t expect_sz = (version >= 3u) ? (uint32_t)sizeof(AM_State)
-                                       : (uint32_t)(sizeof(AM_State) - 3u * sizeof(float));
+  /* Persisted region = field weather up to (not including) the MetaJanus tail (AM_SOMA_PERSIST_SZ).
+   * v3 = that region; v2 = that minus the 3 positive-soma floats (warmth/flow/weave), which sit just
+   * before the MetaJanus tail. A pre-MetaJanus soma is a clean prefix of the same region, so its size
+   * matches exactly. Any other size is malformed/corrupt → refuse before overwriting G. */
+  uint32_t expect_sz = (version >= 3u) ? AM_SOMA_PERSIST_SZ
+                                       : (uint32_t)(AM_SOMA_PERSIST_SZ - 3u * sizeof(float));
   if (fread(&state_sz, 4, 1, f) != 1 || state_sz != expect_sz) {
     fprintf(stderr,
             "[am_field_load] '%s': state size %u != %u expected for version %u — refusing\n",
@@ -964,7 +970,7 @@ int am_field_load(const char* path) {
   if (fread(&timestamp, 8, 1, f) != 1) {
     fclose(f); return -5;
   }
-  memset(&G, 0, sizeof(AM_State));   /* appended fields default to 0 when loading an older prefix */
+  memset(&G, 0, AM_SOMA_PERSIST_SZ);   /* zero only field weather; the MetaJanus identity tail (the origin) is left intact, so LOAD never drags it */
   if (fread(&G, state_sz, 1, f) != 1) {
     fprintf(stderr, "[am_field_load] '%s': short read of state\n", path);
     fclose(f);
