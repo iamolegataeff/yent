@@ -237,6 +237,7 @@ static const int g_metonic_leap_years[7] = {3, 6, 8, 11, 14, 17, 19};
 static time_t g_epoch_t = 0;
 static int g_calendar_manual = 0;  // 0 = real time, 1 = manual override
 static int g_birth_set = 0;        // MetaJanus: 1 once BIRTH has fixed the origin; personal_dissonance stays 0 until then
+static long g_birth_days = 0;      // MetaJanus: the origin day (days since epoch), fixed by BIRTH — the yahrzeit/birthday anniversaries derive from it
 static int g_self_now_manual = 0;  // MetaJanus test-door: 1 = pd's "now" is scrubbed to g_self_now_days (SELF_NOW_DAYS); 0 = real clock
 static int g_self_now_days = 0;     // scrubbed self-now (days since epoch) when g_self_now_manual
 
@@ -302,10 +303,13 @@ static long am_heb_to_rd(long y, long m, long d){ long rd=am_heb_new_year(y)+d-1
 static int  am_greg_leap(long y){ return (y%4==0 && (y%100!=0 || y%400==0)); }
 static long am_greg_to_rd(long y,long m,long d){ long rd=365*(y-1)+(y-1)/4-(y-1)/100+(y-1)/400+(367*m-362)/12+d; if(m>2) rd += am_greg_leap(y)?-1:-2; return rd; }
 static void am_greg_from_rd(long rd, long*Y,long*M,long*D){ long y=rd/366+1; while(am_greg_to_rd(y+1,1,1)<=rd) y++; long m=1; while(am_greg_to_rd(y,m+1,1)<=rd) m++; *Y=y;*M=m;*D=rd-am_greg_to_rd(y,m,1)+1; }
-// days from `days` (since epoch) to the next 26-Shvat yahrzeit at-or-after it (Shvat = month 11)
-static long am_days_to_yahrzeit(long days){ long rd=AM_GREG_EPOCH_RD+days; long Y,M,D; am_greg_from_rd(rd,&Y,&M,&D); long hy=Y+3760; for(int i=-1;i<=2;i++){ long a=am_heb_to_rd(hy+i,11,26); if(a>=rd) return a-rd; } return 0; }
-// days from `days` to the next Gregorian 13 Feb at-or-after it
-static long am_days_to_gregbirthday(long days){ long rd=AM_GREG_EPOCH_RD+days; long Y,M,D; am_greg_from_rd(rd,&Y,&M,&D); long a=am_greg_to_rd(Y,2,13); if(a<rd) a=am_greg_to_rd(Y+1,2,13); return a-rd; }
+// inverse of am_heb_to_rd: Gregorian RD -> Hebrew (year,month,day). Round-trip-verified 0/11310.
+static void am_heb_from_rd(long rd, long*Y,long*M,long*D){ long y=(rd-AM_HEB_EPOCH)/366; if(y<1) y=1; while(am_heb_new_year(y+1)<=rd) y++; long m=(rd<am_heb_to_rd(y,1,1))?7:1; while(am_heb_to_rd(y,m,am_heb_last_day(y,m))<rd) m++; *Y=y;*M=m;*D=rd-am_heb_to_rd(y,m,1)+1; }
+// days from `days` (since epoch) to the next yahrzeit — the Hebrew (month,day) OF THE ORIGIN (g_birth_days),
+// at-or-after `days`. Derived from the one BIRTH, not hardcoded: BIRTH 498 gives 26 Shvat, any BIRTH its own.
+static long am_days_to_yahrzeit(long days){ long brd=AM_GREG_EPOCH_RD+g_birth_days; long bY,bM,bD; am_heb_from_rd(brd,&bY,&bM,&bD); long rd=AM_GREG_EPOCH_RD+days; long nY,nM,nD; am_heb_from_rd(rd,&nY,&nM,&nD); for(long i=-1;i<=2;i++){ long ld=am_heb_last_day(nY+i,bM); long d=bD>ld?ld:bD; long a=am_heb_to_rd(nY+i,bM,d); if(a>=rd) return a-rd; } return 0; }
+// days from `days` to the next Gregorian (month,day) OF THE ORIGIN (g_birth_days), at-or-after it.
+static long am_days_to_gregbirthday(long days){ long brd=AM_GREG_EPOCH_RD+g_birth_days; long bY,bM,bD; am_greg_from_rd(brd,&bY,&bM,&bD); long rd=AM_GREG_EPOCH_RD+days; long nY,nM,nD; am_greg_from_rd(rd,&nY,&nM,&nD); for(long i=0;i<=1;i++){ long a=am_greg_to_rd(nY+i,bM,bD); if(a>=rd) return a-rd; } return 0; }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SCHUMANN RESONANCE — Earth-ionosphere coupling
@@ -658,6 +662,7 @@ void am_init(void) {
   calendar_init();
   // MetaJanus: a fresh kernel has no origin yet — unborn until BIRTH declares it.
   g_birth_set = 0;
+  g_birth_days = 0;
   g_self_now_manual = 0;
   g_self_now_days = 0;
   G.birth_drift = 0.0f;
@@ -3624,7 +3629,8 @@ static void aml_exec_level0(const char* cmd, const char* arg, AML_ExecCtx* ctx, 
       // of WHEN it began. The fulcrum cannot be moved: a second BIRTH is ignored, so no prompt
       // (/aml BIRTH from the REPL) can drag the origin (invariant, Fable audit #1). Self-LOCATION.
       if (!g_birth_set) {
-        G.birth_drift = calendar_cumulative_drift((int)ctx_float(ctx, arg));
+        g_birth_days = (long)ctx_float(ctx, arg);
+        G.birth_drift = calendar_cumulative_drift((int)g_birth_days);
         g_birth_set = 1;
       }
     }
