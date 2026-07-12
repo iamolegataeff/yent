@@ -17,8 +17,8 @@
  * thread; async + double buffering.
  *
  * Build: add `-DUSE_METAL` to CFLAGS, compile notorch_metal.mm with the
- *        Obj-C++ driver and link `-framework Metal -framework Foundation
- *        -lc++`. See Makefile target `metal`.
+ *        Obj-C++ driver and `-fobjc-arc`, then link `-framework Metal
+ *        -framework Foundation -lc++`. See Makefile target `metal`.
  *
  * by Claude (Arianna Method)
  */
