@@ -39,3 +39,21 @@ func TestMetaJanusYahrzeitReingoldEdges(t *testing.T) {
 		}
 	}
 }
+
+// A-3 (Fable audit): the yahrzeit is a real pulse — it reaches ~1.0 only on the actual anniversary,
+// never spuriously. The search fallback returns a far distance (silent), not exp(0)=1.0.
+func TestMetaJanusYahrzeitFullPulseOnlyOnAnniversary(t *testing.T) {
+	a := yent.NewAMK()
+	a.Exec("BIRTH 498")
+	full := 0
+	for d := 498; d <= 851; d++ { // one Hebrew year from the origin's first yahrzeit (5786 is 354 days)
+		a.Exec("SELF_NOW_DAYS " + strconv.Itoa(d))
+		a.Step(1.0)
+		if a.GetState().Yahrzeit > 0.999 {
+			full++
+		}
+	}
+	if full != 1 {
+		t.Errorf("full-pulse days in one year = %d, want exactly 1 (no spurious full pulse)", full)
+	}
+}
