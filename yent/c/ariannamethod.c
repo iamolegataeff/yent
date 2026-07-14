@@ -959,16 +959,17 @@ int am_field_load(const char* path) {
     fclose(f);
     return -3;
   }
-  /* Persisted region = field weather up to (not including) the MetaJanus tail (AM_SOMA_PERSIST_SZ).
-   * v3 = that region; v2 = that minus the 3 positive-soma floats (warmth/flow/weave), which sit just
-   * before the MetaJanus tail. A pre-MetaJanus soma is a clean prefix of the same region, so its size
-   * matches exactly. Any other size is malformed/corrupt → refuse before overwriting G. */
-  uint32_t expect_sz = (version >= 3u) ? AM_SOMA_PERSIST_SZ
-                                       : (uint32_t)(AM_SOMA_PERSIST_SZ - 3u * sizeof(float));
-  if (fread(&state_sz, 4, 1, f) != 1 || state_sz != expect_sz) {
+  /* Persisted region = field weather up to (not including) the MetaJanus identity tail
+   * (AM_SOMA_PERSIST_SZ). AM_State grows APPEND-ONLY, so any older soma is a clean PREFIX of the
+   * current region: accept any state_sz in (0, PERSIST_SZ] and load it as a prefix — the memset
+   * below has already zeroed the whole region, so an unread trailing part is honestly zero. This
+   * kills the whole "each appended field orphans older somas" class (the old exact-size gate refused
+   * every pre-append soma). A larger state_sz means a NEWER layout (or junk) we cannot safely
+   * interpret → refuse. */
+  if (fread(&state_sz, 4, 1, f) != 1 || state_sz == 0u || state_sz > AM_SOMA_PERSIST_SZ) {
     fprintf(stderr,
-            "[am_field_load] '%s': state size %u != %u expected for version %u — refusing\n",
-            path, state_sz, expect_sz, version);
+            "[am_field_load] '%s': state size %u not in (0, %u] — refusing\n",
+            path, state_sz, AM_SOMA_PERSIST_SZ);
     fclose(f);
     return -4;
   }
