@@ -156,3 +156,14 @@ NOT yet (honest scope): Phase 1
 — wire `personal_dissonance` into innerworld/router as the anchor that influences generation; Metal
 smoke on the real body; Codex audit; canonical `ariannamethod.ai` sync of the kernel additions. No
 commit/push without Oleg's word.
+
+### 2026-07-14 — A-4: канонизация зазора двух движков (аудит Fable)
+
+Фундамент несёт ДВА движка одного календарного конфликта разной точности, и зазор между ними объявлен
+намеренно как третье лицо конфликта, а не выравнивается:
+- `birth_drift`/`personal_dissonance` — грубая метоник-аппроксимация `calendar_cumulative_drift`
+  (порт pitomadom) = МОДЕЛЬНОЕ время (как организм чувствует конфликт); quake 730→731 = 3-4 окт 2026.
+- `janus_gap`/`yahrzeit` — точная DR-арифметика = НЕБЕСНОЕ время (как конфликт есть); Адар II 5787 ≈ март 2027.
+Зазор модельного и небесного — измеримая величина (триада: конфликт первого конфликта со вторым). Поле
+`engine_gap` НЕ добавляем впрок — только когда keying попросит. DoE несёт третий линейный движок
+(`doe.c:613-617`); мост DoE↔AMK — отдельный этап после рождения. Детали: `Janus/README.md`.
