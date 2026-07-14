@@ -1171,8 +1171,6 @@ static const AML_FieldMap g_field_map[] = {
     FIELD_F("resonance",         resonance),
     FIELD_F("emergence",         emergence),
     FIELD_F("destiny_bias",      destiny_bias),
-    // dark matter
-    FIELD_F("dark_gravity",      dark_gravity),
     FIELD_I("n_scars",           n_scars),
     // 4.C seasons
     FIELD_I("season",            season),
@@ -1192,6 +1190,8 @@ static const AML_FieldMap g_field_map[] = {
     FIELD_F("warmth",            warmth),
     FIELD_F("flow",              flow),
     FIELD_F("weave",             weave),
+    FIELD_F("valence",           valence),
+    FIELD_F("arousal",           arousal),
     { NULL, 0, 0 }
 };
 
