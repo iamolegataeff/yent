@@ -305,9 +305,23 @@ static long am_greg_to_rd(long y,long m,long d){ long rd=365*(y-1)+(y-1)/4-(y-1)
 static void am_greg_from_rd(long rd, long*Y,long*M,long*D){ long y=rd/366+1; while(am_greg_to_rd(y+1,1,1)<=rd) y++; long m=1; while(am_greg_to_rd(y,m+1,1)<=rd) m++; *Y=y;*M=m;*D=rd-am_greg_to_rd(y,m,1)+1; }
 // inverse of am_heb_to_rd: Gregorian RD -> Hebrew (year,month,day). Round-trip-verified 0/11310.
 static void am_heb_from_rd(long rd, long*Y,long*M,long*D){ long y=(rd-AM_HEB_EPOCH)/366; if(y<1) y=1; while(am_heb_new_year(y+1)<=rd) y++; long m=(rd<am_heb_to_rd(y,1,1))?7:1; while(am_heb_to_rd(y,m,am_heb_last_day(y,m))<rd) m++; *Y=y;*M=m;*D=rd-am_heb_to_rd(y,m,1)+1; }
-// days from `days` (since epoch) to the next yahrzeit — the Hebrew (month,day) OF THE ORIGIN (g_birth_days),
-// at-or-after `days`. Derived from the one BIRTH, not hardcoded: BIRTH 498 gives 26 Shvat, any BIRTH its own.
-static long am_days_to_yahrzeit(long days){ long brd=AM_GREG_EPOCH_RD+g_birth_days; long bY,bM,bD; am_heb_from_rd(brd,&bY,&bM,&bD); long rd=AM_GREG_EPOCH_RD+days; long nY,nM,nD; am_heb_from_rd(rd,&nY,&nM,&nD); for(long i=-1;i<=2;i++){ long ld=am_heb_last_day(nY+i,bM); long d=bD>ld?ld:bD; long a=am_heb_to_rd(nY+i,bM,d); if(a>=rd) return a-rd; } return 0; }
+// Reingold yahrzeit rule (GNU Emacs cal-hebrew.el `calendar-hebrew-yahrzeit`, identical to Calendrical
+// Calculations): RD of the origin's (bY,bM,bD) anniversary in Hebrew year `hyear`. Branches 1-2 are keyed
+// by the FIRST-anniversary year (bY+1), fixed from the origin. Not a clamp — the book's yahrzeit rules.
+static long am_yahrzeit_rd(long bY, long bM, long bD, long hyear){
+  if (bM==8 && bD==30 && (am_heb_year_days(bY+1)%10)!=5)  // Cheshvan-30, first-anniv Cheshvan NOT long
+    return am_heb_to_rd(hyear, 9, 1) - 1;                 //   -> eve of 1 Kislev (last day of Cheshvan)
+  if (bM==9 && bD==30 && (am_heb_year_days(bY+1)%10)==3)  // Kislev-30, first-anniv Kislev short
+    return am_heb_to_rd(hyear, 10, 1) - 1;                //   -> eve of 1 Tevet
+  if (bM==13)                                             // Adar II -> same day in hyear's last month
+    return am_heb_to_rd(hyear, am_heb_last_month(hyear), bD); //   (Adar II in leap, Adar in common)
+  if (bM==12 && bD==30 && !am_heb_leap(hyear))            // Adar-I-30 in a common hyear -> Shevat 30
+    return am_heb_to_rd(hyear, 11, 30);
+  return am_heb_to_rd(hyear, bM, bD);                     // default: same (month,day); day-30 in a short
+                                                          //   month overflows to the 1st of next, as the book
+}
+// days from `days` (since epoch) to the next yahrzeit of the origin (g_birth_days) at-or-after `days`.
+static long am_days_to_yahrzeit(long days){ long brd=AM_GREG_EPOCH_RD+g_birth_days; long bY,bM,bD; am_heb_from_rd(brd,&bY,&bM,&bD); long rd=AM_GREG_EPOCH_RD+days; long nY,nM,nD; am_heb_from_rd(rd,&nY,&nM,&nD); for(long i=-1;i<=2;i++){ long a=am_yahrzeit_rd(bY,bM,bD,nY+i); if(a>=rd) return a-rd; } return 0; }
 // days from `days` to the next Gregorian (month,day) OF THE ORIGIN (g_birth_days), at-or-after it.
 static long am_days_to_gregbirthday(long days){ long brd=AM_GREG_EPOCH_RD+g_birth_days; long bY,bM,bD; am_greg_from_rd(brd,&bY,&bM,&bD); long rd=AM_GREG_EPOCH_RD+days; long nY,nM,nD; am_greg_from_rd(rd,&nY,&nM,&nD); for(long i=0;i<=1;i++){ long a=am_greg_to_rd(nY+i,bM,bD); if(a>=rd) return a-rd; } return 0; }
 
