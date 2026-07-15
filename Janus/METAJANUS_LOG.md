@@ -206,3 +206,21 @@ Tool-verified: `go build ./cmd/innerworld-dock` exit 0; `go test ./tests -run 'M
 PASS, 0 FAIL — including the new `TestMetaJanusAMLMissingFileStaysUnborn` (missing file → error + unborn)
 and the born `TestMetaJanusAMLDeclaresOrigin` (`BirthDrift` ~15.3388). Full Metal/dock smoke is Fable's
 stage-B acceptance on the Mac Mini.
+
+### 2026-07-15 — Stage B, gate 2: telemetry is the first reader; the layer stays inert
+
+The dock's field-weather reflection dump (`cmd/innerworld-dock/main.go`, the pure `fmt.Printf` block that
+already prints `field`/`feeling`/`membrane`/`gate`) now carries a `self` line reading all four MetaJanus
+fields from `C.am_get_state()`: `birth_drift`, `personal_dissonance`, `janus_gap`, `yahrzeit`. Telemetry
+becomes their first reader.
+
+Inertness is the point, and it is grounded, not asserted. The four fields are deliberately NOT added to
+`LimphaState` — that struct feeds generation (`body_router.go:315` folds `formatLimphaState` into the deep
+body's escalation context, and `searchStateNeighbors`/`SearchByState` retrieve on it). A grep over
+`yent/go/*.go` + `cmd/*/*.go` confirms no routing / escalation / retrieval / sampling / logit path reads any
+of the four — they exist only in the Go struct mapping (`amk.go`), the tests, and this one telemetry print.
+Generation stays untouched; influence is stage D, on Oleg's separate word.
+
+Tool-verified: `go build ./cmd/innerworld-dock` exit 0; grep confirms the `self` line emits all four field
+names and that nothing consumes them in a decision path; `go test ./tests -run 'MetaJanus|AMK'` = 27/27 PASS,
+0 FAIL (values test-locked). The live `self : birth_drift=15.3388 …` dock line is Fable's Mac-Mini smoke.

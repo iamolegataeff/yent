@@ -617,6 +617,11 @@ func main() {
 	st := C.am_get_state()
 	fmt.Printf("  field    : debt=%.3f destiny=%.3f velocity_mode=%d effective_temp=%.3f\n",
 		float32(st.debt), float32(st.destiny), int(st.velocity_mode), float32(st.effective_temp))
+	// MetaJanus self-anchor, telemetry-only: the origin (birth_drift), its growing distance
+	// (personal_dissonance), and the two-calendar faces (janus_gap, yahrzeit). Read here for
+	// observation; nothing routes, escalates, or retrieves on them — the layer stays inert.
+	fmt.Printf("  self     : birth_drift=%.4f personal_dissonance=%.4f | janus_gap=%.4f yahrzeit=%.4f\n",
+		float32(st.birth_drift), float32(st.personal_dissonance), float32(st.janus_gap), float32(st.yahrzeit))
 	printReflectionMemoryPressure("  memory   ", r.MemoryPressure)
 	fmt.Printf("  feeling  : valence=%.3f arousal=%.3f | warmth=%.3f pain=%.3f flow=%.3f tension=%.3f | scars(sea)=%d\n",
 		float32(st.valence), float32(st.arousal), float32(st.warmth), float32(st.pain),
