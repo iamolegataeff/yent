@@ -270,3 +270,28 @@ bug. Locks: field bounds every day, immovable origin, sawtooth (sign-change ≥1
 730→731), the pulse peak (max > 0.9, the exact anniversary is hit), and the annual recurrence (≥2 windows).
 Tool-verified: `go test ./tests -run 'MetaJanus|AMK'` = 28/28 PASS, 0 FAIL; whole `./tests` package green.
 Stage D (first key: `janus_gap` → `temporal_alpha`) touches generation and waits on Oleg's separate word.
+
+### 2026-07-15 — Stage D-1: the first key on the write-only knob (inert, OFF by default)
+
+D-0 finding (Fable, reproduced by grep here): `temporal_alpha` / `temporal_mode` are WRITE-ONLY across the
+whole repo — the PITOMADOM temporal block has setters (init `ariannamethod.c:645-646`, the `TEMPORAL_*` /
+`REMEMBER_FUTURE` / `REWIND_EXPERIENCE` builtins at `:3515-3521`/`:4060-4077`, `amk_kernel.c:540-557`) and the
+`FIELD_F` introspection map (`:1151`), but ZERO readers in any generation / sampler / routing path, in C or Go.
+A knob with no wire — so keying it is inert until a later stage connects one, which is why it is the safe first rung.
+
+D-1 arms that knob without connecting it. In the `am_step` MetaJanus block, when born AND the key is on, the
+sign of `janus_gap` EMA-pulls `temporal_alpha` toward its pole (k=0.05): `gap<0` (yahrzeit nearer) → 0.0
+retrodiction, `gap>0` (Gregorian nearer) → 1.0 prophecy, `gap==0` (origin day) → 0.5 equilibrium. A gentle pull,
+not a hard write, so it rides alongside the `TEMPORAL_*` directive-setters rather than trampling them. The switch
+is a new AML operator `JANUS_KEY <0|1>`, kernel default OFF (`g_temporal_key_on=0`, reset in `am_init`) — without
+the line, behavior is bit-for-bit current. `temporal_alpha` is now surfaced in the dock `self` telemetry line and
+in Go `amk.AMState.TemporalAlpha`, so the now-live knob is observable.
+
+Inert by construction: D-0 says nothing reads `temporal_alpha`, so the pull changes no generation and no process
+— it lights the knob and makes it visible, nothing more. The wire (D-2) is a SEPARATE step, process-side (Fable:
+"sampler and logits are not touched at all"), on Oleg's fork choice. Tool-verified: `go build ./cmd/innerworld-dock`
+exit 0; `go test ./tests -run 'MetaJanus|AMK'` = 32/32 PASS, 0 FAIL, whole `./tests` green — new
+`TestMetaJanusKey*`: OFF stays bit-for-bit (`temporal_alpha` == 0.5 where `janus_gap` is non-zero), armed converges
+below 0.05 (retrodiction, day 528) and above 0.95 (prophecy, day 888) over 100 steps, unborn+armed never pulls
+(gated by `g_birth_set`). Kernel change → canon-sync to `ariannamethod.ai` (vendor==canon) is deferred to Oleg's
+separate word, not this step.
