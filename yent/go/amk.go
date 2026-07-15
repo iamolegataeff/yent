@@ -41,7 +41,8 @@ type AMState struct {
 	PersonalDissonance float32
 	JanusGap           float32
 	Yahrzeit           float32
-	TemporalAlpha      float32 // D-1: EMA-pulled by janus_gap when JANUS_KEY is armed (else inert)
+	TemporalAlpha      float32 // generic PITOMADOM temporal focus, driven by TEMPORAL_* directives (not by Janus)
+	JanusTemporalAlpha float32 // HIGH-2: calendar-derived Janus signal clamp01(0.5+0.5*janus_gap); what D-2 reads when armed
 
 	// Attention
 	AttendFocus  float32
@@ -157,6 +158,7 @@ func (a *AMK) GetState() AMState {
 		JanusGap:           float32(s.janus_gap),
 		Yahrzeit:           float32(s.yahrzeit),
 		TemporalAlpha:      float32(s.temporal_alpha),
+		JanusTemporalAlpha: float32(s.janus_temporal_alpha),
 		AttendFocus:       float32(s.attend_focus),
 		AttendSpread:      float32(s.attend_spread),
 		TunnelThreshold:   float32(s.tunnel_threshold),

@@ -6,10 +6,10 @@ import (
 	yent "github.com/ariannamethod/yent/yent/go"
 )
 
-// HIGH-1 (Sol audit): JANUS_KEY 0 must let a consumer de-arm even though the D-1 EMA writer only stops
-// and leaves temporal_alpha frozen off-center. The kernel now exposes am_janus_key_armed so D-2 gates
-// on the key, not the frozen value. Reproduces Sol's key-off evidence at the kernel boundary:
-// `armed_then_key_off: before=0.002960 after_100_steps=0.002960`.
+// HIGH-1 (Sol audit): JANUS_KEY must be observable so a consumer (D-2) can de-arm. am_janus_key_armed
+// reports the key state true->false across JANUS_KEY 1 -> 0. HIGH-2: the Janus signal is calendar-derived,
+// so across arm/disarm at the SAME date it is unchanged (deterministic, not a frozen EMA), and the generic
+// temporal_alpha is never written by Janus.
 func TestMetaJanusKeyArmedFlagTracksKey(t *testing.T) {
 	amk := yent.NewAMK()
 	amk.Exec("BIRTH 498")
@@ -21,11 +21,11 @@ func TestMetaJanusKeyArmedFlagTracksKey(t *testing.T) {
 	if !amk.JanusKeyArmed() {
 		t.Fatal("after JANUS_KEY 1, JanusKeyArmed() = false, want true")
 	}
-	armedAlpha := amk.GetState().TemporalAlpha
-	if armedAlpha >= 0.5 {
-		t.Fatalf("armed retrodiction should pull alpha below 0.5, got %.4f", armedAlpha)
+	armedSignal := amk.GetState().JanusTemporalAlpha
+	if armedSignal >= 0.5 {
+		t.Fatalf("armed retrodiction should keep janus_temporal_alpha below 0.5, got %.4f", armedSignal)
 	}
-	// Disarm: the key goes false, but the EMA writer only stops — alpha stays frozen at the pole.
+	// Disarm: the key flag goes false so the consumer can de-arm.
 	amk.Exec("JANUS_KEY 0")
 	for i := 0; i < 100; i++ {
 		amk.Step(1.0)
@@ -33,7 +33,12 @@ func TestMetaJanusKeyArmedFlagTracksKey(t *testing.T) {
 	if amk.JanusKeyArmed() {
 		t.Fatal("after JANUS_KEY 0, JanusKeyArmed() = true, want false (the consumer can de-arm)")
 	}
-	if frozen := amk.GetState().TemporalAlpha; frozen != armedAlpha {
-		t.Fatalf("temporal_alpha not frozen after disarm: %.6f -> %.6f (writer stops, value must not reset)", armedAlpha, frozen)
+	// The signal is calendar-derived, so at the same date it is unchanged (deterministic, not frozen).
+	if s := amk.GetState().JanusTemporalAlpha; s != armedSignal {
+		t.Fatalf("janus_temporal_alpha changed across arm/disarm at one date: %.6f -> %.6f (must be date-deterministic)", armedSignal, s)
+	}
+	// Janus never wrote the generic temporal_alpha.
+	if ta := amk.GetState().TemporalAlpha; ta != 0.5 {
+		t.Fatalf("generic temporal_alpha = %.4f, want 0.5 (untouched by Janus)", ta)
 	}
 }

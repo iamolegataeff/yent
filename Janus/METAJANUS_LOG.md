@@ -363,3 +363,23 @@ ignores it while unarmed. Tool-verified: `TestMetaJanusKeyGatesConsumer` (consum
 armed) and `TestMetaJanusKeyArmedFlagTracksKey` (key false after `JANUS_KEY 0` while alpha stays frozen —
 Sol's exact scenario) both green; whole `./tests` + `./innerworld/...` green; dock builds. Kernel change →
 canon-sync deferred to a checkpoint. HIGH-2 (calendar-derived alpha) is next.
+
+### fix 2 — HIGH-2: the Janus signal follows the calendar, not process ticks
+
+Reproduced (tool): with `JANUS_KEY 1` at one date (day 528), the old per-tick EMA gave `temporal_alpha`
+0.4750 after 1 step vs 0.0030 after 100 steps — the anchor's first causal signal drifted with traffic and
+replay shape, not the calendar, defeating the model-external claim. My D-3 "ladder" was that same tick
+artifact (1 step/day hid it). Fix: a new kernel field `janus_temporal_alpha = clamp01(0.5 + 0.5*janus_gap)`
+computed each step as a PURE function of the calendar gap (no accumulation) — deterministic per date and
+independent of am_step count. It is separate from the generic `temporal_alpha`, which is now left entirely
+to its own `TEMPORAL_*` directives (Sol's "separate fact / interpretation / actuation"). D-2 reads
+`janus_temporal_alpha` (still gated on `JANUS_KEY` at the consumer, HIGH-1); the dock `self` line and Go
+`amk.AMState.JanusTemporalAlpha` surface it. The old D-1 tick-EMA is removed.
+
+Tool-verified: `TestMetaJanusSignalPartitionInvariant` (1 step == 100 steps at each of days 498/528/858/888/1218
+— the exact tick-drift Sol found, now invariant; reversible back to 0.5 at the origin), `TestMetaJanusSignalIsCalendarDerived`
+(`janus_temporal_alpha == clamp01(0.5+0.5*gap)`, retrodiction<0.5 near the yahrzeit, prophecy>0.5 after),
+`TestMetaJanusLeavesGenericTemporalAlpha` (the generic field stays 0.5, untouched by Janus). Whole `./tests`
++ `./innerworld/...` green, dock builds. The old EMA-ladder D-1/D-3 tests were rewritten to the new
+calendar semantics. Kernel change → canon-sync deferred to the checkpoint batch. HIGH-3 (limpha boundary,
+PROMOTE) is next.

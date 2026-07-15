@@ -210,6 +210,15 @@ func (b *Body) JanusKeyArmed() bool {
 	return C.am_janus_key_armed() != 0
 }
 
+// JanusTemporalAlpha reports the calendar-derived Janus temporal signal (HIGH-2): a pure function of
+// janus_gap, deterministic per date and independent of am_step count. This is what D-2 reads (gated on
+// JanusKeyArmed); the generic TemporalAlpha above keeps its own TEMPORAL_* directive semantics.
+func (b *Body) JanusTemporalAlpha() float32 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return float32(C.am_get_state().janus_temporal_alpha)
+}
+
 // BiasWords pulls the next seed toward what the field's cooc memory associates with
 // the seed's last token — the field->circles half of the bidirectional loop. The seed
 // is tokenized, the cooc graph (am_get_state cooc_src/dst/cnt) is scanned for that

@@ -44,8 +44,8 @@ func metajanusTemporalAlpha(flow Flow) float32 {
 	if ka, ok := flow.(interface{ JanusKeyArmed() bool }); ok && !ka.JanusKeyArmed() {
 		return 0.5
 	}
-	if ta, ok := flow.(interface{ TemporalAlpha() float32 }); ok {
-		return ta.TemporalAlpha()
+	if ja, ok := flow.(interface{ JanusTemporalAlpha() float32 }); ok {
+		return ja.JanusTemporalAlpha()
 	}
 	return 0.5
 }

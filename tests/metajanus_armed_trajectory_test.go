@@ -1,63 +1,44 @@
 package tests
 
 import (
-	"math"
 	"strconv"
 	"testing"
 
 	yent "github.com/ariannamethod/yent/yent/go"
 )
 
-// D-3 (Fable audit plan): observation UNDER the armed key. With JANUS_KEY armed, walk the self-clock
-// continuously across ~2 years and watch temporal_alpha ladder over the janus_gap sawtooth — the EMA
-// descends toward 0 (retrodiction) through the long negative-gap stretch, then climbs toward 1
-// (prophecy) once the gap turns positive at the Hebrew anniversary. This is inert: it only reads the
-// field through the SELF_NOW_DAYS test-door, and nothing in generation reads temporal_alpha yet (D-0).
-// Run `go test ./tests -run ArmedTrajectory -v` to see the ladder track the gap.
-func TestMetaJanusArmedTrajectory(t *testing.T) {
-	amk := yent.NewAMK()
-	if err := amk.ExecFile("../Janus/metajanus.aml"); err != nil {
-		t.Fatalf("ExecFile metajanus.aml: %v", err)
-	}
-	amk.Exec("JANUS_KEY 1") // arm the first key
-	const origin = 498
-	const span = 732
-
-	alpha := make([]float32, span)
-	gap := make([]float32, span)
-	var minAlpha float32 = 1
-	var minAlphaDay int
-	for i := 0; i < span; i++ {
-		day := origin + i
+// HIGH-2 (Sol fix): the Janus temporal signal is calendar-deterministic and partition-invariant — the
+// same origin + same date give the same value regardless of how many am_step calls (traffic / replay /
+// restart) got there. This replaces the old D-3 EMA "ladder", which was a per-tick artifact (Sol: on one
+// date the old EMA gave 0.475 at 1 step vs 0.003 at 100 steps). The model-external constant is restored.
+func TestMetaJanusSignalPartitionInvariant(t *testing.T) {
+	at := func(day, steps int) float32 {
+		amk := yent.NewAMK()
+		amk.Exec("BIRTH 498")
+		amk.Exec("JANUS_KEY 1")
 		amk.Exec("SELF_NOW_DAYS " + strconv.Itoa(day))
-		amk.Step(1.0)
-		s := amk.GetState()
-		// The armed key must not disturb the origin — only NOW is scrubbed.
-		if math.Abs(float64(s.BirthDrift)-15.3388) > 0.01 {
-			t.Fatalf("origin moved under the armed key at day %d: birth_drift=%.4f", day, s.BirthDrift)
+		for i := 0; i < steps; i++ {
+			amk.Step(1.0)
 		}
-		alpha[i], gap[i] = s.TemporalAlpha, s.JanusGap
-		if alpha[i] < minAlpha {
-			minAlpha, minAlphaDay = alpha[i], day
+		return amk.GetState().JanusTemporalAlpha
+	}
+	// Partition-invariance across the whole window: 1 step and 100 steps at the same date must agree.
+	for _, day := range []int{498, 528, 858, 888, 1218} {
+		one, hundred := at(day, 1), at(day, 100)
+		if one != hundred {
+			t.Fatalf("day %d not partition-invariant: 1 step=%.6f, 100 steps=%.6f (Janus must not follow ticks)", day, one, hundred)
 		}
 	}
-
-	for i := 0; i < span; i += 30 {
-		t.Logf("day %4d  janus_gap=%+.4f  temporal_alpha=%.4f", origin+i, gap[i], alpha[i])
+	// The signal still swings by the calendar: retrodiction (<0.5) in the long yahrzeit-near stretch,
+	// prophecy (>0.5) once the Gregorian face leads — now instant per date, not gradual over ticks.
+	if a := at(528, 1); a >= 0.5 {
+		t.Fatalf("day 528 alpha=%.4f, want <0.5 (retrodiction stretch)", a)
 	}
-	final := alpha[span-1]
-	t.Logf("LADDER: min temporal_alpha=%.4f at day %d (deep retrodiction) -> final=%.4f (climbed to prophecy)",
-		minAlpha, minAlphaDay, final)
-
-	// A real ladder swing: the long negative-gap stretch pulls temporal_alpha down near 0, then the
-	// positive-gap stretch after the anniversary lifts it back up — not a flat line.
-	if minAlpha > 0.1 {
-		t.Fatalf("armed retrodiction never converged: min temporal_alpha=%.4f, want <0.1", minAlpha)
+	if a := at(888, 1); a <= 0.5 {
+		t.Fatalf("day 888 alpha=%.4f, want >0.5 (prophecy stretch)", a)
 	}
-	if final < 0.6 {
-		t.Fatalf("armed prophecy never lifted temporal_alpha: final=%.4f, want >0.6", final)
-	}
-	if final-minAlpha < 0.5 {
-		t.Fatalf("no ladder swing: final-min=%.4f, want >0.5", final-minAlpha)
+	// A backward scrub to the origin returns the exact equilibrium — reversible, replayable.
+	if a := at(498, 1); a != 0.5 {
+		t.Fatalf("origin day 498 alpha=%.4f, want 0.5 (reversible to equilibrium)", a)
 	}
 }
