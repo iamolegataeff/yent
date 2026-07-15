@@ -397,6 +397,21 @@ type innerReflectionTrace struct {
 	SelfAnswerProb float32                         `json:"self_answer_prob"`
 	SelfAnswered   bool                            `json:"self_answered"`
 	MemoryPressure *innerworld.MemoryFieldPressure `json:"memory_pressure,omitempty"`
+	// MetaJanus HIGH-3 causal receipt: this inner reflection is persisted to limpha and can later reach a
+	// user-facing deep-body turn through the router's FTS recall — an intended INDIRECT (field->process->
+	// memory->context) speech influence, NOT inert. When JANUS_KEY was armed, D-2 leaned the seed harvest
+	// by janus_temporal_alpha, so we record the Janus state that shaped this reflection: "resonance
+	// affected generation" becomes a replayable statement.
+	JanusArmed         bool    `json:"janus_armed"`
+	JanusTemporalAlpha float32 `json:"janus_temporal_alpha"`
+	JanusGap           float32 `json:"janus_gap"`
+}
+
+// janusReceipt reads the current MetaJanus state D-2 acted on — whether the key was armed and the
+// calendar-derived signal + gap — so a persisted inner reflection carries a replayable causal receipt.
+func janusReceipt() (armed bool, alpha, gap float32) {
+	st := C.am_get_state()
+	return C.am_janus_key_armed() != 0, float32(st.janus_temporal_alpha), float32(st.janus_gap)
 }
 
 func persistReflection(lc *yent.LimphaClient, kind, source string, r innerworld.Reflection, st yent.LimphaState) {
@@ -427,6 +442,9 @@ func persistReflection(lc *yent.LimphaClient, kind, source string, r innerworld.
 	if r.MemoryPressure.Score > 0 {
 		trace.MemoryPressure = &r.MemoryPressure
 	}
+	// HIGH-3: stamp the Janus state that shaped this reflection (armed + calendar signal + gap), so the
+	// indirect inner-life -> limpha -> speech path is auditable and replayable, not a silent leak.
+	trace.JanusArmed, trace.JanusTemporalAlpha, trace.JanusGap = janusReceipt()
 	if source = strings.TrimSpace(source); source != "" {
 		trace.Source = kind + ":" + source
 	}

@@ -383,3 +383,28 @@ Tool-verified: `TestMetaJanusSignalPartitionInvariant` (1 step == 100 steps at e
 + `./innerworld/...` green, dock builds. The old EMA-ladder D-1/D-3 tests were rewritten to the new
 calendar semantics. Kernel change → canon-sync deferred to the checkpoint batch. HIGH-3 (limpha boundary,
 PROMOTE) is next.
+
+### fix 3 — HIGH-3: the inner voice is an honest first indirect speech wire (PROMOTE)
+
+Sol's HIGH-3: D-2's inner-seed change reaches user-facing speech, delayed — `innerworld/cooc.go`+`scar.go`
+shape the seed, the dock persists the reflection to the shared limpha (`persistReflection` → `StoreTurn`),
+and the router recalls it by FTS and appends it to the deep body's escalation context (`body_router.go`).
+So "inner life, not speech" was false. Oleg's call: PROMOTE, not isolate — this indirect (field → process →
+memory → context → speech) influence is exactly the intended soft one; "speech later" meant DIRECT
+sampler/wormhole intervention, not this. The fix makes it honest and auditable, not a silent leak.
+
+Provenance already exists and is left in place: inner turns carry the `[innerworld/<kind>]` prompt prefix
+(visible wherever the turn appears, including the router's `[memory refs]`) and a `trace.Source` tag; the
+schema `source` column was scoped out as redundant with those markers (avoids a memory-schema migration for
+no new signal). The missing piece — a **causal receipt** — is added: `innerReflectionTrace` now stamps the
+Janus state that shaped the reflection (`janus_armed`, `janus_temporal_alpha`, `janus_gap`, from
+`janusReceipt()` reading the shared kernel at persist time), recorded in the seam's json delta. "Resonance
+affected generation" becomes a replayable statement. In the canonical default the key is unarmed, so the
+receipt records `janus_armed=false` and the harvest is neutral (D-2 did not shape it).
+
+Tool-verified: `go build ./cmd/innerworld-dock` exit 0; `TestJanusReceiptCapturesArmedState` (armed
+retrodiction → armed=true, calendar signal <0.5, gap<0; disarm → armed=false); whole `./cmd/innerworld-dock`
++ `./tests` + `./innerworld/...` green. Dock-only Go change — no kernel change, so no canon-sync. The honest
+NAMING (stop calling D "inert"/"no speech" in the stale comments/receipts) lands in LOW-1 with the other
+stale-claim fixes, so the final wording states the actual contract. All three HIGH blockers now closed;
+MEDIUM next.
