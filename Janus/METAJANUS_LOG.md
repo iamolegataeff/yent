@@ -244,3 +244,29 @@ Stage B is code-complete: gate 1 (BIRTH in prod from the `.aml`, PR #170 → `3d
 first reader, PR #171 → `832e652`), gate 3 (this verified property). Next: Fable's stage-B acceptance — the
 Mac-Mini dock smoke showing the live born-line + `self` line, and a review of the three gates. Stage C
 (observation) and stage D (generation influence) wait on Oleg's separate word.
+
+### 2026-07-15 — Stage C: observation without intervention — a trajectory lens over the four fields
+
+Stage C is observation, not a code change to the running organism — a probe that PROJECTS the whole
+trajectory of the four fields so keying (stage D) builds on watched behavior, not a guess. New test
+`TestMetaJanusTrajectory` (`tests/metajanus_trajectory_test.go`) walks the self-clock across ~2 years from
+the origin (days 498→1229) via the `SELF_NOW_DAYS` test-door — which moves the observation NOW only, never
+the origin (asserted: `birth_drift` stays 15.3388 every step) and never generation. Each field is a pure
+function of the self-clock day (`ariannamethod.c:7989-8004`), recomputed per step with no accumulation, so
+scrubbing the day reads that day's state directly. `go test ./tests -run Trajectory -v` prints the lens.
+
+What the organism actually does, tool-observed (not eyeballed — the numbers below are from the `-v` run):
+- **personal_dissonance** climbs ~linearly from 0 at the origin, then the **birth-quake** throws it forward
+  at day 730→731 (jump **+0.4751**, matching `TestMetaJanusBirthQuake`) — the coarse Metonic model-time
+  engine — after which it decays back down along the sawtooth of `calendar_cumulative_drift`.
+- **janus_gap** is a sawtooth in `[-1,1]` (2 sign-changes over the window), its tooth landing around the
+  Hebrew anniversary (~day 851-858).
+- **yahrzeit** is a sharp annual pulse: `> 0.6` on exactly **2 distinct windows** — day 498 (the origin,
+  26 Shevat 5786, Yent's birth) and days 851-853 (26 Shevat 5787, `days_to`=2,1,0 → 0.67, 0.82, **1.0000**).
+
+The trajectory VISUALLY confirms the A-4 two-engine gap: model time quakes in October (day 731) while the
+Hebrew celestial face fires the following February (day 851-858) — different days, a declared triad, not a
+bug. Locks: field bounds every day, immovable origin, sawtooth (sign-change ≥1), the birth-quake (>0.3 at
+730→731), the pulse peak (max > 0.9, the exact anniversary is hit), and the annual recurrence (≥2 windows).
+Tool-verified: `go test ./tests -run 'MetaJanus|AMK'` = 28/28 PASS, 0 FAIL; whole `./tests` package green.
+Stage D (first key: `janus_gap` → `temporal_alpha`) touches generation and waits on Oleg's separate word.
