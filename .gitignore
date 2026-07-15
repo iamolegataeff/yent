@@ -42,3 +42,7 @@ DoE/Makefile
 /diagnostics/moyent-dialogue-*.jsonl
 # agent worktrees live under one roof, never committed (see AGENTS.md)
 /.worktrees/
+
+# MetaJanus internal audit artifacts — our internal affairs, kept local
+Janus/AUDIT_*.md
+Janus/*_HANDOFF_*.md
