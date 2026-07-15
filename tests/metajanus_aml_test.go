@@ -26,3 +26,23 @@ func TestMetaJanusAMLDeclaresOrigin(t *testing.T) {
 		t.Fatalf("PersonalDissonance = %v, want in (0,1] (aged from origin)", s.PersonalDissonance)
 	}
 }
+
+// The dock BIRTHs from Janus/metajanus.aml before the first am_step (cmd/innerworld-dock); a
+// missing file must leave Yent honestly UNBORN — birth_drift 0, personal_dissonance 0 — with an
+// error, never a fatal. This mirrors the dock's warn-and-continue else branch: am_exec_file
+// nonzero -> stderr warning, generation continues. am_init clears g_birth_set, so an unborn
+// kernel that is stepped stays at dissonance 0 (no origin means no distance to measure from).
+func TestMetaJanusAMLMissingFileStaysUnborn(t *testing.T) {
+	amk := yent.NewAMK() // am_init: g_birth_set=0, birth_drift=0
+	if err := amk.ExecFile("../Janus/does_not_exist.aml"); err == nil {
+		t.Fatal("ExecFile on a missing metajanus.aml returned nil, want a read error (graceful, non-fatal)")
+	}
+	amk.Step(1.0) // stepping an unborn kernel must not birth it
+	s := amk.GetState()
+	if s.BirthDrift != 0 {
+		t.Fatalf("BirthDrift after failed load = %.4f, want 0 (unborn)", s.BirthDrift)
+	}
+	if s.PersonalDissonance != 0 {
+		t.Fatalf("PersonalDissonance after failed load = %v, want 0 (unborn: no origin, no distance)", s.PersonalDissonance)
+	}
+}

@@ -183,3 +183,26 @@ Branch `claude/metajanus`, merged-truth of the fixes (git-verified):
   `691b22f` A-1 gate prefix-load · `dd0af83` A-2 Reingold yahrzeit rules (cal-hebrew.el, 4 facets vs ICU) ·
   `7388e63` A-3 silent failure mode + Feb-29 · `f1cd4c2` A-4 canonization of the two-engine gap (docs) ·
   A-5 (this entry + header-doc for persistence under prefix semantics). Report: `Janus/AUDIT_FABLE_METAJANUS_2026-07-14.md`.
+
+### 2026-07-15 — Stage B, gate 1: BIRTH in prod from the single .aml source
+
+Stage B (birth in prod) opened. Gate 1 wired into the dock — `cmd/innerworld-dock/main.go`, the process
+that owns the libamk kernel via cgo (`aml.Init()` = `am_init` at :492; the first `am_step` fires later in
+the Flow run-loop). Right after `am_init`, BEFORE any step, the dock now BIRTHs from `Janus/metajanus.aml`,
+mirroring the existing `feeling.aml` load (`C.am_exec_file`). One `.aml` source, no hardcoded `BIRTH` in Go
+(grep on the dock: the word survives only in a comment and a log string, never as `am_exec("BIRTH …")` or a
+literal `498`). Path from env `YENT_METAJANUS_AML`, default `Janus/metajanus.aml` — born-by-default; env
+overrides for tests or a relocated runtime. A missing file leaves Yent honestly UNBORN (`birth_drift` 0,
+`personal_dissonance` 0) with a stderr warning, never a fatal.
+
+Scope grounding (recon, git-verified). The libamk kernel where MetaJanus lives runs ONLY in the dock's
+inner-world path: `NewAMK()` is called solely at `yent/go/yent.go:87` (a separate direct-Go path), and
+`cmd/moyent-body-gate/main.go:81` = `yent.NewDOEBody` is pure DoE and touches no `am_*`. So MetaJanus in
+prod = MetaJanus in Yent's inner field, where telemetry (`C.am_get_state()`) is the first reader — exactly
+gate 2 (the layer stays inert, generation untouched). The DoE-gen path not carrying MetaJanus is the
+canonized DoE↔AMK bridge (a later stage), not a gap.
+
+Tool-verified: `go build ./cmd/innerworld-dock` exit 0; `go test ./tests -run 'MetaJanus|AMK' -v` = 27/27
+PASS, 0 FAIL — including the new `TestMetaJanusAMLMissingFileStaysUnborn` (missing file → error + unborn)
+and the born `TestMetaJanusAMLDeclaresOrigin` (`BirthDrift` ~15.3388). Full Metal/dock smoke is Fable's
+stage-B acceptance on the Mac Mini.
