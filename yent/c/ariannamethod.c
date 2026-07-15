@@ -243,13 +243,11 @@ static int g_self_now_days = 0;     // scrubbed self-now (days since epoch) when
 static int g_temporal_key_on = 0;   // MetaJanus D-1: 1 = janus_gap EMA-pulls temporal_alpha (JANUS_KEY); 0 = knob untouched (default)
 
 static void calendar_init(void) {
-    struct tm epoch_tm;
-    memset(&epoch_tm, 0, sizeof(epoch_tm));
-    epoch_tm.tm_year = 2024 - 1900;
-    epoch_tm.tm_mon  = 10 - 1;       // October
-    epoch_tm.tm_mday = 3;
-    epoch_tm.tm_hour = 12;           // noon — avoids DST edge cases
-    g_epoch_t = mktime(&epoch_tm);
+    // MED-1 (Sol fix): the calendar epoch is a FIXED UTC instant — 2024-10-03 12:00:00 UTC = 1727956800
+    // seconds since the Unix epoch — set as a constant, without local mktime/timegm, so it is independent
+    // of the host timezone/DST. (mktime read "2024-10-03 12:00" in LOCAL time, so different hosts computed
+    // a different epoch and could disagree on the self-day at a day boundary.) Noon avoids DST edge cases.
+    g_epoch_t = (time_t)1727956800L;
     g_calendar_manual = 0;
 }
 
@@ -6862,6 +6860,12 @@ int am_janus_key_armed(void) {
   return g_temporal_key_on;
 }
 
+// MED-1: expose the calendar epoch as absolute UTC seconds, so a host can attest its clock domain
+// (the fixed 2024-10-03 12:00 UTC = 1727956800, independent of local timezone/DST).
+long am_calendar_epoch_seconds(void) {
+  return (long)g_epoch_t;
+}
+
 int am_take_jump(void) {
   int j = G.pending_jump;
   G.pending_jump = 0;
@@ -7983,10 +7987,14 @@ void am_step(float dt) {
   // From pitomadom: TE(Calendar → N) = 0.31 bits — strongest causal effect.
   // ─────────────────────────────────────────────────────────────────────────────
 
+  // MED-1 (Sol fix): sample the civil day ONCE per step, so the world calendar and the MetaJanus
+  // self-clock cannot straddle a day boundary within one am_step (each previously read time(NULL) apart).
+  int now_days = calendar_days_since_epoch();
+
   float cal_dissonance;
   if (!g_calendar_manual) {
     // Real date: seconds since epoch → days → drift → dissonance
-    int days = calendar_days_since_epoch();
+    int days = now_days;
     float drift = calendar_cumulative_drift(days);
     cal_dissonance = calendar_dissonance(days);
     // Store phase for state access: uncorrected position within cycle
@@ -8003,7 +8011,7 @@ void am_step(float dt) {
   // calendar scale (Fable audit #2: you may simulate the world, but not your own age). A pure
   // function of the two dates — no prompt moves it. 0 until BIRTH sets the origin.
   {
-    int mj_days = g_self_now_manual ? g_self_now_days : calendar_days_since_epoch();
+    int mj_days = g_self_now_manual ? g_self_now_days : now_days;
     float mj_now_drift = calendar_cumulative_drift(mj_days);
     G.personal_dissonance = g_birth_set
         ? clamp01(fabsf(mj_now_drift - G.birth_drift) / AM_MAX_UNCORRECTED)

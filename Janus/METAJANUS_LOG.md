@@ -408,3 +408,18 @@ retrodiction → armed=true, calendar signal <0.5, gap<0; disarm → armed=false
 NAMING (stop calling D "inert"/"no speech" in the stale comments/receipts) lands in LOW-1 with the other
 stale-claim fixes, so the final wording states the actual contract. All three HIGH blockers now closed;
 MEDIUM next.
+
+### fix 4 — MED-1: the calendar clock is pinned to UTC, off the host timezone
+
+Reproduced (tool, on this IDT+0300 host): `calendar_init` built the epoch "2024-10-03 12:00" with local
+`mktime`, giving `1727946000` — the UTC noon is `1727956800`, so the epoch (and the self-day near a
+boundary) shifted by the host's timezone/DST. `am_step` also read `time(NULL)` twice (world calendar +
+MetaJanus), so one step could straddle a day boundary. Fix: the epoch is a FIXED UTC constant
+`(time_t)1727956800` (no local `mktime`/`timegm` — `timegm` needs a feature-test macro and is not portable
+under the lean CFLAGS), and the civil day is sampled ONCE per step (`now_days`) and reused by both the world
+block and the MetaJanus self-clock. New accessor `am_calendar_epoch_seconds()` + Go `CalendarEpochSeconds()`
+attest the clock domain. The tests use the `SELF_NOW_DAYS` test-door, so they are unaffected; only the
+real-clock prod path becomes host-independent. Tool-verified: `TestMetaJanusEpochIsUTCFixed` (epoch ==
+1727956800 regardless of host TZ — red on the old mktime, green now); whole `./tests` + `./innerworld/...` +
+`./cmd/innerworld-dock` green; dock builds. Kernel change → canon-sync batch. MED-3 (birth attestation +
+fail-closed) next.
