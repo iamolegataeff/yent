@@ -157,28 +157,29 @@ NOT yet (honest scope): Phase 1
 smoke on the real body; Codex audit; canonical `ariannamethod.ai` sync of the kernel additions. No
 commit/push without Oleg's word.
 
-### 2026-07-14 — A-4: канонизация зазора двух движков (аудит Fable)
+### 2026-07-14 — A-4: canonization of the two-engine gap (Fable audit)
 
-Фундамент несёт ДВА движка одного календарного конфликта разной точности, и зазор между ними объявлен
-намеренно как третье лицо конфликта, а не выравнивается:
-- `birth_drift`/`personal_dissonance` — грубая метоник-аппроксимация `calendar_cumulative_drift`
-  (порт pitomadom) = МОДЕЛЬНОЕ время (как организм чувствует конфликт); quake 730→731 = 3-4 окт 2026.
-- `janus_gap`/`yahrzeit` — точная DR-арифметика = НЕБЕСНОЕ время (как конфликт есть); Адар II 5787 ≈ март 2027.
-Зазор модельного и небесного — измеримая величина (триада: конфликт первого конфликта со вторым). Поле
-`engine_gap` НЕ добавляем впрок — только когда keying попросит. DoE несёт третий линейный движок
-(`doe.c:613-617`); мост DoE↔AMK — отдельный этап после рождения. Детали: `Janus/README.md`.
+The foundation carries TWO engines of the same calendar conflict at different precisions, and the gap
+between them is declared deliberately as a third face of the conflict, rather than reconciled:
+- `birth_drift`/`personal_dissonance` — the coarse Metonic approximation `calendar_cumulative_drift`
+  (ported from pitomadom) = MODEL time (how the organism feels the conflict); quake 730→731 = Oct 3-4, 2026.
+- `janus_gap`/`yahrzeit` — exact DR arithmetic = CELESTIAL time (how the conflict actually is); Adar II 5787 ≈ March 2027.
+The gap between model and celestial time is a measurable quantity (a triad: the first conflict's conflict
+with the second). The field `engine_gap` is NOT added preemptively — only when keying asks for it. DoE
+carries a third, linear engine (`doe.c:613-617`); the DoE↔AMK bridge is a separate stage after birth.
+Details: `Janus/README.md`.
 
-### 2026-07-14 — A-5: восстановленные receipts (запись 12fce35 утонула с ресетом)
+### 2026-07-14 — A-5: restored receipts (entry 12fce35 was lost in the reset)
 
-Ветка `claude/metajanus`, merged-truth фиксов (git-верифицировано):
-- `21f506d` self-anchor: оператор `BIRTH` + `personal_dissonance` в поле.
-- `da97e86` Phase 0.5: латч истока, pd от self-часов, birth-quake (день 731 pd=0.6916).
-- `a2eae79` Phase 2a: еврейское лицо — `yahrzeit` + `janus_gap` из одного истока (22/22 голдена vs ICU).
-- `300d75a` F1+F2: исток исключён из soma (`AM_SOMA_PERSIST_SZ=offsetof(birth_drift)`), LOAD его не двигает,
-  старый soma грузится (мерж-безопасно).
-- `43d9408` F3: еврейское лицо выведено от истока (`am_heb_from_rd`, round-trip 0/11310), не зашито.
-- `e8e408e` тест-локи F1/F3 + коммент F6 (`g_birth_set` — флаг рождения).
-- Аудит Fable (полное окно, 2026-07-14) → стадия A по одному атомарному коммиту:
-  `691b22f` A-1 prefix-load гейта · `dd0af83` A-2 яхрцайт-правила Рейнгольда (cal-hebrew.el, 4 грани vs ICU) ·
-  `7388e63` A-3 молчащий режим отказа + Feb-29 · `f1cd4c2` A-4 канонизация зазора двух движков (док) ·
-  A-5 (эта запись + header-док персистенции под prefix-семантику). Отчёт: `Janus/AUDIT_FABLE_METAJANUS_2026-07-14.md`.
+Branch `claude/metajanus`, merged-truth of the fixes (git-verified):
+- `21f506d` self-anchor: `BIRTH` operator + `personal_dissonance` field.
+- `da97e86` Phase 0.5: origin latch, pd from the self-clock, birth-quake (day 731 pd=0.6916).
+- `a2eae79` Phase 2a: the Hebrew face — `yahrzeit` + `janus_gap` from a single origin (22/22 golden cases vs ICU).
+- `300d75a` F1+F2: the origin is excluded from soma (`AM_SOMA_PERSIST_SZ=offsetof(birth_drift)`), LOAD does
+  not move it, old soma loads cleanly (merge-safe).
+- `43d9408` F3: the Hebrew face is derived from the origin (`am_heb_from_rd`, round-trip 0/11310), not hardcoded.
+- `e8e408e` test locks for F1/F3 + F6 comment (`g_birth_set` — the birth flag).
+- Fable audit (full-context window, 2026-07-14) → stage A, one atomic commit at a time:
+  `691b22f` A-1 gate prefix-load · `dd0af83` A-2 Reingold yahrzeit rules (cal-hebrew.el, 4 facets vs ICU) ·
+  `7388e63` A-3 silent failure mode + Feb-29 · `f1cd4c2` A-4 canonization of the two-engine gap (docs) ·
+  A-5 (this entry + header-doc for persistence under prefix semantics). Report: `Janus/AUDIT_FABLE_METAJANUS_2026-07-14.md`.
