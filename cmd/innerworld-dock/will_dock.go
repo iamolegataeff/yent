@@ -17,7 +17,11 @@ import (
 
 // willScriptPath resolves Janus/the_will_design.aml: YENT_WILL_AML if set, else the canonical file
 // resolved relative to the executable, falling back to the CWD-relative path (mirrors
-// metajanusAMLPath so the default does not depend on the working directory).
+// metajanusAMLPath so the default does not depend on the working directory). The script must be
+// READ-ONLY over the field — it only reads FIELD_F symbols and its own persistent globals. The
+// dock reads C.am_get_state() for telemetry outside Body.mu, so a YENT_WILL_AML override that
+// MUTATES a field directive could race a concurrent dream's telemetry read; the canonical script
+// only reads, so there is no race by default.
 func willScriptPath() string {
 	if p := strings.TrimSpace(os.Getenv("YENT_WILL_AML")); p != "" {
 		return p
