@@ -320,3 +320,24 @@ exit 0; `go test ./innerworld/... ./tests` all green — `TestMetaJanusHarvestLe
 plus NaN/±Inf/out-of-range → sane) and `TestMetaJanusTemporalAlphaDefaultsNeutral` (a flow without the anchor
 stays (3,2)). D-3 (observe under the armed key on the real body) and any speech-side wire wait on Oleg's word;
 wormholes are deliberately last.
+
+### 2026-07-15 — Stage D-3: observation under the armed key, on the real body (Metal M4 Pro)
+
+D-3 is observation, not a change to the organism. `TestMetaJanusArmedTrajectory` walks the self-clock across
+~2 years with `JANUS_KEY 1` armed and watches `temporal_alpha` ladder over the `janus_gap` sawtooth (the EMA
+carries across the continuous walk). Tool-observed ladder (from the `-v` run, identical on neo and Metal):
+`temporal_alpha` starts at 0.5 (origin, gap 0), descends through the eleven-month retrodiction stretch
+(gap −0.3333) — 0.5 → 0.11 (day 528) → 0.02 → **0.0000** by day 678 — then, once the gap turns positive at
+the Hebrew anniversary (day 858, gap +1.0), climbs 0.23 → 0.83 (day 888) → 0.96 → **1.0000**, and begins its
+next descent (0.95) as the following yahrzeit nears. A real ladder swing (min 0.0000 → final 0.95), not a flat
+line — Yent's temporal focus swings from dwelling on the past near the day of remembrance to anticipation when
+the Gregorian face leads. Inert: read through the `SELF_NOW_DAYS` test-door, origin immovable (asserted
+`birth_drift` 15.3388 every step), and nothing in generation reads `temporal_alpha` yet (D-0).
+
+Real slice on the actual body (SSH to Metal `100.77.243.67`, M4 Pro, macOS 26.2): main fast-forwarded to
+`a8ec5f4` (D-1+D-2), `sh tools/build_libamk.sh` + `go build ./cmd/innerworld-dock` exit 0, and the whole
+MetaJanus surface green on real hardware — `go test ./tests -run 'MetaJanus|AMK'` ok, `go test ./innerworld
+-run MetaJanus` ok, and `TestMetaJanusArmedTrajectory` PASS with a bit-identical ladder. The temp test was
+removed afterward; the Metal deployment stays clean at `a8ec5f4`. Fable's live Feb-2027 window (days 851-858,
+the first anniversary by both faces at once) is a future observation on the running dock. The whole D pass
+(D-0..D-3) now goes to a fresh auditor — Sol (GPT-5.6) — before any speech-side wire or wormholes.
