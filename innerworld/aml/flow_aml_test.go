@@ -2,6 +2,8 @@ package aml
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -192,5 +194,59 @@ func TestFieldBridge(t *testing.T) {
 	_ = b.Destiny()
 	if s := b.Season(); s < 0 || s > 3 {
 		t.Errorf("season out of range: %d", s)
+	}
+}
+
+// TestPersistentVarBridge proves the will-tide mechanism: with persistent mode a global
+// assigned in one exec is restored into the next, so an accumulation survives across ticks;
+// without it, nothing is readable. This is exactly how will_gaze = will_gaze*decay + confluence
+// carries the tide from tick to tick, and how Go reads it back.
+func TestPersistentVarBridge(t *testing.T) {
+	Init()
+	b := New(nil)
+	// Persistent mode off (fresh field default): a global does not survive the exec.
+	if err := b.Exec("acc = 2"); err != nil {
+		t.Fatalf("Exec assignment: %v", err)
+	}
+	if got := b.GetVarFloat("acc"); got != 0 {
+		t.Errorf("no persistent mode -> nothing readable, acc=%.3f want 0", got)
+	}
+	// Persistent mode on: the global survives, and the next exec accumulates over it.
+	b.PersistentMode(true)
+	defer b.PersistentMode(false)
+	if err := b.Exec("acc = 2"); err != nil {
+		t.Fatalf("Exec assignment (persistent): %v", err)
+	}
+	if got := b.GetVarFloat("acc"); got != 2 {
+		t.Fatalf("persistent global not readable, acc=%.3f want 2", got)
+	}
+	if err := b.Exec("acc = acc + 3"); err != nil {
+		t.Fatalf("Exec accumulate: %v", err)
+	}
+	if got := b.GetVarFloat("acc"); got != 5 {
+		t.Errorf("persistent global did not accumulate across execs, acc=%.3f want 5", got)
+	}
+}
+
+// TestExecFileRunsScript proves the multi-line file path Go loads the will script through,
+// and that a missing file surfaces an error rather than passing silently.
+func TestExecFileRunsScript(t *testing.T) {
+	Init()
+	b := New(nil)
+	b.PersistentMode(true)
+	defer b.PersistentMode(false)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tiny.aml")
+	if err := os.WriteFile(path, []byte("# tiny AML file\nx = 6 * 7\n"), 0o644); err != nil {
+		t.Fatalf("write temp aml: %v", err)
+	}
+	if err := b.ExecFile(path); err != nil {
+		t.Fatalf("ExecFile: %v", err)
+	}
+	if got := b.GetVarFloat("x"); got != 42 {
+		t.Errorf("ExecFile did not run the script, x=%.3f want 42", got)
+	}
+	if err := b.ExecFile(filepath.Join(dir, "nope.aml")); err == nil {
+		t.Error("ExecFile on a missing file should error, not pass")
 	}
 }

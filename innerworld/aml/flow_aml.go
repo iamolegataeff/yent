@@ -98,6 +98,48 @@ func (b *Body) Destiny() float32 {
 	return float32(C.am_get_state().destiny)
 }
 
+// ── persistent-globals bridge — how an AML physics script carries state, and how Go reads it ──
+
+// ExecFile runs a multi-line AML script file (am_exec_file) — the file form of Exec, used to
+// load a physics script such as Janus/the_will_design.aml on each will tick. Non-zero rc
+// (parse error, or a file that failed to load) is surfaced as an error, matching Exec.
+func (b *Body) ExecFile(path string) error {
+	cs := C.CString(path)
+	defer C.free(unsafe.Pointer(cs))
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if C.am_exec_file(cs) != 0 {
+		return fmt.Errorf("am_exec_file failed: %q", path)
+	}
+	return nil
+}
+
+// PersistentMode enables (or disables) AML persistent globals, so a variable assigned in one
+// Exec/ExecFile survives into the next — the mechanism the will tide rides: will_gaze
+// accumulates and decays across ticks (will_gaze = will_gaze*decay + confluence). Disabling
+// frees the persistent globals. Init (am_init) clears them and turns the mode off, so a fresh
+// field always starts non-persistent — one enable at process start arms the tide.
+func (b *Body) PersistentMode(enable bool) {
+	v := C.int(0)
+	if enable {
+		v = 1
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	C.am_persistent_mode(v)
+}
+
+// GetVarFloat reads a persistent AML global scalar by name (am_get_var_float) — how Go reads
+// back what an AML physics script computed: the will_gaze tide and the pull_* shares. Returns
+// 0 when the name is unset or persistent mode is off — the honest "no reading yet", not an error.
+func (b *Body) GetVarFloat(name string) float32 {
+	cs := C.CString(name)
+	defer C.free(unsafe.Pointer(cs))
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return float32(C.am_get_var_float(cs))
+}
+
 // ── innerworld.Flow — the consolidation organs ──────────────────────────────────
 
 // Ingest folds a thought into the field's token co-occurrence graph: the text is
