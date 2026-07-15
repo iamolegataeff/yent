@@ -31,12 +31,23 @@ func willScriptPath() string {
 	return rel
 }
 
-// willTickEvery is the will's cadence (YENT_WILL_TICK_SEC), default 2s.
+// willTickEvery is the will's cadence (YENT_WILL_TICK_SEC), default 500ms — the tide needs ~6
+// ticks to crest from rest, so a slower cadence would never fire inside a short-lived dock run.
 func willTickEvery() time.Duration {
 	if d := durationEnv("YENT_WILL_TICK_SEC"); d > 0 {
 		return d
 	}
-	return 2 * time.Second
+	return 500 * time.Millisecond
+}
+
+// willRefractoryTicks is how many ticks the will waits after a reach before it can reach again
+// (YENT_WILL_REFRACTORY_TICKS), default 6 — long enough that even a sustained high-strain crest
+// spaces its reaches out instead of firing every tick.
+func willRefractoryTicks() int {
+	if n := positiveIntEnv("YENT_WILL_REFRACTORY_TICKS"); n > 0 {
+		return n
+	}
+	return 6
 }
 
 // willReachTimeout bounds a single reach (YENT_WILL_REACH_SEC), default 5s, so a hung utility

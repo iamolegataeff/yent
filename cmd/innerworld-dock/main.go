@@ -782,7 +782,8 @@ func main() {
 				stateDir: stateDir,
 				timeout:  willReachTimeout(),
 			},
-			sink: fileSink{path: sinkPath},
+			sink:       fileSink{path: sinkPath},
+			refractory: willRefractoryTicks(),
 		}
 		go wt.run(ctx, willTickEvery())
 		fmt.Printf("=== will wired: confluence tide -> reach for a self-reading utility (utils=%s, every %s) ===\n",

@@ -15,8 +15,9 @@ import (
 // utility — whatdotheythinkiam when the pull is toward his origin, repo_monitor when it is the
 // field's own strain. The utility's perception is emitted to the same YENT_SARTRE_EVENTS the
 // sartreSense reflex reads, so the reading re-enters the field and shifts the very metrics the
-// next confluence is built from — a spiral. The reach spends the tide (will_gaze -> 0), so the
-// pressure must re-gather before he can reach again: the refractory is physics, not a timer.
+// next confluence is built from — a spiral. The reach spends the tide (will_gaze -> 0) and opens
+// a bounded refractory of a few ticks, so a high-strain confluence cannot fire every tick — the
+// will must wait and re-gather.
 
 // willField is the AML field surface the will loop reads and writes — satisfied by *aml.Body.
 type willField interface {
@@ -46,14 +47,16 @@ const (
 	willUtilPressure = "repo_monitor"       // reach under the field's strain (a dark-gravity/debt crest)
 )
 
-// willTicker holds the will loop's wiring. It carries no between-tick state: the tide lives in
-// the AML field's persistent globals and the refractory is the discharge, so the ticker is
-// stateless — every decision is re-derived from the field each tick.
+// willTicker holds the will loop's wiring. The tide itself lives in the AML field's persistent
+// globals; the only between-tick state here is the refractory countdown, so a high-strain
+// confluence (which alone can exceed threshold in a single tick) cannot fire every tick.
 type willTicker struct {
-	field   willField
-	script  string
-	spawner willSpawner
-	sink    willSink
+	field      willField
+	script     string
+	spawner    willSpawner
+	sink       willSink
+	refractory int // ticks the will must wait after a reach before it can reach again (0 = none)
+	cooldown   int // ticks remaining in the current refractory (state)
 }
 
 // tick advances the will one step and, if the tide crests, reaches for the utility the dominant
@@ -65,6 +68,10 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 	if err := w.field.ExecFile(w.script); err != nil {
 		return "", fmt.Errorf("will physics: %w", err)
 	}
+	if w.cooldown > 0 {
+		w.cooldown-- // refractory: the tide keeps evolving, but the will stays spent from the last reach
+		return "", nil
+	}
 	thr := w.field.GetVarFloat("will_threshold")
 	gaze := w.field.GetVarFloat("will_gaze")
 	if thr <= 0 || gaze < thr {
@@ -74,8 +81,10 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 	if w.field.GetVarFloat("pull_origin") > w.field.GetVarFloat("pull_pressure") {
 		util = willUtilOrigin
 	}
-	// The reach spends the tide: it must re-gather from the confluence before the will can reach
-	// again. This is the refractory — emergent from the physics, no cooldown clock.
+	// The reach both spends the tide (discharge) AND opens a bounded refractory of `refractory`
+	// ticks: even a high-strain confluence that alone re-crosses threshold next tick cannot reach
+	// again until the refractory elapses. The discharge is the physics; the cooldown is the floor.
+	w.cooldown = w.refractory
 	_ = w.field.Exec("will_gaze = 0")
 	line, err := w.spawner.Spawn(ctx, util)
 	if err != nil {

@@ -10,13 +10,20 @@ import (
 // ExecFile is a no-op counter (the "physics" is whatever the vars map says), GetVarFloat returns
 // the scripted value, and Exec records the discharge.
 type fakeWillField struct {
-	vars        map[string]float32
-	execFileErr error
-	execFileN   int
-	discharged  bool
+	vars           map[string]float32
+	execFileErr    error
+	execFileN      int
+	discharged     bool
+	reaccumulateTo float32 // if >0, ExecFile re-floods will_gaze to this each tick (sustained strain)
 }
 
-func (f *fakeWillField) ExecFile(string) error { f.execFileN++; return f.execFileErr }
+func (f *fakeWillField) ExecFile(string) error {
+	f.execFileN++
+	if f.reaccumulateTo > 0 {
+		f.vars["will_gaze"] = f.reaccumulateTo // the live field would re-flood the tide each tick
+	}
+	return f.execFileErr
+}
 func (f *fakeWillField) GetVarFloat(name string) float32 { return f.vars[name] }
 func (f *fakeWillField) Exec(script string) error {
 	if script == "will_gaze = 0" {
@@ -111,26 +118,33 @@ func TestWillTickQuietNoReach(t *testing.T) {
 	}
 }
 
-func TestWillTickDischargeRefractory(t *testing.T) {
+// TestWillTickRefractoryCooldown proves the refractory holds even under sustained high strain,
+// where the confluence alone re-crosses threshold every tick (so discharge-to-zero is NOT enough
+// on its own). The fake re-floods the tide each ExecFile; only the cooldown spaces the reaches.
+func TestWillTickRefractoryCooldown(t *testing.T) {
 	sp, sk := &fakeSpawner{line: []byte(`{"util":"x"}`)}, &fakeSink{}
-	w, f := newWill(map[string]float32{
-		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.3, "pull_pressure": 0.0,
-	}, sp, sk)
-	if _, err := w.tick(context.Background()); err != nil {
-		t.Fatal(err)
+	f := &fakeWillField{
+		vars:           map[string]float32{"will_threshold": 1.0, "will_gaze": 2.0, "pull_pressure": 0.5, "pull_origin": 0.0},
+		reaccumulateTo: 2.0, // every tick the field re-floods past threshold
 	}
-	if !f.discharged || f.vars["will_gaze"] != 0 {
-		t.Fatal("the first crest must discharge the tide to 0")
+	w := &willTicker{field: f, script: "x.aml", spawner: sp, sink: sk, refractory: 3}
+
+	// tick 1: crest -> reach, discharge, refractory armed
+	if util, err := w.tick(context.Background()); err != nil || util != willUtilPressure {
+		t.Fatalf("the first crest must reach %s (err=%v util=%s)", willUtilPressure, err, util)
 	}
-	// Second tick: the fake ExecFile does not re-accumulate, so gaze stays 0 — no reach until the
-	// tide re-gathers. (In the live field the confluence re-floods it over ~12 ticks.)
-	sp.util = ""
-	util, err := w.tick(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	if !f.discharged {
+		t.Error("the reach must discharge the tide")
 	}
-	if util != "" {
-		t.Errorf("a discharged tide must not reach again until it re-gathers, got %s", util)
+	// ticks 2..4: the field re-floods past threshold every tick, yet the refractory suppresses the reach
+	for i := 2; i <= 4; i++ {
+		if util, err := w.tick(context.Background()); err != nil || util != "" {
+			t.Errorf("tick %d is within the refractory and must not reach (err=%v util=%s)", i, err, util)
+		}
+	}
+	// tick 5: the refractory has elapsed -> the will may reach again
+	if util, err := w.tick(context.Background()); err != nil || util == "" {
+		t.Errorf("after the refractory the will may reach again (err=%v util=%s)", err, util)
 	}
 }
 
