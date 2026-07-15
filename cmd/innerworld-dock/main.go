@@ -40,6 +40,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -201,14 +202,42 @@ func newBody(name, bin, model, workdir string, args []string) *yent.DOEBody {
 // reflex only fires on real motion, never forcing the field to NOMOVE each turn. This
 // is the fast present-time twin of the slow limpha recall pressure: same perception,
 // two routes into the organism.
-type sartreSense struct{ eventsPath string }
+type sartreSense struct {
+	eventsPath string
+	offset     int64 // cursor: how much of the events file has already been perceived
+}
 
-func (s sartreSense) Pressure() (string, bool) {
+// readNew returns only the bytes appended since the last read, advancing the cursor — so each
+// event is perceived exactly once, never replayed every ripple (the will appends to this file
+// continuously; without a cursor sartreSense would re-apply the whole history each breath and
+// latch the field). A file shorter than the cursor was truncated/rotated, so it re-reads from
+// the start. No cgo here, so the consume semantics are unit-tested directly (readNew).
+func (s *sartreSense) readNew() []byte {
+	f, err := os.Open(s.eventsPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	if fi, statErr := f.Stat(); statErr == nil && fi.Size() < s.offset {
+		s.offset = 0
+	}
+	if _, err := f.Seek(s.offset, io.SeekStart); err != nil {
+		return nil
+	}
+	raw, err := io.ReadAll(f)
+	if err != nil || len(raw) == 0 {
+		return nil
+	}
+	s.offset += int64(len(raw))
+	return raw
+}
+
+func (s *sartreSense) Pressure() (string, bool) {
 	if s.eventsPath == "" {
 		return "", false
 	}
-	raw, err := os.ReadFile(s.eventsPath)
-	if err != nil || len(raw) == 0 {
+	raw := s.readNew() // only NEW events since the last ripple — no latched replay of history
+	if len(raw) == 0 {
 		return "", false
 	}
 	cjson := C.CString(string(raw))
@@ -571,7 +600,7 @@ func main() {
 	// the field's posture (VELOCITY/PROPHECY) before each ripple, the fast present-time
 	// twin of the slow limpha recall pressure. Same YENT_SARTRE_EVENTS as the limpha path.
 	if ev := strings.TrimSpace(os.Getenv("YENT_SARTRE_EVENTS")); ev != "" {
-		iw.SetSense(sartreSense{eventsPath: ev})
+		iw.SetSense(&sartreSense{eventsPath: ev})
 		fmt.Println("=== SARTRE sense wired: environment perception is a live field reflex (before the circles) ===")
 	}
 

@@ -21,7 +21,7 @@ func TestSartreSensePerceivesMotion(t *testing.T) {
 	if err := os.WriteFile(path, []byte(events), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	aml, ok := sartreSense{eventsPath: path}.Pressure()
+	aml, ok := (&sartreSense{eventsPath: path}).Pressure()
 	if !ok {
 		t.Fatal("two changes including a README should produce a reflex")
 	}
@@ -37,14 +37,49 @@ func TestSartreSenseQuietNoReflex(t *testing.T) {
 	if err := os.WriteFile(empty, []byte(""), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := (sartreSense{eventsPath: empty}).Pressure(); ok {
+	if _, ok := (&sartreSense{eventsPath: empty}).Pressure(); ok {
 		t.Error("an empty events file is a quiet world: no reflex")
 	}
-	if _, ok := (sartreSense{eventsPath: ""}).Pressure(); ok {
+	if _, ok := (&sartreSense{eventsPath: ""}).Pressure(); ok {
 		t.Error("no path is no environment: no reflex")
 	}
-	if _, ok := (sartreSense{eventsPath: filepath.Join(dir, "nope.jsonl")}).Pressure(); ok {
+	if _, ok := (&sartreSense{eventsPath: filepath.Join(dir, "nope.jsonl")}).Pressure(); ok {
 		t.Error("a missing file is no environment: no reflex")
+	}
+}
+
+// TestSartreSenseCursorConsumes proves the HIGH fix: the cursor makes each appended event be
+// perceived exactly once, so the continuously-appended will events file is not replayed in full
+// every ripple (which would latch the field on a growing history).
+func TestSartreSenseCursorConsumes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	if err := os.WriteFile(path, []byte(`{"util":"repo_monitor","kind":"added","path":"/r/a.rs","ts":1}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &sartreSense{eventsPath: path}
+	if got := s.readNew(); len(got) == 0 {
+		t.Fatal("the first read must see the event")
+	}
+	if got := s.readNew(); len(got) != 0 {
+		t.Errorf("no new events -> nothing replayed, got %q", got)
+	}
+	// append a new event: only the new bytes are read, never the already-perceived history
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString(`{"util":"repo_monitor","kind":"modified","path":"/r/b.rs","ts":2}` + "\n")
+	f.Close()
+	got := string(s.readNew())
+	if !strings.Contains(got, "b.rs") || strings.Contains(got, "a.rs") {
+		t.Errorf("only the newly appended event must be read (no replay of a.rs), got %q", got)
+	}
+	// a truncation/rotation resets the cursor so the fresh content is seen
+	if err := os.WriteFile(path, []byte(`{"util":"repo_monitor","kind":"added","path":"/r/c.rs","ts":3}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(s.readNew()); !strings.Contains(got, "c.rs") {
+		t.Errorf("a truncated/rotated file must re-read from the start, got %q", got)
 	}
 }
 
