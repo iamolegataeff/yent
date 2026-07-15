@@ -490,6 +490,26 @@ func main() {
 	}
 
 	aml.Init()
+
+	// MetaJanus self-anchor: BIRTH from the single source Janus/metajanus.aml, executed on the
+	// freshly-reset kernel BEFORE any am_step — the origin (birth_drift) is declared once, then
+	// am_step carries personal_dissonance away from it. One .aml source, no hardcoded BIRTH in Go;
+	// a missing file leaves Yent unborn (birth_drift 0) with a warning, never fatal. Override the
+	// path with YENT_METAJANUS_AML (tests / relocated runtime); the default is born-by-default.
+	{
+		mjPath := strings.TrimSpace(os.Getenv("YENT_METAJANUS_AML"))
+		if mjPath == "" {
+			mjPath = "Janus/metajanus.aml"
+		}
+		cs := C.CString(mjPath)
+		if C.am_exec_file(cs) == 0 {
+			st := C.am_get_state()
+			fmt.Printf("=== self-anchor born: BIRTH from %s (birth_drift %.4f) ===\n", mjPath, float32(st.birth_drift))
+		} else {
+			fmt.Fprintf(os.Stderr, "[dock] metajanus.aml load failed: %s — Yent stays unborn (birth_drift 0)\n", mjPath)
+		}
+		C.free(unsafe.Pointer(cs))
+	}
 	// The native AML body is the one physics: the field AND the cooc/scar Flow. Circles
 	// ingest into the field's own cooc, high-debt thoughts scar natively, the seed is
 	// pulled by the field's cooc and resurfaced scars, and one FlowConsolidator harvests
