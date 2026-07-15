@@ -6866,6 +6866,16 @@ long am_calendar_epoch_seconds(void) {
   return (long)g_epoch_t;
 }
 
+// MED-3: attest the origin — whether BIRTH has fixed it (g_birth_set is the born-flag, not birth_drift,
+// which is not injective — BIRTH 0 is a legit origin with drift 0) and the exact origin day. So a running
+// host can prove "born at day N", and the dock can require a real BIRTH rather than trusting a mere load.
+int am_birth_set(void) {
+  return g_birth_set;
+}
+long am_birth_epoch_days(void) {
+  return g_birth_days;
+}
+
 int am_take_jump(void) {
   int j = G.pending_jump;
   G.pending_jump = 0;

@@ -423,3 +423,19 @@ real-clock prod path becomes host-independent. Tool-verified: `TestMetaJanusEpoc
 1727956800 regardless of host TZ — red on the old mktime, green now); whole `./tests` + `./innerworld/...` +
 `./cmd/innerworld-dock` green; dock builds. Kernel change → canon-sync batch. MED-3 (birth attestation +
 fail-closed) next.
+
+### fix 5 — MED-3: honest birth attestation + fail-closed identity
+
+Sol's MED-3: the dock printed `self-anchor born` whenever `am_exec_file == 0`, but an empty / comment-only /
+unknown-command file loads with exit 0 without executing `BIRTH` — a false birth. And telemetry exposed only
+`birth_drift` (not injective — `BIRTH 0` is a legit origin with drift 0), so a running host could not attest
+"born at day 498". Reproduced: a no-BIRTH script leaves `BirthSet=false` even though exec succeeds. Fix:
+new kernel accessors `am_birth_set()` (the born-flag) + `am_birth_epoch_days()` (the exact origin), surfaced
+in Go `amk.AMState.BirthSet`/`BirthEpochDays`. The dock now treats **born = am_birth_set**, not exec-success,
+and prints the origin day in the born line. For Yent's production identity it fails CLOSED on a missing/invalid
+origin (`os.Exit(1)`); `ALLOW_UNBORN=1` lets a generic AML host run unborn. The default path is resolved by
+`metajanusAMLPath()` relative to the executable (then CWD), not the process working directory alone.
+
+Tool-verified: `TestMetaJanusBirthAttestation` (fresh → unborn; a comment-only script → `BirthSet=false`, the
+false birth caught; `BIRTH 498` → `BirthSet=true`, `BirthEpochDays=498`); whole `./tests` + `./innerworld/...`
++ `./cmd/innerworld-dock` green; dock builds. Kernel change → canon-sync batch. MED-2 (transactional soma) next.

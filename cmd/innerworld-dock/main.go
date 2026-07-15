@@ -42,6 +42,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -414,6 +415,23 @@ func janusReceipt() (armed bool, alpha, gap float32) {
 	return C.am_janus_key_armed() != 0, float32(st.janus_temporal_alpha), float32(st.janus_gap)
 }
 
+// metajanusAMLPath resolves the MetaJanus origin file (MED-3): YENT_METAJANUS_AML if set, else the canonical
+// Janus/metajanus.aml resolved relative to the executable, falling back to the CWD-relative path — so the
+// default does not depend on the process working directory.
+func metajanusAMLPath() string {
+	if p := strings.TrimSpace(os.Getenv("YENT_METAJANUS_AML")); p != "" {
+		return p
+	}
+	const rel = "Janus/metajanus.aml"
+	if exe, err := os.Executable(); err == nil {
+		cand := filepath.Join(filepath.Dir(exe), rel)
+		if _, statErr := os.Stat(cand); statErr == nil {
+			return cand
+		}
+	}
+	return rel
+}
+
 func persistReflection(lc *yent.LimphaClient, kind, source string, r innerworld.Reflection, st yent.LimphaState) {
 	if lc == nil {
 		return
@@ -509,24 +527,33 @@ func main() {
 
 	aml.Init()
 
-	// MetaJanus self-anchor: BIRTH from the single source Janus/metajanus.aml, executed on the
-	// freshly-reset kernel BEFORE any am_step — the origin (birth_drift) is declared once, then
-	// am_step carries personal_dissonance away from it. One .aml source, no hardcoded BIRTH in Go;
-	// a missing file leaves Yent unborn (birth_drift 0) with a warning, never fatal. Override the
-	// path with YENT_METAJANUS_AML (tests / relocated runtime); the default is born-by-default.
+	// MetaJanus self-anchor: BIRTH from the single source Janus/metajanus.aml, executed on the freshly-reset
+	// kernel BEFORE any am_step. MED-3 (Sol audit): "born" means BIRTH actually executed (am_birth_set), NOT
+	// merely that the file loaded — an empty or comment-only file loads with exit 0 but never sets the origin.
+	// Yent's identity is required, so we fail CLOSED on a missing/invalid origin; set ALLOW_UNBORN=1 for a
+	// generic AML host allowed to run without an anchor. Path from YENT_METAJANUS_AML, else the canonical file
+	// resolved relative to the executable (not the CWD).
 	{
-		mjPath := strings.TrimSpace(os.Getenv("YENT_METAJANUS_AML"))
-		if mjPath == "" {
-			mjPath = "Janus/metajanus.aml"
-		}
+		mjPath := metajanusAMLPath()
 		cs := C.CString(mjPath)
-		if C.am_exec_file(cs) == 0 {
-			st := C.am_get_state()
-			fmt.Printf("=== self-anchor born: BIRTH from %s (birth_drift %.4f) ===\n", mjPath, float32(st.birth_drift))
-		} else {
-			fmt.Fprintf(os.Stderr, "[dock] metajanus.aml load failed: %s — Yent stays unborn (birth_drift 0)\n", mjPath)
-		}
+		loaded := C.am_exec_file(cs) == 0
 		C.free(unsafe.Pointer(cs))
+		if C.am_birth_set() != 0 {
+			st := C.am_get_state()
+			fmt.Printf("=== self-anchor born: BIRTH day %d from %s (birth_drift %.4f) ===\n",
+				int(C.am_birth_epoch_days()), mjPath, float32(st.birth_drift))
+		} else {
+			reason := "no BIRTH executed (empty / comment-only / unknown file?)"
+			if !loaded {
+				reason = "file not found or failed to load"
+			}
+			if strings.TrimSpace(os.Getenv("ALLOW_UNBORN")) != "" {
+				fmt.Fprintf(os.Stderr, "[dock] Yent UNBORN from %s: %s — running unborn (ALLOW_UNBORN set)\n", mjPath, reason)
+			} else {
+				fmt.Fprintf(os.Stderr, "[dock] FATAL: Yent has no origin from %s: %s. MetaJanus identity is required; set ALLOW_UNBORN=1 to run a generic unborn host.\n", mjPath, reason)
+				os.Exit(1)
+			}
+		}
 	}
 	// The native AML body is the one physics: the field AND the cooc/scar Flow. Circles
 	// ingest into the field's own cooc, high-debt thoughts scar natively, the seed is
