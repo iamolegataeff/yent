@@ -372,6 +372,12 @@ func ingestSartreFromEnv(lc *yent.LimphaClient, st yent.LimphaState) int {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// A fresh will-events path does not exist yet — the will's fileSink creates it on the
+			// first reach (O_CREATE). A missing file is "no events yet", not a fatal misconfiguration.
+			fmt.Printf("=== SARTRE wired: events file %s not present yet (the will creates it on first reach) ===\n", path)
+			return 0
+		}
 		fmt.Fprintf(os.Stderr, "[dock] SARTRE events open %s: %v\n", path, err)
 		os.Exit(1)
 	}
@@ -773,12 +779,16 @@ func main() {
 			stateDir = os.TempDir()
 		}
 		sinkPath := strings.TrimSpace(os.Getenv("YENT_SARTRE_EVENTS"))
+		root := strings.TrimSpace(os.Getenv("YENT_WILL_ROOT"))
+		if root == "" {
+			root = "." // repo_monitor scans nothing without a --path, so default to the working dir
+		}
 		wt := &willTicker{
 			field:  flowBody,
 			script: willScriptPath(),
 			spawner: osSpawner{
 				dir:      utilsDir,
-				root:     strings.TrimSpace(os.Getenv("YENT_WILL_ROOT")),
+				root:     root,
 				stateDir: stateDir,
 				timeout:  willReachTimeout(),
 			},

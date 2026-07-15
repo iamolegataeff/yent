@@ -109,8 +109,10 @@ func (w *capWriter) Write(p []byte) (int, error) {
 
 // willUtilArgs builds each utility's one-shot argv from its own CLI (they differ): both take
 // --once and keep a --state file so a reach diffs against the last; repo_monitor scans --path
-// <root>, whatdotheythinkiam reads --readme/--research under <root>. With no root the utility
-// falls back to its own default paths.
+// <root>, whatdotheythinkiam reads --readme/--research under <root>. The dock always supplies a
+// root (default: its working directory), because repo_monitor scans NOTHING without --path — so
+// a pressure crest must never resolve to an empty scan. An empty root here (tests) drops the path
+// flags, which is repo_monitor's silent-no-op case, exactly what the wiring's default prevents.
 func willUtilArgs(util, root, stateDir string) []string {
 	args := []string{"--once", "--state", filepath.Join(stateDir, util+".state")}
 	switch util {
