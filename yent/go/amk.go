@@ -37,6 +37,8 @@ type AMState struct {
 	CalendarDrift float32
 
 	// MetaJanus — the self-location anchor
+	BirthSet           bool    // MED-3: true once BIRTH fixed the origin (the born-flag; birth_drift is not injective)
+	BirthEpochDays     int     // MED-3: the exact origin day set by BIRTH
 	BirthDrift         float32
 	PersonalDissonance float32
 	JanusGap           float32
@@ -159,6 +161,8 @@ func (a *AMK) GetState() AMState {
 		Destiny:           float32(s.destiny),
 		Wormhole:          float32(s.wormhole),
 		CalendarDrift:     float32(s.calendar_drift),
+		BirthSet:           C.am_birth_set() != 0,
+		BirthEpochDays:     int(C.am_birth_epoch_days()),
 		BirthDrift:         float32(s.birth_drift),
 		PersonalDissonance: float32(s.personal_dissonance),
 		JanusGap:           float32(s.janus_gap),
