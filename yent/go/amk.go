@@ -41,6 +41,7 @@ type AMState struct {
 	PersonalDissonance float32
 	JanusGap           float32
 	Yahrzeit           float32
+	TemporalAlpha      float32 // D-1: EMA-pulled by janus_gap when JANUS_KEY is armed (else inert)
 
 	// Attention
 	AttendFocus  float32
@@ -147,6 +148,7 @@ func (a *AMK) GetState() AMState {
 		PersonalDissonance: float32(s.personal_dissonance),
 		JanusGap:           float32(s.janus_gap),
 		Yahrzeit:           float32(s.yahrzeit),
+		TemporalAlpha:      float32(s.temporal_alpha),
 		AttendFocus:       float32(s.attend_focus),
 		AttendSpread:      float32(s.attend_spread),
 		TunnelThreshold:   float32(s.tunnel_threshold),

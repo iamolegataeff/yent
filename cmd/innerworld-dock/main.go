@@ -620,8 +620,8 @@ func main() {
 	// MetaJanus self-anchor, telemetry-only: the origin (birth_drift), its growing distance
 	// (personal_dissonance), and the two-calendar faces (janus_gap, yahrzeit). Read here for
 	// observation; nothing routes, escalates, or retrieves on them — the layer stays inert.
-	fmt.Printf("  self     : birth_drift=%.4f personal_dissonance=%.4f | janus_gap=%.4f yahrzeit=%.4f\n",
-		float32(st.birth_drift), float32(st.personal_dissonance), float32(st.janus_gap), float32(st.yahrzeit))
+	fmt.Printf("  self     : birth_drift=%.4f personal_dissonance=%.4f | janus_gap=%.4f yahrzeit=%.4f | temporal_alpha=%.4f\n",
+		float32(st.birth_drift), float32(st.personal_dissonance), float32(st.janus_gap), float32(st.yahrzeit), float32(st.temporal_alpha))
 	printReflectionMemoryPressure("  memory   ", r.MemoryPressure)
 	fmt.Printf("  feeling  : valence=%.3f arousal=%.3f | warmth=%.3f pain=%.3f flow=%.3f tension=%.3f | scars(sea)=%d\n",
 		float32(st.valence), float32(st.arousal), float32(st.warmth), float32(st.pain),
