@@ -439,3 +439,17 @@ origin (`os.Exit(1)`); `ALLOW_UNBORN=1` lets a generic AML host run unborn. The 
 Tool-verified: `TestMetaJanusBirthAttestation` (fresh → unborn; a comment-only script → `BirthSet=false`, the
 false birth caught; `BIRTH 498` → `BirthSet=true`, `BirthEpochDays=498`); whole `./tests` + `./innerworld/...`
 + `./cmd/innerworld-dock` green; dock builds. Kernel change → canon-sync batch. MED-2 (transactional soma) next.
+
+### fix 6 — MED-2: the soma load is transactional (a truncated file no longer wipes the live field)
+
+Sol's MED-2: `am_field_load` did `memset(&G, 0, PERSIST_SZ)` and then `fread(&G, state_sz, …)` — it zeroed
+the live field weather BEFORE it knew the payload was complete, so a truncated soma destroyed the live state
+and returned `-5`, an error the AML `LOAD` then swallowed. Fix: read the payload into a temp zeroed buffer,
+require a full read, and only then commit to `G` atomically with `memcpy` — the load is all-or-nothing, the
+live field is untouched on a truncated/short read, and the prefix-load (A-1) and the MetaJanus identity tail
+are both preserved. Tool-verified: `TestMetaJanusTruncatedSomaKeepsLiveField` (a soma whose header claims the
+full `state_sz` but whose payload is cut in half now refuses without changing the live `prophecy`);
+`TestMetaJanusSomaPrefixLoad` still green (no regression); whole `./tests` + `./innerworld/...` +
+`./cmd/innerworld-dock` green. There is still no prod caller of `am_field_load` (M-3), so this is a
+foundational fix that becomes live only when soma loading is wired. Kernel change → canon-sync batch. MED-4 +
+LOW (DoE classification + stale-claim wording) close the pass.

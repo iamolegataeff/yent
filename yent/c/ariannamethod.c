@@ -992,13 +992,19 @@ int am_field_load(const char* path) {
   if (fread(&timestamp, 8, 1, f) != 1) {
     fclose(f); return -5;
   }
-  memset(&G, 0, AM_SOMA_PERSIST_SZ);   /* zero only field weather; the MetaJanus identity tail (the origin) is left intact, so LOAD never drags it */
-  if (fread(&G, state_sz, 1, f) != 1) {
-    fprintf(stderr, "[am_field_load] '%s': short read of state\n", path);
+  /* MED-2 (Sol fix): read the payload into a temp buffer and validate it is COMPLETE before touching the
+   * live field. A truncated / short read must not zero the live weather — the load is transactional: commit
+   * to G only after a full read succeeds. The buffer is zeroed first, so an unread trailing prefix is
+   * honestly zero (prefix-load, A-1); the MetaJanus identity tail beyond PERSIST_SZ is never touched. */
+  unsigned char buf[AM_SOMA_PERSIST_SZ];
+  memset(buf, 0, AM_SOMA_PERSIST_SZ);
+  if (fread(buf, state_sz, 1, f) != 1) {
+    fprintf(stderr, "[am_field_load] '%s': short read of state (truncated soma) — refusing, live field intact\n", path);
     fclose(f);
     return -5;
   }
   fclose(f);
+  memcpy(&G, buf, AM_SOMA_PERSIST_SZ);   /* atomic commit of the validated field-weather prefix */
   return 0;
 }
 
