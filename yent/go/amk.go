@@ -143,6 +143,12 @@ func (a *AMK) JanusKeyArmed() bool {
 	return C.am_janus_key_armed() != 0
 }
 
+// CalendarEpochSeconds returns the kernel calendar epoch as absolute UTC seconds (MED-1): the fixed
+// 2024-10-03 12:00 UTC = 1727956800, independent of the host timezone/DST. Set by am_init.
+func CalendarEpochSeconds() int64 {
+	return int64(C.am_calendar_epoch_seconds())
+}
+
 func (a *AMK) GetState() AMState {
 	a.mu.Lock()
 	defer a.mu.Unlock()

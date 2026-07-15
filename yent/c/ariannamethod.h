@@ -405,6 +405,7 @@ const char* am_get_error(void);
 // State access
 AM_State* am_get_state(void);
 int am_janus_key_armed(void);   // MetaJanus HIGH-1: 1 if JANUS_KEY is armed (D-2 gates on this, not raw temporal_alpha)
+long am_calendar_epoch_seconds(void); // MED-1: calendar epoch as absolute UTC seconds (fixed 1727956800, host-TZ-independent)
 int am_take_jump(void);
 
 // Copy state to float array (32 floats)
