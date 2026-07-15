@@ -453,3 +453,27 @@ full `state_sz` but whose payload is cut in half now refuses without changing th
 `./cmd/innerworld-dock` green. There is still no prod caller of `am_field_load` (M-3), so this is a
 foundational fix that becomes live only when soma loading is wired. Kernel change → canon-sync batch. MED-4 +
 LOW (DoE classification + stale-claim wording) close the pass.
+
+### fix 7 — MED-4 + LOW-1: correct the DoE classification and the stale "no readers / inert" wording
+
+MED-4 reproduced (I opened `DoE/doe.c` myself this time — the earlier "third linear engine" line was recorded
+on Fable's word without checking): `calendar_dissonance` at `doe.c:613-623` computes `years*11.25` and then
+SUBTRACTS the 19-year / 7-leap / 30-day corrections using the same `g_metonic_leaps` structure as AMK. So DoE
+is a DUPLICATE of the one coarse Metonic model at a different cadence (per token vs per inner-field step), not
+a third independent calendar physics. Corrected in `Janus/README.md`: no `engine_gap` for two copies of one
+formula; the DoE↔AMK bridge distributes one canonical clock, not duplicated pressure as independent evidence.
+Also noted: `doe.c` still uses local `mktime` for its epoch (the same MED-1 timezone bug) — a DoE runtime fix
+pending a Mac-Mini smoke, not done here.
+
+LOW-1: the pre-D-2/D-0-era comments that survived the fixes are corrected to the actual contract. The
+`g_temporal_key_on` static and the `JANUS_KEY` operator comment (`ariannamethod.c`) no longer say
+`temporal_alpha` is "write-only / no readers / inert until a wire" — armed, `JANUS_KEY` makes D-2 act on the
+calendar-derived `janus_temporal_alpha` (a first indirect, receipted speech influence via limpha), and the
+generic `temporal_alpha` is never touched by Janus; default OFF stays bit-for-bit. (The D-1/D-3 test doc-
+comments were already rewritten to the calendar semantics during HIGH-2; the LOG's own history is append-only
+and this entry is the current-truth receipt.)
+
+Doc-only change; no logic touched. `go build ./cmd/innerworld-dock` exit 0; whole `./tests` + `./innerworld/...`
+green. This closes the Sol fix pass: all 3 HIGH + all 4 MEDIUM + LOW addressed. Remaining before the re-audit:
+the kernel canon-sync batch (`am_janus_key_armed`, `janus_temporal_alpha`, the MED-1 epoch, the MED-3 birth
+accessors, the MED-2 transactional load) into `ariannamethod.ai`, then Sol's re-audit.

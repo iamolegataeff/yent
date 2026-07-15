@@ -240,7 +240,7 @@ static int g_birth_set = 0;        // MetaJanus: 1 once BIRTH has fixed the orig
 static long g_birth_days = 0;      // MetaJanus: the origin day (days since epoch), fixed by BIRTH — the yahrzeit/birthday anniversaries derive from it
 static int g_self_now_manual = 0;  // MetaJanus test-door: 1 = pd's "now" is scrubbed to g_self_now_days (SELF_NOW_DAYS); 0 = real clock
 static int g_self_now_days = 0;     // scrubbed self-now (days since epoch) when g_self_now_manual
-static int g_temporal_key_on = 0;   // MetaJanus D-1: 1 = janus_gap EMA-pulls temporal_alpha (JANUS_KEY); 0 = knob untouched (default)
+static int g_temporal_key_on = 0;   // MetaJanus: 1 = JANUS_KEY armed → D-2 acts on janus_temporal_alpha (HIGH-1 consumer gate); 0 = disarmed → D-2 reads neutral 0.5 (default)
 
 static void calendar_init(void) {
     // MED-1 (Sol fix): the calendar epoch is a FIXED UTC instant — 2024-10-03 12:00:00 UTC = 1727956800
@@ -3667,9 +3667,10 @@ static void aml_exec_level0(const char* cmd, const char* arg, AML_ExecCtx* ctx, 
       else { g_self_now_days = d; g_self_now_manual = 1; }
     }
     else if (!strcmp(t, "JANUS_KEY")) {
-      // MetaJanus D-1: switch the janus_gap -> temporal_alpha EMA pull ON/OFF. Default OFF, so
-      // without this line behavior is bit-for-bit current. temporal_alpha is write-only across the
-      // repo (no readers), so arming this is inert until a later stage wires temporal_alpha to a process.
+      // MetaJanus: arm/disarm the Janus temporal key. Armed, D-2 acts on the calendar-derived
+      // janus_temporal_alpha (HIGH-2), leaning the inner seed harvest — a first INDIRECT speech influence
+      // via limpha recall (HIGH-3), receipted, not inert. Default OFF is bit-for-bit current (D-2 reads the
+      // neutral 0.5, HIGH-1); the generic temporal_alpha is never touched by Janus.
       g_temporal_key_on = (ctx_float(ctx, arg) != 0.0f) ? 1 : 0;
     }
 

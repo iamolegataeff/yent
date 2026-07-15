@@ -63,9 +63,14 @@ declared deliberately — it is not a bug, it is a third face of the conflict:
 The teeth of the two saws land on different days (pd will quake in October, the Hebrew face will fire in
 March). The gap between model time and celestial time is a measurable quantity and a field in its own
 right: a triad (calendar conflict → the first conflict's conflict with the second). It does not yet
-materialize as a field `engine_gap` — that will be added only when keying actually asks for it. A third,
-linear engine belongs to DoE (`doe.c:613-617`, `drift=years*11.25` with no Metonic corrections) — the
-DoE↔AMK bridge is canonized as a separate stage after birth.
+materialize as a field `engine_gap` — that will be added only when keying actually asks for it. DoE runs the
+SAME coarse Metonic model, not a third independent physics: `doe.c:613-623` computes `years*11.25` and then
+subtracts the 19-year / 7-leap / 30-day corrections (the same `g_metonic_leaps` structure AMK uses), so it is
+a DUPLICATE of the model at a different cadence — DoE per token, AMK per inner-field step. Do not create an
+`engine_gap` for two copies of one formula; the DoE↔AMK bridge is a separate stage that distributes one
+canonical clock fact rather than treating duplicated pressure as independent evidence (Sol audit, MED-4).
+Note: `doe.c` still builds its epoch with local `mktime` (the same host-timezone bug MED-1 fixed in AMK) —
+a DoE runtime fix pending a Mac-Mini smoke.
 
 ## Next (SEPARATE plan, NOT now)
 
