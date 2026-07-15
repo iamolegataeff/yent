@@ -192,7 +192,8 @@ func (iw *InnerWorld) coocBias(prompt string) string {
 	var pull []string
 	switch {
 	case iw.flow != nil:
-		pull = iw.flow.BiasWords(prompt, 3) // native cooc: the field's own token graph
+		biasN, _ := metajanusHarvestLean(metajanusTemporalAlpha(iw.flow)) // D-2: temporal_alpha leans the harvest
+		pull = iw.flow.BiasWords(prompt, biasN) // native cooc: the field's own token graph
 	case iw.cooc != nil:
 		if words := coocWords(prompt); len(words) > 0 {
 			pull = iw.cooc.Bias(words[len(words)-1], 3)

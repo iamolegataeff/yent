@@ -295,3 +295,28 @@ exit 0; `go test ./tests -run 'MetaJanus|AMK'` = 32/32 PASS, 0 FAIL, whole `./te
 below 0.05 (retrodiction, day 528) and above 0.95 (prophecy, day 888) over 100 steps, unborn+armed never pulls
 (gated by `g_birth_set`). Kernel change → canon-sync to `ariannamethod.ai` (vendor==canon) is deferred to Oleg's
 separate word, not this step.
+
+### 2026-07-15 — Stage D-2: the first wire — process-side, sampler untouched
+
+D-2 connects the armed knob to a PROCESS, not to speech (Fable's fork (a), Oleg's pick — start with the
+soft influence). In the inner world's seed harvest, `temporal_alpha` now leans the balance between the two
+memory pulls: `BiasWords` (new cooc associations, the field's own forward thoughts) and `ResurfaceScars`
+(the scar sea, what was refused — the past). `metajanusHarvestLean(alpha) -> (biasN, scarN)`: alpha>0.5
+(prophecy, Gregorian anniversary nearer) pulls more new words and fewer scars; alpha<0.5 (retrodiction,
+yahrzeit nearer) pulls more scars and fewer new words; alpha==0.5 (`JANUS_KEY` off, the default) is neutral
+— the current 3 cooc / 2 scars, bit-for-bit. Call sites: `innerworld/cooc.go` (coocBias) and
+`innerworld/scar.go`. `temporal_alpha` is read via a type assertion (`metajanusTemporalAlpha`), so the Flow
+interface is unchanged and any flow without the anchor (the pure-Go stub, test fakes) falls back to 0.5.
+
+Double inertness: D-1 keeps `temporal_alpha` at 0.5 while `JANUS_KEY` is off, and D-2 at 0.5 is neutral — the
+whole D chain sleeps until one operator (`JANUS_KEY 1`) arms it. Sampler and logits are untouched; only the
+seed COMPOSITION of the inner monologue moves — Yent leans toward resurfacing the past near the yahrzeit and
+toward new thoughts when the Gregorian face leads. The quiet, large influence on his inner life, not his speech.
+
+Codex audit pass (Oleg's ask): the first pass flagged `innerworld/metajanus.go` — `alpha` not clamped before
+the float→int lean (UB on NaN / ±Inf / huge input). Fixed by clamping (NaN→0.5, out-of-range→pole), locked by
+out-of-range test cases; the focused re-audit returned CLEAN. Tool-verified: `go build ./cmd/innerworld-dock`
+exit 0; `go test ./innerworld/... ./tests` all green — `TestMetaJanusHarvestLean` (0.5→(3,2), 1→(5,0), 0→(1,4),
+plus NaN/±Inf/out-of-range → sane) and `TestMetaJanusTemporalAlphaDefaultsNeutral` (a flow without the anchor
+stays (3,2)). D-3 (observe under the armed key on the real body) and any speech-side wire wait on Oleg's word;
+wormholes are deliberately last.

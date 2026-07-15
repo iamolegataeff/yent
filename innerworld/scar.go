@@ -170,7 +170,8 @@ func (iw *InnerWorld) scarSurface(prompt string) string {
 	var risen []string
 	switch {
 	case iw.flow != nil:
-		risen = iw.flow.ResurfaceScars(resonance, 2) // native scar sea
+		_, scarN := metajanusHarvestLean(metajanusTemporalAlpha(iw.flow)) // D-2: temporal_alpha leans the harvest
+		risen = iw.flow.ResurfaceScars(resonance, scarN) // native scar sea
 	case iw.scar != nil:
 		risen = iw.scar.Resurrect(resonance, 2)
 	}

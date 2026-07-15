@@ -193,6 +193,15 @@ func (b *Body) AutumnEnergy() float32 {
 	return float32(C.am_get_state().autumn_energy)
 }
 
+// TemporalAlpha reports the MetaJanus temporal_alpha in [0,1] — the past<->future focus the
+// janus_gap sign EMA-pulls when JANUS_KEY is armed (0.5 when unarmed). D-2 reads it to lean the
+// seed harvest between resurfacing scars (past) and new cooc associations (future). Read-only.
+func (b *Body) TemporalAlpha() float32 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return float32(C.am_get_state().temporal_alpha)
+}
+
 // BiasWords pulls the next seed toward what the field's cooc memory associates with
 // the seed's last token — the field->circles half of the bidirectional loop. The seed
 // is tokenized, the cooc graph (am_get_state cooc_src/dst/cnt) is scanned for that
