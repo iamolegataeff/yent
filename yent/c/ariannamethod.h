@@ -263,6 +263,14 @@ typedef struct {
   float weave;       // pattern-binding, threads cohering into a whole (COMPLEX)
   float valence;     // emotional lean of the current thought (-1..1), written by the High brain
   float arousal;     // emotional intensity of the current thought (0..1), written by the High brain
+  // MetaJanus — the self-LOCATION anchor: WHEN this organism began, and how far the world's
+  // calendars have drifted from that origin since. APPEND-ONLY (soma prefix-migration holds).
+  float birth_drift;         // cumulative Hebrew-Gregorian drift at THIS organism's birth — the fixed origin. Set once via BIRTH; g_birth_set (not this value) is the born-flag, so BIRTH 0 is a legit origin with drift 0.
+  float personal_dissonance; // |drift(now) - birth_drift| / AM_MAX_UNCORRECTED, clamped — the growing (Metonic-nonlinear) distance from origin. 0 until born.
+  // MetaJanus Hebrew face — the same origin seen by the OTHER calendar (the yahrzeit). Derived
+  // from the same BIRTH, never a second anchor. APPEND-ONLY.
+  float janus_gap;           // (days to next Hebrew yahrzeit − days to next Gregorian birthday)/30, clamped [-1,1] — the saw of two calendars on one origin. 0 until born.
+  float yahrzeit;            // exp(-days_to_next_26_Shvat / 5) — closeness pulse to the death-anniversary of the origin, as field. 0 until born.
 } AM_State;
 
 // Temporal modes
@@ -481,9 +489,13 @@ void am_apply_field_to_logits(float* logits, int n);
 //
 // Inferences (yent.aml, resonance.aml, jannus-r) carry no memory between runs
 // without this — every am_init resets chambers, scars, prophecy debt, calendar
-// snapshots, etc. am_field_save dumps the whole AM_State to a binary file
-// (magic "AMSO" + version + sizeof + timestamp + raw struct); am_field_load
-// reads it back, refusing if version or sizeof differ (recompiled libaml).
+// snapshots, etc. am_field_save dumps the field-weather region of AM_State to a binary file
+// (magic "AMSO" + version + region size + timestamp + region bytes); am_field_load reads it back.
+// AM_State grows APPEND-ONLY, so an older/shorter soma is a clean PREFIX: load accepts any region
+// size in (0, AM_SOMA_PERSIST_SZ] and zeroes the rest, refusing only a wrong magic, an out-of-range
+// version, or a size larger than the current region. The MetaJanus identity tail (birth_drift and
+// the derived personal_dissonance/janus_gap/yahrzeit) is EXCLUDED — the origin is re-declared by
+// BIRTH each session, never restored from a file.
 //
 // Bound to top-level AML directives:
 //     LOAD "path.soma"   → am_field_load(path)
@@ -491,10 +503,10 @@ void am_apply_field_to_logits(float* logits, int n);
 //
 // File format (little-endian):
 //     [0..3]   magic        "AMSO"           (0x4F534D41)
-//     [4..7]   version      uint32           (currently 1)
-//     [8..11]  state_size   uint32           (sizeof(AM_State))
+//     [4..7]   version      uint32           (currently AM_SOMA_VERSION = 3; v2 loads as prefix)
+//     [8..11]  state_size   uint32           (AM_SOMA_PERSIST_SZ — the field-weather region)
 //     [12..19] timestamp    uint64           (UTC seconds)
-//     [20..]   raw AM_State bytes
+//     [20..]   field-weather bytes (offsetof(AM_State, birth_drift); MetaJanus tail excluded)
 //
 // Returns 0 on success, negative on failure (with stderr message).
 // ═══════════════════════════════════════════════════════════════════════════════

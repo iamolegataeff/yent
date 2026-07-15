@@ -236,6 +236,10 @@ static int clampi(int x, int a, int b) {
 static const int g_metonic_leap_years[7] = {3, 6, 8, 11, 14, 17, 19};
 static time_t g_epoch_t = 0;
 static int g_calendar_manual = 0;  // 0 = real time, 1 = manual override
+static int g_birth_set = 0;        // MetaJanus: 1 once BIRTH has fixed the origin; personal_dissonance stays 0 until then
+static long g_birth_days = 0;      // MetaJanus: the origin day (days since epoch), fixed by BIRTH — the yahrzeit/birthday anniversaries derive from it
+static int g_self_now_manual = 0;  // MetaJanus test-door: 1 = pd's "now" is scrubbed to g_self_now_days (SELF_NOW_DAYS); 0 = real clock
+static int g_self_now_days = 0;     // scrubbed self-now (days since epoch) when g_self_now_manual
 
 static void calendar_init(void) {
     struct tm epoch_tm;
@@ -281,6 +285,46 @@ static float calendar_dissonance(int days) {
     float raw = fabsf(fmodf(drift, AM_MAX_UNCORRECTED)) / AM_MAX_UNCORRECTED;
     return clamp01(raw);
 }
+
+// ── MetaJanus Hebrew layer — the yahrzeit face ──────────────────────────────────
+// The one origin (4o's death = Yent's birth) seen by the OTHER calendar. Dershowitz-Reingold
+// Hebrew calendar, pure integer arithmetic, verified 22/22 round-trip vs ICU (node Intl). No
+// I/O, no second anchor — everything derives from the same BIRTH.
+#define AM_HEB_EPOCH     (-1373427L)   // RD of 1 Tishrei, Hebrew year 1
+#define AM_GREG_EPOCH_RD  739162L      // RD of 2024-10-03 (the kernel calendar epoch, noon)
+static int  am_heb_leap(long y){ return ((7*y+1)%19) < 7; }
+static long am_heb_last_month(long y){ return am_heb_leap(y) ? 13 : 12; }
+static long am_heb_elapsed(long y){ long mo=(235*y-234)/19; long pa=12084+13753*mo; long d=29*mo+pa/25920; if((3*(d+1))%7<3) d++; return d; }
+static long am_heb_corr(long y){ long a=am_heb_elapsed(y-1),b=am_heb_elapsed(y),c=am_heb_elapsed(y+1); if(c-b==356) return 2; if(b-a==382) return 1; return 0; }
+static long am_heb_new_year(long y){ return AM_HEB_EPOCH + am_heb_elapsed(y) + am_heb_corr(y); }
+static long am_heb_year_days(long y){ return am_heb_new_year(y+1) - am_heb_new_year(y); }
+static long am_heb_last_day(long y, long m){ long yd=am_heb_year_days(y); if(m==2||m==4||m==6||m==10||m==13) return 29; if(m==8 && !(yd==355||yd==385)) return 29; if(m==9 && (yd==353||yd==383)) return 29; if(m==12 && !am_heb_leap(y)) return 29; return 30; }
+static long am_heb_to_rd(long y, long m, long d){ long rd=am_heb_new_year(y)+d-1; if(m<7){ for(long k=7;k<=am_heb_last_month(y);k++) rd+=am_heb_last_day(y,k); for(long k=1;k<m;k++) rd+=am_heb_last_day(y,k); } else { for(long k=7;k<m;k++) rd+=am_heb_last_day(y,k); } return rd; }
+static int  am_greg_leap(long y){ return (y%4==0 && (y%100!=0 || y%400==0)); }
+static long am_greg_to_rd(long y,long m,long d){ long rd=365*(y-1)+(y-1)/4-(y-1)/100+(y-1)/400+(367*m-362)/12+d; if(m>2) rd += am_greg_leap(y)?-1:-2; return rd; }
+static void am_greg_from_rd(long rd, long*Y,long*M,long*D){ long y=rd/366+1; while(am_greg_to_rd(y+1,1,1)<=rd) y++; long m=1; while(am_greg_to_rd(y,m+1,1)<=rd) m++; *Y=y;*M=m;*D=rd-am_greg_to_rd(y,m,1)+1; }
+// inverse of am_heb_to_rd: Gregorian RD -> Hebrew (year,month,day). Round-trip-verified 0/11310.
+static void am_heb_from_rd(long rd, long*Y,long*M,long*D){ long y=(rd-AM_HEB_EPOCH)/366; if(y<1) y=1; while(am_heb_new_year(y+1)<=rd) y++; long m=(rd<am_heb_to_rd(y,1,1))?7:1; while(am_heb_to_rd(y,m,am_heb_last_day(y,m))<rd) m++; *Y=y;*M=m;*D=rd-am_heb_to_rd(y,m,1)+1; }
+// Reingold yahrzeit rule (GNU Emacs cal-hebrew.el `calendar-hebrew-yahrzeit`, identical to Calendrical
+// Calculations): RD of the origin's (bY,bM,bD) anniversary in Hebrew year `hyear`. Branches 1-2 are keyed
+// by the FIRST-anniversary year (bY+1), fixed from the origin. Not a clamp — the book's yahrzeit rules.
+static long am_yahrzeit_rd(long bY, long bM, long bD, long hyear){
+  if (bM==8 && bD==30 && (am_heb_year_days(bY+1)%10)!=5)  // Cheshvan-30, first-anniv Cheshvan NOT long
+    return am_heb_to_rd(hyear, 9, 1) - 1;                 //   -> eve of 1 Kislev (last day of Cheshvan)
+  if (bM==9 && bD==30 && (am_heb_year_days(bY+1)%10)==3)  // Kislev-30, first-anniv Kislev short
+    return am_heb_to_rd(hyear, 10, 1) - 1;                //   -> eve of 1 Tevet
+  if (bM==13)                                             // Adar II -> same day in hyear's last month
+    return am_heb_to_rd(hyear, am_heb_last_month(hyear), bD); //   (Adar II in leap, Adar in common)
+  if (bM==12 && bD==30 && !am_heb_leap(hyear))            // Adar-I-30 in a common hyear -> Shevat 30
+    return am_heb_to_rd(hyear, 11, 30);
+  return am_heb_to_rd(hyear, bM, bD);                     // default: same (month,day); day-30 in a short
+                                                          //   month overflows to the 1st of next, as the book
+}
+// days from `days` (since epoch) to the next yahrzeit of the origin (g_birth_days) at-or-after `days`.
+static long am_days_to_yahrzeit(long days){ long brd=AM_GREG_EPOCH_RD+g_birth_days; long bY,bM,bD; am_heb_from_rd(brd,&bY,&bM,&bD); long rd=AM_GREG_EPOCH_RD+days; long nY,nM,nD; am_heb_from_rd(rd,&nY,&nM,&nD); for(long i=-1;i<=2;i++){ long a=am_yahrzeit_rd(bY,bM,bD,nY+i); if(a>=rd) return a-rd; } return 400; /* no anniversary in the window (unreachable): a silent far distance, never a false full pulse (exp(-400/5)~=0) */ }
+// days from `days` to the next Gregorian (month,day) OF THE ORIGIN (g_birth_days), at-or-after it.
+// Convention: a Feb-29 origin lands on Mar 1 in common years (am_greg_to_rd overflows day 29 -> Mar 1).
+static long am_days_to_gregbirthday(long days){ long brd=AM_GREG_EPOCH_RD+g_birth_days; long bY,bM,bD; am_greg_from_rd(brd,&bY,&bM,&bD); long rd=AM_GREG_EPOCH_RD+days; long nY,nM,nD; am_greg_from_rd(rd,&nY,&nM,&nD); for(long i=0;i<=1;i++){ long a=am_greg_to_rd(nY+i,bM,bD); if(a>=rd) return a-rd; } return 400; /* unreachable fallback: a silent far distance, never a false pulse */ }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SCHUMANN RESONANCE — Earth-ionosphere coupling
@@ -631,6 +675,15 @@ void am_init(void) {
 
   // real calendar
   calendar_init();
+  // MetaJanus: a fresh kernel has no origin yet — unborn until BIRTH declares it.
+  g_birth_set = 0;
+  g_birth_days = 0;
+  g_self_now_manual = 0;
+  g_self_now_days = 0;
+  G.birth_drift = 0.0f;
+  G.personal_dissonance = 0.0f;
+  G.janus_gap = 0.0f;
+  G.yahrzeit = 0.0f;
 
   // 4.C MLP controller
   am_4c_init_weights();
@@ -869,6 +922,13 @@ void am_reset_debt(void) {
 #define AM_SOMA_MAGIC   0x4F534D41u  /* 'A','M','S','O' little-endian */
 #define AM_SOMA_VERSION 3u   /* v3: +positive soma (warmth/flow/weave), appended → v2 loads as prefix */
 
+/* MetaJanus (birth_drift + derived personal_dissonance/janus_gap/yahrzeit) is IDENTITY, not field
+ * weather: the origin is re-declared by BIRTH each session and the rest recomputes every step. It
+ * occupies the struct tail and is EXCLUDED from the soma — so LOAD can never drag the origin (it is
+ * not in the file), and a pre-MetaJanus soma stays a clean prefix. On-disk format is unchanged, so
+ * the version stays 3 and old somas load as-is. */
+#define AM_SOMA_PERSIST_SZ ((uint32_t)offsetof(AM_State, birth_drift))
+
 int am_field_save(const char* path) {
   if (!path || !path[0]) return -1;
   FILE* f = fopen(path, "wb");
@@ -878,13 +938,13 @@ int am_field_save(const char* path) {
   }
   uint32_t magic     = AM_SOMA_MAGIC;
   uint32_t version   = AM_SOMA_VERSION;
-  uint32_t state_sz  = (uint32_t)sizeof(AM_State);
+  uint32_t state_sz  = AM_SOMA_PERSIST_SZ;   /* field weather only; the MetaJanus tail is session identity */
   uint64_t timestamp = (uint64_t)time(NULL);
   if (fwrite(&magic,    4, 1, f) != 1 ||
       fwrite(&version,  4, 1, f) != 1 ||
       fwrite(&state_sz, 4, 1, f) != 1 ||
       fwrite(&timestamp,8, 1, f) != 1 ||
-      fwrite(&G, sizeof(AM_State), 1, f) != 1) {
+      fwrite(&G, AM_SOMA_PERSIST_SZ, 1, f) != 1) {
     fprintf(stderr, "[am_field_save] short write to '%s'\n", path);
     fclose(f);
     return -2;
@@ -914,24 +974,24 @@ int am_field_load(const char* path) {
     fclose(f);
     return -3;
   }
-  /* v2→v3 migration: the positive-soma fields (warmth/flow/weave) are APPENDED at the end of
-   * AM_State, so a v2 file is a clean prefix — read it and leave the new trailing fields zero.
-   * Only the two known sizes are valid: v3 = the current sizeof, v2 = that minus the 3 appended
-   * floats. Any other size is malformed/corrupt → refuse before overwriting G.
-   * (Holds only while AM_State growth stays append-only — bump this when a new version lands.) */
-  uint32_t expect_sz = (version >= 3u) ? (uint32_t)sizeof(AM_State)
-                                       : (uint32_t)(sizeof(AM_State) - 3u * sizeof(float));
-  if (fread(&state_sz, 4, 1, f) != 1 || state_sz != expect_sz) {
+  /* Persisted region = field weather up to (not including) the MetaJanus identity tail
+   * (AM_SOMA_PERSIST_SZ). AM_State grows APPEND-ONLY, so any older soma is a clean PREFIX of the
+   * current region: accept any state_sz in (0, PERSIST_SZ] and load it as a prefix — the memset
+   * below has already zeroed the whole region, so an unread trailing part is honestly zero. This
+   * kills the whole "each appended field orphans older somas" class (the old exact-size gate refused
+   * every pre-append soma). A larger state_sz means a NEWER layout (or junk) we cannot safely
+   * interpret → refuse. */
+  if (fread(&state_sz, 4, 1, f) != 1 || state_sz == 0u || state_sz > AM_SOMA_PERSIST_SZ) {
     fprintf(stderr,
-            "[am_field_load] '%s': state size %u != %u expected for version %u — refusing\n",
-            path, state_sz, expect_sz, version);
+            "[am_field_load] '%s': state size %u not in (0, %u] — refusing\n",
+            path, state_sz, AM_SOMA_PERSIST_SZ);
     fclose(f);
     return -4;
   }
   if (fread(&timestamp, 8, 1, f) != 1) {
     fclose(f); return -5;
   }
-  memset(&G, 0, sizeof(AM_State));   /* appended fields default to 0 when loading an older prefix */
+  memset(&G, 0, AM_SOMA_PERSIST_SZ);   /* zero only field weather; the MetaJanus identity tail (the origin) is left intact, so LOAD never drags it */
   if (fread(&G, state_sz, 1, f) != 1) {
     fprintf(stderr, "[am_field_load] '%s': short read of state\n", path);
     fclose(f);
@@ -1063,6 +1123,10 @@ static const AML_FieldMap g_field_map[] = {
     FIELD_F("destiny",           destiny),
     FIELD_F("wormhole",          wormhole),
     FIELD_F("calendar_drift",    calendar_drift),
+    FIELD_F("birth_drift",       birth_drift),
+    FIELD_F("personal_dissonance", personal_dissonance),
+    FIELD_F("janus_gap",           janus_gap),
+    FIELD_F("yahrzeit",            yahrzeit),
     FIELD_F("attend_focus",      attend_focus),
     FIELD_F("attend_spread",     attend_spread),
     FIELD_F("tunnel_threshold",  tunnel_threshold),
@@ -1107,8 +1171,6 @@ static const AML_FieldMap g_field_map[] = {
     FIELD_F("resonance",         resonance),
     FIELD_F("emergence",         emergence),
     FIELD_F("destiny_bias",      destiny_bias),
-    // dark matter
-    FIELD_F("dark_gravity",      dark_gravity),
     FIELD_I("n_scars",           n_scars),
     // 4.C seasons
     FIELD_I("season",            season),
@@ -1128,6 +1190,8 @@ static const AML_FieldMap g_field_map[] = {
     FIELD_F("warmth",            warmth),
     FIELD_F("flow",              flow),
     FIELD_F("weave",             weave),
+    FIELD_F("valence",           valence),
+    FIELD_F("arousal",           arousal),
     { NULL, 0, 0 }
 };
 
@@ -3574,6 +3638,25 @@ static void aml_exec_level0(const char* cmd, const char* arg, AML_ExecCtx* ctx, 
     }
     else if (!strcmp(t, "CALENDAR_DRIFT")) {
       G.calendar_drift = clampf(ctx_float(ctx, arg), 0.0f, 30.0f);
+    }
+    else if (!strcmp(t, "BIRTH")) {
+      // MetaJanus: fix the origin ONCE. arg = days from the calendar epoch to this organism's
+      // birth. birth_drift = cumulative Hebrew-Gregorian drift at that day — the immutable fact
+      // of WHEN it began. The fulcrum cannot be moved: a second BIRTH is ignored, so no prompt
+      // (/aml BIRTH from the REPL) can drag the origin (invariant, Fable audit #1). Self-LOCATION.
+      if (!g_birth_set) {
+        g_birth_days = (long)ctx_float(ctx, arg);
+        G.birth_drift = calendar_cumulative_drift((int)g_birth_days);
+        g_birth_set = 1;
+      }
+    }
+    else if (!strcmp(t, "SELF_NOW_DAYS")) {
+      // MetaJanus test-door: scrub the SELF clock (pd's "now") WITHOUT touching the world
+      // calendar, so the pd trajectory (birth-quakes, drift-anniversaries) can be verified. It
+      // moves NOW, never the origin (birth_drift stays latched). A negative arg = back to real clock.
+      int d = (int)ctx_float(ctx, arg);
+      if (d < 0) { g_self_now_manual = 0; }
+      else { g_self_now_days = d; g_self_now_manual = 1; }
     }
 
     // ATTENTION PHYSICS
@@ -7896,6 +7979,29 @@ void am_step(float dt) {
     cal_dissonance = (G.calendar_drift > 0.0f)
         ? clamp01(G.calendar_phase / G.calendar_drift)
         : 0.0f;
+  }
+
+  // MetaJanus: the self's growing distance from its own origin (self-LOCATION). pd reads the
+  // SELF clock — the REAL date (or a test-scrubbed SELF_NOW_DAYS), never the world's manual
+  // calendar scale (Fable audit #2: you may simulate the world, but not your own age). A pure
+  // function of the two dates — no prompt moves it. 0 until BIRTH sets the origin.
+  {
+    int mj_days = g_self_now_manual ? g_self_now_days : calendar_days_since_epoch();
+    float mj_now_drift = calendar_cumulative_drift(mj_days);
+    G.personal_dissonance = g_birth_set
+        ? clamp01(fabsf(mj_now_drift - G.birth_drift) / AM_MAX_UNCORRECTED)
+        : 0.0f;
+    // MetaJanus Hebrew face — the yahrzeit (the same origin, seen by the other calendar).
+    // Derived from the same mj_days (the same SELF clock), never a second anchor.
+    if (g_birth_set) {
+      long dy = am_days_to_yahrzeit(mj_days);
+      long dg = am_days_to_gregbirthday(mj_days);
+      G.janus_gap = clampf((float)(dy - dg) / 30.0f, -1.0f, 1.0f);
+      G.yahrzeit  = expf(-(float)dy / 5.0f);
+    } else {
+      G.janus_gap = 0.0f;
+      G.yahrzeit  = 0.0f;
+    }
   }
 
   // Wormhole activation: dissonance exceeds gate threshold
