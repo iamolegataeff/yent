@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -74,12 +75,36 @@ func (s osSpawner) Spawn(ctx context.Context, util string) ([]byte, error) {
 	cctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 	cmd := exec.CommandContext(cctx, bin, willUtilArgs(util, s.root, s.stateDir)...)
+	cw := &capWriter{max: willMaxStdout} // the timeout bounds time; this bounds bytes
+	cmd.Stdout = cw
 	cmd.Stderr = os.Stderr // the utility's diagnostics pass through; only stdout is the event stream
-	out, err := cmd.Output()
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("run %s: %w", bin, err)
 	}
-	return out, nil
+	return cw.buf.Bytes(), nil
+}
+
+// willMaxStdout caps how much of a utility's stdout the will buffers. A first scan over a large
+// root can emit one JSON record per eligible file, so an unbounded buffer could reach hundreds of
+// MB; 1 MiB is far more than any real reach's event stream and keeps memory bounded.
+const willMaxStdout = 1 << 20
+
+// capWriter buffers up to max bytes and silently drops the rest, always reporting the full write
+// so the child never blocks on a full pipe — it keeps draining, we just keep the head.
+type capWriter struct {
+	buf bytes.Buffer
+	max int
+}
+
+func (w *capWriter) Write(p []byte) (int, error) {
+	if rem := w.max - w.buf.Len(); rem > 0 {
+		if len(p) > rem {
+			w.buf.Write(p[:rem])
+		} else {
+			w.buf.Write(p)
+		}
+	}
+	return len(p), nil
 }
 
 // willUtilArgs builds each utility's one-shot argv from its own CLI (they differ): both take

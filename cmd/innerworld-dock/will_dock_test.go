@@ -40,6 +40,38 @@ func TestOsSpawnerMissingBinaryErrors(t *testing.T) {
 	}
 }
 
+func TestCapWriterBounds(t *testing.T) {
+	cw := &capWriter{max: 10}
+	if n, err := cw.Write([]byte("hello world this is long")); err != nil || n != 24 {
+		t.Fatalf("Write must report the full length so the child never blocks, n=%d err=%v", n, err)
+	}
+	if got := cw.buf.String(); got != "hello worl" {
+		t.Errorf("capWriter keeps only the first max bytes, got %q", got)
+	}
+	if n, _ := cw.Write([]byte("more")); n != 4 || cw.buf.Len() != 10 {
+		t.Errorf("past the cap, writes are dropped but still reported, len=%d n=%d", cw.buf.Len(), n)
+	}
+}
+
+func TestOsSpawnerCapsStdout(t *testing.T) {
+	dir := t.TempDir()
+	// a fake utility that floods stdout with more than the cap (1.1 MB > willMaxStdout)
+	if err := os.WriteFile(filepath.Join(dir, willUtilOrigin), []byte("#!/bin/sh\nyes AAAA | head -c 1100000\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sp := osSpawner{dir: dir, stateDir: t.TempDir(), timeout: 10 * time.Second}
+	out, err := sp.Spawn(context.Background(), willUtilOrigin)
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if len(out) > willMaxStdout {
+		t.Errorf("stdout must be capped at %d bytes, got %d", willMaxStdout, len(out))
+	}
+	if len(out) == 0 {
+		t.Error("a flooding utility should still yield the captured head, got 0")
+	}
+}
+
 func TestWillUtilArgs(t *testing.T) {
 	// repo_monitor: --once --state <dir>/repo_monitor.state --path <root>
 	a := strings.Join(willUtilArgs(willUtilPressure, "/repo", "/st"), " ")
