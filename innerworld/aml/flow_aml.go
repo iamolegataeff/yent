@@ -202,6 +202,14 @@ func (b *Body) TemporalAlpha() float32 {
 	return float32(C.am_get_state().temporal_alpha)
 }
 
+// JanusKeyArmed reports whether JANUS_KEY has armed the MetaJanus temporal key (HIGH-1). D-2 reads this
+// so the harvest stays neutral while unarmed, regardless of a frozen or legacy-driven temporal_alpha.
+func (b *Body) JanusKeyArmed() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return C.am_janus_key_armed() != 0
+}
+
 // BiasWords pulls the next seed toward what the field's cooc memory associates with
 // the seed's last token — the field->circles half of the bidirectional loop. The seed
 // is tokenized, the cooc graph (am_get_state cooc_src/dst/cnt) is scanned for that

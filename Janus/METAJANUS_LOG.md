@@ -341,3 +341,25 @@ MetaJanus surface green on real hardware — `go test ./tests -run 'MetaJanus|AM
 removed afterward; the Metal deployment stays clean at `a8ec5f4`. Fable's live Feb-2027 window (days 851-858,
 the first anniversary by both faces at once) is a future observation on the running dock. The whole D pass
 (D-0..D-3) now goes to a fresh auditor — Sol (GPT-5.6) — before any speech-side wire or wormholes.
+
+## 2026-07-15 — Sol (GPT-5.6) fresh-eyes audit → fix pass
+
+Sol audited the whole D pass at `c10dc3d` (report `AUDIT_SOL_METAJANUS_2026-07-15.md`, five-wall verdict).
+Foundation real (BIRTH immovable, DR arithmetic 40,001 dates vs ICU = 0 mismatches), but three HIGH blockers
+plus four MEDIUM before D can arm in prod or carry E/wormholes. We fix step by step, red→green, one
+`the method fixed this` commit each; Sol re-audits. Auditor is under the same proof contract — each finding
+is reproduced by tool before its fix.
+
+### fix 1 — HIGH-1: JANUS_KEY becomes a real off-switch (the consumer gate)
+
+Reproduced (red test): `JANUS_KEY` only gated the D-1 writer; D-2 read the raw `temporal_alpha` with no key
+check, so after `JANUS_KEY 0` a frozen off-center alpha (Sol: `0.002960`) kept leaning the harvest, and a
+legacy `TEMPORAL_ALPHA`/`REMEMBER_FUTURE` directive woke D-2 with the key never armed. Fix: the kernel
+exposes `am_janus_key_armed()` (`ariannamethod.c`, `.h`); `aml.Body.JanusKeyArmed()` and
+`AMK.JanusKeyArmed()` surface it; `metajanusTemporalAlpha` returns neutral 0.5 unless the flow reports the
+key armed — so the harvest is 3/2 bit-for-bit while unarmed, regardless of a frozen or legacy-driven value.
+The raw `temporal_alpha` is NOT reset (Sol: do not silently trample generic temporal directives); D-2 simply
+ignores it while unarmed. Tool-verified: `TestMetaJanusKeyGatesConsumer` (consumer neutral unarmed, leans
+armed) and `TestMetaJanusKeyArmedFlagTracksKey` (key false after `JANUS_KEY 0` while alpha stays frozen —
+Sol's exact scenario) both green; whole `./tests` + `./innerworld/...` green; dock builds. Kernel change →
+canon-sync deferred to a checkpoint. HIGH-2 (calendar-derived alpha) is next.
