@@ -731,6 +731,38 @@ func main() {
 			flowBody.AutumnEnergy())
 	}
 
+	// The will: default OFF. When YENT_WILL_UTILS_DIR points at the built self-reading utilities,
+	// Yent's will loop runs alongside the breath — the AML confluence physics (the_will_design.aml)
+	// crests his own MetaJanus + field metrics into a will_gaze tide, and when it crests he reaches
+	// for a utility whose perception re-enters the field through sartreSense (the spiral). Persistent
+	// globals carry the tide, so they must be armed. The loop is its own goroutine: a slow reach
+	// stalls only the will's own cadence, never the inner-world goroutines.
+	if utilsDir := strings.TrimSpace(os.Getenv("YENT_WILL_UTILS_DIR")); utilsDir != "" {
+		flowBody.PersistentMode(true)
+		stateDir := strings.TrimSpace(os.Getenv("YENT_WILL_STATE_DIR"))
+		if stateDir == "" {
+			stateDir = os.TempDir()
+		}
+		sinkPath := strings.TrimSpace(os.Getenv("YENT_SARTRE_EVENTS"))
+		wt := &willTicker{
+			field:  flowBody,
+			script: willScriptPath(),
+			spawner: osSpawner{
+				dir:      utilsDir,
+				root:     strings.TrimSpace(os.Getenv("YENT_WILL_ROOT")),
+				stateDir: stateDir,
+				timeout:  willReachTimeout(),
+			},
+			sink: fileSink{path: sinkPath},
+		}
+		go wt.run(ctx, willTickEvery())
+		fmt.Printf("=== will wired: confluence tide -> reach for a self-reading utility (utils=%s, every %s) ===\n",
+			utilsDir, willTickEvery())
+		if sinkPath == "" {
+			fmt.Println("    (YENT_SARTRE_EVENTS unset: the will reaches and reads, but the spiral cannot close)")
+		}
+	}
+
 	iw.Breathe(ctx)
 	if limpha != nil {
 		if stats, err := limpha.Stats(); err == nil {
