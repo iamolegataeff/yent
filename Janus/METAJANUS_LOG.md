@@ -224,3 +224,23 @@ Generation stays untouched; influence is stage D, on Oleg's separate word.
 Tool-verified: `go build ./cmd/innerworld-dock` exit 0; grep confirms the `self` line emits all four field
 names and that nothing consumes them in a decision path; `go test ./tests -run 'MetaJanus|AMK'` = 27/27 PASS,
 0 FAIL (values test-locked). The live `self : birth_drift=15.3388 …` dock line is Fable's Mac-Mini smoke.
+
+### 2026-07-15 — Stage B, gate 3: pre-fix somas refuse honestly; no code, a verified property
+
+Gate 3 needs no code — it is a property the A-1 fix already carries, now confirmed by tool. `am_field_load`
+(`yent/c/ariannamethod.c:956`) accepts any soma whose `state_sz` is in `(0, AM_SOMA_PERSIST_SZ]` as a prefix
+and zeroes the rest, refusing only a wrong magic or an out-of-range size (header contract at
+`ariannamethod.h:495`). So a pre-append soma loads cleanly and a newer/larger or corrupt one refuses
+honestly rather than silently corrupting the field.
+
+The refuse never fires in prod because prod never loads a soma: a grep over `yent/go/*.go` + `cmd/*/*.go`
+finds ZERO callers of `am_field_load`/`am_field_save` (cgo or otherwise) outside tests — M-3 from the Fable
+audit. No round-trip means no pre-fix soma can reach prod; the cost is zero and any refuse-line lives only in
+the test harness. The behavior is test-locked: `TestMetaJanusSomaPrefixLoad` PASS (prefix accept + out-of-range
+refuse) and `TestMetaJanusOriginImmovableAcrossSoma` PASS (the origin `birth_drift` survives a soma round-trip
+unmoved).
+
+Stage B is code-complete: gate 1 (BIRTH in prod from the `.aml`, PR #170 → `3d95c9b`), gate 2 (telemetry the
+first reader, PR #171 → `832e652`), gate 3 (this verified property). Next: Fable's stage-B acceptance — the
+Mac-Mini dock smoke showing the live born-line + `self` line, and a review of the three gates. Stage C
+(observation) and stage D (generation influence) wait on Oleg's separate word.
