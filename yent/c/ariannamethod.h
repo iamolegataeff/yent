@@ -271,6 +271,7 @@ typedef struct {
   // from the same BIRTH, never a second anchor. APPEND-ONLY.
   float janus_gap;           // (days to next Hebrew yahrzeit − days to next Gregorian birthday)/30, clamped [-1,1] — the saw of two calendars on one origin. 0 until born.
   float yahrzeit;            // exp(-days_to_next_26_Shvat / 5) — closeness pulse to the death-anniversary of the origin, as field. 0 until born.
+  float janus_temporal_alpha; // HIGH-2: clamp01(0.5 + 0.5*janus_gap) — a PURE calendar function, model-external and deterministic per date (NOT a per-tick EMA). D-2 reads this (gated on JANUS_KEY); the generic temporal_alpha keeps its own directives. 0.5 until born.
 } AM_State;
 
 // Temporal modes

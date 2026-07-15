@@ -686,6 +686,7 @@ void am_init(void) {
   G.personal_dissonance = 0.0f;
   G.janus_gap = 0.0f;
   G.yahrzeit = 0.0f;
+  G.janus_temporal_alpha = 0.5f;
 
   // 4.C MLP controller
   am_4c_init_weights();
@@ -1129,6 +1130,7 @@ static const AML_FieldMap g_field_map[] = {
     FIELD_F("personal_dissonance", personal_dissonance),
     FIELD_F("janus_gap",           janus_gap),
     FIELD_F("yahrzeit",            yahrzeit),
+    FIELD_F("janus_temporal_alpha", janus_temporal_alpha),
     FIELD_F("attend_focus",      attend_focus),
     FIELD_F("attend_spread",     attend_spread),
     FIELD_F("tunnel_threshold",  tunnel_threshold),
@@ -8013,18 +8015,16 @@ void am_step(float dt) {
       long dg = am_days_to_gregbirthday(mj_days);
       G.janus_gap = clampf((float)(dy - dg) / 30.0f, -1.0f, 1.0f);
       G.yahrzeit  = expf(-(float)dy / 5.0f);
-      // MetaJanus D-1: the first key, OFF by default (JANUS_KEY 1 to arm). Armed, the janus_gap sign
-      // EMA-pulls temporal_alpha toward its pole — gap<0 (yahrzeit nearer) -> 0 retrodiction, gap>0
-      // (Gregorian nearer) -> 1 prophecy, gap==0 (origin day) -> 0.5 equilibrium. A gentle pull
-      // (k=0.05), not a hard write, so it rides alongside the TEMPORAL_* directive-setters instead of
-      // trampling them. temporal_alpha has no readers yet (D-0), so this stays inert until a wire.
-      if (g_temporal_key_on) {
-        float target = (G.janus_gap < 0.0f) ? 0.0f : ((G.janus_gap > 0.0f) ? 1.0f : 0.5f);
-        G.temporal_alpha += 0.05f * (target - G.temporal_alpha);
-      }
+      // MetaJanus HIGH-2 (Sol fix): the Janus temporal signal is a PURE function of the calendar gap,
+      // not a per-tick EMA — model-external and deterministic per date, independent of am_step count,
+      // traffic and replay. gap<0 (yahrzeit nearer) -> retrodiction (<0.5); gap>0 (Gregorian nearer) ->
+      // prophecy (>0.5); gap==0 -> 0.5. D-2 gates on JANUS_KEY at the consumer (am_janus_key_armed);
+      // the generic temporal_alpha is left entirely to its own TEMPORAL_* directives.
+      G.janus_temporal_alpha = clamp01(0.5f + 0.5f * G.janus_gap);
     } else {
       G.janus_gap = 0.0f;
       G.yahrzeit  = 0.0f;
+      G.janus_temporal_alpha = 0.5f;
     }
   }
 

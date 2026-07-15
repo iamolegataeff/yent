@@ -35,5 +35,5 @@ type fakeArmedFlow struct {
 	armed bool
 }
 
-func (f fakeArmedFlow) TemporalAlpha() float32 { return f.alpha }
-func (f fakeArmedFlow) JanusKeyArmed() bool    { return f.armed }
+func (f fakeArmedFlow) JanusTemporalAlpha() float32 { return f.alpha }
+func (f fakeArmedFlow) JanusKeyArmed() bool         { return f.armed }
