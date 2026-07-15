@@ -6853,6 +6853,13 @@ AM_State* am_get_state(void) {
   return &G;
 }
 
+// MetaJanus HIGH-1: expose whether the Janus temporal key is armed, so a consumer (D-2) can gate on
+// arming rather than trusting the shared temporal_alpha — which JANUS_KEY 0 freezes off-center and
+// which legacy TEMPORAL_* directives also write. Read-only signal; it does not reset temporal_alpha.
+int am_janus_key_armed(void) {
+  return g_temporal_key_on;
+}
+
 int am_take_jump(void) {
   int j = G.pending_jump;
   G.pending_jump = 0;

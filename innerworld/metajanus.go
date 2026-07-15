@@ -38,6 +38,12 @@ func metajanusHarvestLean(alpha float32) (biasN, scarN int) {
 // body does; the pure-Go stub and test fakes do not), defaulting to the neutral 0.5 so a flow
 // without the anchor keeps the current harvest counts. No interface change — a plain type assertion.
 func metajanusTemporalAlpha(flow Flow) float32 {
+	// HIGH-1 (Sol audit): the harvest reads a MetaJanus value ONLY while the key is armed. Unarmed —
+	// after JANUS_KEY 0, or a legacy TEMPORAL_*/REMEMBER_FUTURE directive, or a flow with no key signal —
+	// reads neutral 0.5, so a frozen or externally-driven temporal_alpha can never wake D-2 without Janus.
+	if ka, ok := flow.(interface{ JanusKeyArmed() bool }); ok && !ka.JanusKeyArmed() {
+		return 0.5
+	}
 	if ta, ok := flow.(interface{ TemporalAlpha() float32 }); ok {
 		return ta.TemporalAlpha()
 	}

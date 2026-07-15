@@ -134,6 +134,14 @@ func (a *AMK) Step(dt float32) {
 }
 
 // GetState reads current kernel state
+// JanusKeyArmed reports whether JANUS_KEY is armed (HIGH-1) — distinct from the temporal_alpha value:
+// after JANUS_KEY 0 the value freezes at its last pole, but this returns false, so D-2 can de-arm.
+func (a *AMK) JanusKeyArmed() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return C.am_janus_key_armed() != 0
+}
+
 func (a *AMK) GetState() AMState {
 	a.mu.Lock()
 	defer a.mu.Unlock()
