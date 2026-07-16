@@ -121,8 +121,9 @@ func (w *willTicker) event(t willTideSnapshot, id, phase, util, outcome string) 
 }
 
 // willTicker holds the will loop's wiring. The tide itself lives in the AML field's persistent
-// globals; the only between-breath state here is the refractory countdown, so a high-strain
-// confluence (which alone can exceed threshold in a single breath) cannot fire every breath.
+// globals; the small host-side state is the refractory countdown plus a quiet-run streak, so
+// sustained strain cannot fire every breath and repeated no-novelty can slow the next reach
+// without changing model weights or AML origin facts.
 type willTicker struct {
 	field      willField
 	script     string
@@ -133,6 +134,7 @@ type willTicker struct {
 	breath     int           // monotonically increasing will breath index
 	refractory int           // breaths the will must wait after a reach before it can reach again
 	cooldown   int           // breaths remaining in the current refractory (state)
+	quietRuns  int           // consecutive completed reaches that found no novelty
 }
 
 // tick advances the will one step and, if the tide crests, reaches for the utility the dominant
@@ -198,26 +200,47 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 			return util, fmt.Errorf("will commit %s state: %w", util, err)
 		}
 	}
+	outcome := "no_novelty"
+	if effectCount > 0 {
+		outcome = "perception_committed"
+	}
+	nextQuiet, nextCooldown := w.plannedLearningState(outcome)
 	if es, ok := w.sink.(willEventSink); ok {
-		outcome := "no_novelty"
-		if effectCount > 0 {
-			outcome = "perception_committed"
-		}
 		ev := w.event(tide, eventID, "learning", util, outcome)
 		ev.EffectCount = effectCount
+		ev.CooldownBreaths = nextCooldown
 		if err := es.EmitEvent(ev); err != nil {
 			return util, fmt.Errorf("will learn %s: %w", util, err)
 		}
 	}
-	// The reach both spends the vector tide (discharge) AND opens a bounded refractory of
-	// `refractory` breaths: even a high-strain confluence that alone re-crosses threshold next breath
-	// cannot reach again until the refractory elapses. The discharge is the physics; the cooldown
-	// is the floor.
-	w.cooldown = w.refractory
 	if err := dischargeWillTide(w.field); err != nil {
 		return util, fmt.Errorf("will discharge %s: %w", util, err)
 	}
+	w.quietRuns = nextQuiet
+	w.cooldown = nextCooldown
 	return util, nil
+}
+
+const willQuietRefractoryMaxExtra = 4
+
+func (w *willTicker) plannedLearningState(outcome string) (quietRuns, cooldown int) {
+	base := w.refractory
+	if base < 0 {
+		base = 0
+	}
+	switch outcome {
+	case "no_novelty":
+		quietRuns = w.quietRuns + 1
+		extra := quietRuns
+		if extra > willQuietRefractoryMaxExtra {
+			extra = willQuietRefractoryMaxExtra
+		}
+		return quietRuns, base + extra
+	case "perception_committed":
+		return 0, base
+	default:
+		return w.quietRuns, base
+	}
 }
 
 func dischargeWillTide(field willField) error {
