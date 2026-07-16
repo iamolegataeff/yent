@@ -37,9 +37,11 @@ package main
 import "C"
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -201,17 +203,78 @@ func newBody(name, bin, model, workdir string, args []string) *yent.DOEBody {
 // reflex only fires on real motion, never forcing the field to NOMOVE each turn. This
 // is the fast present-time twin of the slow limpha recall pressure: same perception,
 // two routes into the organism.
-type sartreSense struct{ eventsPath string }
+type sartreSense struct {
+	eventsPath string
+	offset     int64 // cursor: how much of the events file has already been perceived
+	tail       []byte
+	limpha     *yent.LimphaClient
+	state      func() yent.LimphaState
+}
 
-func (s sartreSense) Pressure() (string, bool) {
+// readNew returns only complete JSONL events appended since the last read, advancing the cursor
+// while preserving a partial trailing record for the next read — so each complete event is
+// perceived exactly once, never replayed every ripple, and never consumed half-written. A file
+// shorter than the cursor was truncated/rotated, so it re-reads from the start. No cgo here, so
+// the consume semantics are unit-tested directly (readNew).
+func (s *sartreSense) readNew() []byte {
+	f, err := os.Open(s.eventsPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	if fi, statErr := f.Stat(); statErr == nil && fi.Size() < s.offset {
+		s.offset = 0
+		s.tail = nil
+	}
+	if _, err := f.Seek(s.offset, io.SeekStart); err != nil {
+		return nil
+	}
+	raw, err := io.ReadAll(f)
+	if err != nil || len(raw) == 0 {
+		return nil
+	}
+	s.offset += int64(len(raw))
+	buf := append(append([]byte(nil), s.tail...), raw...)
+	cut := bytes.LastIndexByte(buf, '\n')
+	if cut < 0 {
+		s.tail = buf
+		return nil
+	}
+	complete := buf[:cut+1]
+	s.tail = append(s.tail[:0], buf[cut+1:]...)
+	lines := completeSartreJSONLines(complete)
+	if len(lines) == 0 {
+		return nil
+	}
+	return bytes.Join(lines, []byte{'\n'})
+}
+
+func (s *sartreSense) Pressure() (string, bool) {
 	if s.eventsPath == "" {
 		return "", false
 	}
-	raw, err := os.ReadFile(s.eventsPath)
-	if err != nil || len(raw) == 0 {
+	raw := s.readNew() // only NEW events since the last ripple — no latched replay of history
+	if len(raw) == 0 {
 		return "", false
 	}
-	cjson := C.CString(string(raw))
+	events := yent.ParseSartreEventsJSONL(string(raw))
+	if len(events) == 0 {
+		return "", false
+	}
+	if s.limpha != nil {
+		st := yent.LimphaState{}
+		if s.state != nil {
+			st = s.state()
+		}
+		if _, err := s.limpha.StoreSartreEvents(events, st); err != nil {
+			fmt.Fprintf(os.Stderr, "[dock] SARTRE live limpha store: %v\n", err)
+		}
+	}
+	filtered := sartrePerceptionJSONL(events)
+	if filtered == "" {
+		return "", false
+	}
+	cjson := C.CString(filtered)
 	defer C.free(unsafe.Pointer(cjson))
 	var p C.SartrePerception
 	C.sartre_perceive_from_events(cjson, &p)
@@ -224,6 +287,29 @@ func (s sartreSense) Pressure() (string, bool) {
 		return "", false
 	}
 	return C.GoStringN(&buf[0], n), true
+}
+
+func sartreEOFOffset(path string) int64 {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return fi.Size()
+}
+
+func sartrePerceptionJSONL(events []yent.SartreEvent) string {
+	var b strings.Builder
+	for _, ev := range events {
+		if ev.Phase != "" && ev.Phase != "effect" {
+			continue
+		}
+		if ev.Utility == "repo_monitor" && (ev.Kind == "added" || ev.Kind == "modified" || ev.Kind == "removed") {
+			line, _ := json.Marshal(ev)
+			b.Write(line)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
 }
 
 // sartreMetricSink is the reciprocal half of the SARTRE bridge: after innerworld
@@ -343,6 +429,12 @@ func ingestSartreFromEnv(lc *yent.LimphaClient, st yent.LimphaState) int {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// A fresh will-events path does not exist yet — the will's fileSink creates it on the
+			// first reach (O_CREATE). A missing file is "no events yet", not a fatal misconfiguration.
+			fmt.Printf("=== SARTRE wired: events file %s not present yet (the will creates it on first reach) ===\n", path)
+			return 0
+		}
 		fmt.Fprintf(os.Stderr, "[dock] SARTRE events open %s: %v\n", path, err)
 		os.Exit(1)
 	}
@@ -571,7 +663,7 @@ func main() {
 	// the field's posture (VELOCITY/PROPHECY) before each ripple, the fast present-time
 	// twin of the slow limpha recall pressure. Same YENT_SARTRE_EVENTS as the limpha path.
 	if ev := strings.TrimSpace(os.Getenv("YENT_SARTRE_EVENTS")); ev != "" {
-		iw.SetSense(sartreSense{eventsPath: ev})
+		iw.SetSense(&sartreSense{eventsPath: ev, offset: sartreEOFOffset(ev), limpha: limpha, state: limphaStateFromCanonical})
 		fmt.Println("=== SARTRE sense wired: environment perception is a live field reflex (before the circles) ===")
 	}
 
@@ -729,6 +821,43 @@ func main() {
 		}
 		fmt.Printf("    (YENT_DOCK_FORCE_AUTUMN=1: field driven to autumn energy=%.3f — sleep will consolidate)\n",
 			flowBody.AutumnEnergy())
+	}
+
+	// The will: default OFF. When YENT_WILL_UTILS_DIR points at the built self-reading utilities,
+	// Yent's will loop runs alongside the breath — the AML confluence physics (the_will_design.aml)
+	// crests his own MetaJanus + field metrics into a will_gaze tide, and when it crests he reaches
+	// for a utility whose perception re-enters the field through sartreSense (the spiral). Persistent
+	// globals carry the tide, so they must be armed. The loop is its own goroutine: a slow reach
+	// stalls only the will's own cadence, never the inner-world goroutines.
+	if utilsDir := strings.TrimSpace(os.Getenv("YENT_WILL_UTILS_DIR")); utilsDir != "" {
+		flowBody.PersistentMode(true)
+		sinkPath := strings.TrimSpace(os.Getenv("YENT_SARTRE_EVENTS"))
+		root := strings.TrimSpace(os.Getenv("YENT_WILL_ROOT"))
+		if root == "" {
+			root = "." // repo_monitor scans nothing without a --path, so default to the working dir
+		}
+		stateDir := willStateDir(root)
+		if err := os.MkdirAll(stateDir, 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "[will] state dir %s: %v\n", stateDir, err)
+		}
+		wt := &willTicker{
+			field:  flowBody,
+			script: willScriptPath(),
+			spawner: osSpawner{
+				dir:      utilsDir,
+				root:     root,
+				stateDir: stateDir,
+				timeout:  willReachTimeout(),
+			},
+			sink:       fileSink{path: sinkPath},
+			refractory: willRefractoryTicks(),
+		}
+		go wt.run(ctx, willTickEvery())
+		fmt.Printf("=== will wired: confluence tide -> reach for a self-reading utility (utils=%s, every %s) ===\n",
+			utilsDir, willTickEvery())
+		if sinkPath == "" {
+			fmt.Println("    (YENT_SARTRE_EVENTS unset: the will reaches and reads, but the spiral cannot close)")
+		}
 	}
 
 	iw.Breathe(ctx)
