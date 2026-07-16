@@ -112,6 +112,27 @@ func TestBuildSartreReceiptCapsTraceButCountsMetrics(t *testing.T) {
 	}
 }
 
+func TestBuildSartreReceiptKeepsWillPhasesOutOfChangeCounts(t *testing.T) {
+	events := []SartreEvent{
+		{ID: "r1", Phase: "intention", Outcome: "crest", Utility: "repo_monitor", Kind: "modified", Path: "README.md"},
+		{ID: "r1", Phase: "act", Outcome: "spawned", Utility: "repo_monitor"},
+		{ID: "r1", Phase: "learning", Outcome: "no_novelty", Utility: "repo_monitor"},
+		{ID: "r2", Phase: "effect", Utility: "repo_monitor", Kind: "modified", Path: "README.md"},
+	}
+	receipt := BuildSartreReceipt(events)
+	if receipt.EventCount != 4 {
+		t.Fatalf("all typed events should be counted as received, got %d", receipt.EventCount)
+	}
+	if receipt.Changed != 1 || !receipt.ReadmeChanged {
+		t.Fatalf("only the actual effect/change event should move change counters: %+v", receipt)
+	}
+	if len(receipt.Trace) < 2 ||
+		!strings.Contains(strings.Join(receipt.Trace, " | "), "will repo_monitor intention crest") ||
+		!strings.Contains(strings.Join(receipt.Trace, " | "), "repo_monitor modified README.md") {
+		t.Fatalf("receipt should preserve will phases and effect trace: %#v", receipt.Trace)
+	}
+}
+
 func TestSartreMemoryFiltersOtherSeams(t *testing.T) {
 	lc := newTestLimpha(t)
 	if _, err := lc.StoreSeam(Seam{

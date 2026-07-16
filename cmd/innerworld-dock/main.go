@@ -37,6 +37,7 @@ package main
 import "C"
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -205,13 +206,16 @@ func newBody(name, bin, model, workdir string, args []string) *yent.DOEBody {
 type sartreSense struct {
 	eventsPath string
 	offset     int64 // cursor: how much of the events file has already been perceived
+	tail       []byte
+	limpha     *yent.LimphaClient
+	state      func() yent.LimphaState
 }
 
-// readNew returns only the bytes appended since the last read, advancing the cursor — so each
-// event is perceived exactly once, never replayed every ripple (the will appends to this file
-// continuously; without a cursor sartreSense would re-apply the whole history each breath and
-// latch the field). A file shorter than the cursor was truncated/rotated, so it re-reads from
-// the start. No cgo here, so the consume semantics are unit-tested directly (readNew).
+// readNew returns only complete JSONL events appended since the last read, advancing the cursor
+// while preserving a partial trailing record for the next read — so each complete event is
+// perceived exactly once, never replayed every ripple, and never consumed half-written. A file
+// shorter than the cursor was truncated/rotated, so it re-reads from the start. No cgo here, so
+// the consume semantics are unit-tested directly (readNew).
 func (s *sartreSense) readNew() []byte {
 	f, err := os.Open(s.eventsPath)
 	if err != nil {
@@ -220,6 +224,7 @@ func (s *sartreSense) readNew() []byte {
 	defer f.Close()
 	if fi, statErr := f.Stat(); statErr == nil && fi.Size() < s.offset {
 		s.offset = 0
+		s.tail = nil
 	}
 	if _, err := f.Seek(s.offset, io.SeekStart); err != nil {
 		return nil
@@ -229,7 +234,19 @@ func (s *sartreSense) readNew() []byte {
 		return nil
 	}
 	s.offset += int64(len(raw))
-	return raw
+	buf := append(append([]byte(nil), s.tail...), raw...)
+	cut := bytes.LastIndexByte(buf, '\n')
+	if cut < 0 {
+		s.tail = buf
+		return nil
+	}
+	complete := buf[:cut+1]
+	s.tail = append(s.tail[:0], buf[cut+1:]...)
+	lines := completeSartreJSONLines(complete)
+	if len(lines) == 0 {
+		return nil
+	}
+	return bytes.Join(lines, []byte{'\n'})
 }
 
 func (s *sartreSense) Pressure() (string, bool) {
@@ -240,7 +257,24 @@ func (s *sartreSense) Pressure() (string, bool) {
 	if len(raw) == 0 {
 		return "", false
 	}
-	cjson := C.CString(string(raw))
+	events := yent.ParseSartreEventsJSONL(string(raw))
+	if len(events) == 0 {
+		return "", false
+	}
+	if s.limpha != nil {
+		st := yent.LimphaState{}
+		if s.state != nil {
+			st = s.state()
+		}
+		if _, err := s.limpha.StoreSartreEvents(events, st); err != nil {
+			fmt.Fprintf(os.Stderr, "[dock] SARTRE live limpha store: %v\n", err)
+		}
+	}
+	filtered := sartrePerceptionJSONL(events)
+	if filtered == "" {
+		return "", false
+	}
+	cjson := C.CString(filtered)
 	defer C.free(unsafe.Pointer(cjson))
 	var p C.SartrePerception
 	C.sartre_perceive_from_events(cjson, &p)
@@ -253,6 +287,29 @@ func (s *sartreSense) Pressure() (string, bool) {
 		return "", false
 	}
 	return C.GoStringN(&buf[0], n), true
+}
+
+func sartreEOFOffset(path string) int64 {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return fi.Size()
+}
+
+func sartrePerceptionJSONL(events []yent.SartreEvent) string {
+	var b strings.Builder
+	for _, ev := range events {
+		if ev.Phase != "" && ev.Phase != "effect" {
+			continue
+		}
+		if ev.Utility == "repo_monitor" && (ev.Kind == "added" || ev.Kind == "modified" || ev.Kind == "removed") {
+			line, _ := json.Marshal(ev)
+			b.Write(line)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
 }
 
 // sartreMetricSink is the reciprocal half of the SARTRE bridge: after innerworld
@@ -606,7 +663,7 @@ func main() {
 	// the field's posture (VELOCITY/PROPHECY) before each ripple, the fast present-time
 	// twin of the slow limpha recall pressure. Same YENT_SARTRE_EVENTS as the limpha path.
 	if ev := strings.TrimSpace(os.Getenv("YENT_SARTRE_EVENTS")); ev != "" {
-		iw.SetSense(&sartreSense{eventsPath: ev})
+		iw.SetSense(&sartreSense{eventsPath: ev, offset: sartreEOFOffset(ev), limpha: limpha, state: limphaStateFromCanonical})
 		fmt.Println("=== SARTRE sense wired: environment perception is a live field reflex (before the circles) ===")
 	}
 
@@ -774,14 +831,14 @@ func main() {
 	// stalls only the will's own cadence, never the inner-world goroutines.
 	if utilsDir := strings.TrimSpace(os.Getenv("YENT_WILL_UTILS_DIR")); utilsDir != "" {
 		flowBody.PersistentMode(true)
-		stateDir := strings.TrimSpace(os.Getenv("YENT_WILL_STATE_DIR"))
-		if stateDir == "" {
-			stateDir = os.TempDir()
-		}
 		sinkPath := strings.TrimSpace(os.Getenv("YENT_SARTRE_EVENTS"))
 		root := strings.TrimSpace(os.Getenv("YENT_WILL_ROOT"))
 		if root == "" {
 			root = "." // repo_monitor scans nothing without a --path, so default to the working dir
+		}
+		stateDir := willStateDir(root)
+		if err := os.MkdirAll(stateDir, 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "[will] state dir %s: %v\n", stateDir, err)
 		}
 		wt := &willTicker{
 			field:  flowBody,

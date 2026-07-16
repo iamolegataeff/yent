@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -74,18 +77,43 @@ type osSpawner struct {
 	timeout  time.Duration // a reach cannot hang the will forever
 }
 
-func (s osSpawner) Spawn(ctx context.Context, util string) ([]byte, error) {
+func (s osSpawner) Spawn(ctx context.Context, util string) (willSpawnResult, error) {
 	bin := filepath.Join(s.dir, util)
+	statePath := filepath.Join(s.stateDir, util+".state")
+	pendingPath := statePath + ".pending"
+	if err := preparePendingWillState(statePath, pendingPath); err != nil {
+		return willSpawnResult{}, err
+	}
 	cctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, bin, willUtilArgs(util, s.root, s.stateDir)...)
+	cmd := exec.CommandContext(cctx, bin, willUtilArgsWithState(util, s.root, pendingPath)...)
 	cw := &capWriter{max: willMaxStdout} // the timeout bounds time; this bounds bytes
 	cmd.Stdout = cw
 	cmd.Stderr = os.Stderr // the utility's diagnostics pass through; only stdout is the event stream
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("run %s: %w", bin, err)
+		return willSpawnResult{}, fmt.Errorf("run %s: %w", bin, err)
 	}
-	return cw.buf.Bytes(), nil
+	return willSpawnResult{
+		Line: cw.buf.Bytes(),
+		Commit: func() error {
+			return os.Rename(pendingPath, statePath)
+		},
+	}, nil
+}
+
+func preparePendingWillState(statePath, pendingPath string) error {
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
+		return err
+	}
+	if data, err := os.ReadFile(statePath); err == nil {
+		return os.WriteFile(pendingPath, data, 0o644)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Remove(pendingPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // willMaxStdout caps how much of a utility's stdout the will buffers. A first scan over a large
@@ -118,7 +146,11 @@ func (w *capWriter) Write(p []byte) (int, error) {
 // a pressure crest must never resolve to an empty scan. An empty root here (tests) drops the path
 // flags, which is repo_monitor's silent-no-op case, exactly what the wiring's default prevents.
 func willUtilArgs(util, root, stateDir string) []string {
-	args := []string{"--once", "--state", filepath.Join(stateDir, util+".state")}
+	return willUtilArgsWithState(util, root, filepath.Join(stateDir, util+".state"))
+}
+
+func willUtilArgsWithState(util, root, statePath string) []string {
+	args := []string{"--once", "--state", statePath}
 	switch util {
 	case willUtilPressure: // repo_monitor
 		if root != "" {
@@ -126,19 +158,23 @@ func willUtilArgs(util, root, stateDir string) []string {
 		}
 	case willUtilOrigin: // whatdotheythinkiam
 		if root != "" {
-			args = append(args, "--readme", filepath.Join(root, "README.md"), "--research", root)
+			args = append(args, "--readme", filepath.Join(root, "README.md"), "--research", filepath.Join(root, "research"))
 		}
 	}
 	return args
 }
 
-// fileSink appends a utility's event line(s) to YENT_SARTRE_EVENTS — the same file the sartreSense
-// reflex reads each ripple, so the reach's perception re-enters the field and shifts the next
-// confluence (the spiral). An empty path or empty line is a silent no-op.
+// fileSink appends complete JSONL utility events to YENT_SARTRE_EVENTS — the same file the
+// sartreSense reflex reads each ripple, so the reach's perception re-enters the field and shifts
+// the next confluence (the spiral). An empty path or empty line is a silent no-op.
 type fileSink struct{ path string }
 
 func (s fileSink) Emit(line []byte) error {
 	if s.path == "" || len(line) == 0 {
+		return nil
+	}
+	lines := completeSartreJSONLines(line)
+	if len(lines) == 0 {
 		return nil
 	}
 	f, err := os.OpenFile(s.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
@@ -146,7 +182,84 @@ func (s fileSink) Emit(line []byte) error {
 		return err
 	}
 	defer f.Close()
-	body := append([]byte(strings.TrimRight(string(line), "\n")), '\n')
-	_, err = f.Write(body)
-	return err
+	for _, body := range lines {
+		if _, err := f.Write(append(body, '\n')); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s fileSink) EmitEvent(ev willEvent) error {
+	if ev.Timestamp == 0 {
+		ev.Timestamp = time.Now().Unix()
+	}
+	b, err := json.Marshal(ev)
+	if err != nil {
+		return err
+	}
+	return s.Emit(b)
+}
+
+func completeSartreJSONLines(raw []byte) [][]byte {
+	var out [][]byte
+	for _, part := range bytes.Split(raw, []byte{'\n'}) {
+		line := bytes.TrimSpace(part)
+		if len(line) == 0 || line[0] != '{' || !json.Valid(line) {
+			continue
+		}
+		out = append(out, append([]byte(nil), line...))
+	}
+	return out
+}
+
+func tagSartreEffectLines(raw []byte, eventID string) []byte {
+	var out bytes.Buffer
+	for _, line := range completeSartreJSONLines(raw) {
+		var obj map[string]any
+		if err := json.Unmarshal(line, &obj); err != nil {
+			continue
+		}
+		if _, ok := obj["id"]; !ok && eventID != "" {
+			obj["id"] = eventID
+		}
+		obj["phase"] = "effect"
+		b, err := json.Marshal(obj)
+		if err != nil {
+			continue
+		}
+		out.Write(b)
+		out.WriteByte('\n')
+	}
+	return out.Bytes()
+}
+
+type willEvent struct {
+	ID        string `json:"id,omitempty"`
+	Phase     string `json:"phase,omitempty"`
+	Outcome   string `json:"outcome,omitempty"`
+	Utility   string `json:"util"`
+	Kind      string `json:"kind,omitempty"`
+	Path      string `json:"path,omitempty"`
+	Timestamp int64  `json:"ts,omitempty"`
+}
+
+func newWillEventID(util string, gaze, origin, pressure float32) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%.6f|%.6f|%.6f", util, time.Now().UnixNano(), gaze, origin, pressure)))
+	return hex.EncodeToString(sum[:8])
+}
+
+func willStateDir(root string) string {
+	if stateDir := strings.TrimSpace(os.Getenv("YENT_WILL_STATE_DIR")); stateDir != "" {
+		return stateDir
+	}
+	key := "none"
+	if root != "" {
+		if abs, err := filepath.Abs(root); err == nil {
+			root = abs
+		}
+		keyBytes := sha256.Sum256([]byte(filepath.Clean(root)))
+		key = hex.EncodeToString(keyBytes[:8])
+	}
+	return filepath.Join(os.TempDir(), "yent-will-"+key)
 }

@@ -19,17 +19,33 @@ func writeFakeUtil(t *testing.T, dir, name, stdout string) {
 	}
 }
 
+func writeFakeStateUtil(t *testing.T, dir, name, stdout string) {
+	t.Helper()
+	script := "#!/bin/sh\n" +
+		"while [ \"$#\" -gt 0 ]; do\n" +
+		"  if [ \"$1\" = \"--state\" ]; then shift; printf 'state\\n' > \"$1\"; fi\n" +
+		"  shift || break\n" +
+		"done\n" +
+		"printf '%s\\n' '" + stdout + "'\n"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake state util: %v", err)
+	}
+}
+
 func TestOsSpawnerCapturesStdout(t *testing.T) {
 	dir := t.TempDir()
 	line := `{"util":"whatdotheythinkiam","kind":"framing","reduced":2,"recognized":5}`
 	writeFakeUtil(t, dir, willUtilOrigin, line)
 	sp := osSpawner{dir: dir, stateDir: t.TempDir(), timeout: 5 * time.Second}
-	out, err := sp.Spawn(context.Background(), willUtilOrigin)
+	result, err := sp.Spawn(context.Background(), willUtilOrigin)
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	if !strings.Contains(string(out), `"util":"whatdotheythinkiam"`) {
-		t.Errorf("the spawner must capture the utility's stdout JSON, got %q", out)
+	if !strings.Contains(string(result.Line), `"util":"whatdotheythinkiam"`) {
+		t.Errorf("the spawner must capture the utility's stdout JSON, got %q", result.Line)
+	}
+	if result.Commit == nil {
+		t.Fatal("spawner must return a pending state commit")
 	}
 }
 
@@ -60,15 +76,36 @@ func TestOsSpawnerCapsStdout(t *testing.T) {
 		t.Fatal(err)
 	}
 	sp := osSpawner{dir: dir, stateDir: t.TempDir(), timeout: 10 * time.Second}
-	out, err := sp.Spawn(context.Background(), willUtilOrigin)
+	result, err := sp.Spawn(context.Background(), willUtilOrigin)
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	if len(out) > willMaxStdout {
-		t.Errorf("stdout must be capped at %d bytes, got %d", willMaxStdout, len(out))
+	if len(result.Line) > willMaxStdout {
+		t.Errorf("stdout must be capped at %d bytes, got %d", willMaxStdout, len(result.Line))
 	}
-	if len(out) == 0 {
+	if len(result.Line) == 0 {
 		t.Error("a flooding utility should still yield the captured head, got 0")
+	}
+}
+
+func TestOsSpawnerCommitsPendingStateOnlyWhenAsked(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := t.TempDir()
+	writeFakeStateUtil(t, dir, willUtilPressure, `{"util":"repo_monitor","kind":"added","path":"a.md"}`)
+	sp := osSpawner{dir: dir, root: t.TempDir(), stateDir: stateDir, timeout: 5 * time.Second}
+	result, err := sp.Spawn(context.Background(), willUtilPressure)
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	statePath := filepath.Join(stateDir, willUtilPressure+".state")
+	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+		t.Fatalf("canonical state must not be published before commit, err=%v", err)
+	}
+	if err := result.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if _, err := os.Stat(statePath); err != nil {
+		t.Fatalf("canonical state should be published after commit: %v", err)
 	}
 }
 
@@ -78,9 +115,9 @@ func TestWillUtilArgs(t *testing.T) {
 	if !strings.Contains(a, "--once") || !strings.Contains(a, "--state /st/repo_monitor.state") || !strings.Contains(a, "--path /repo") {
 		t.Errorf("repo_monitor args wrong: %q", a)
 	}
-	// whatdotheythinkiam: --readme <root>/README.md --research <root>
+	// whatdotheythinkiam: --readme <root>/README.md --research <root>/research
 	b := strings.Join(willUtilArgs(willUtilOrigin, "/repo", "/st"), " ")
-	if !strings.Contains(b, "--readme /repo/README.md") || !strings.Contains(b, "--research /repo") {
+	if !strings.Contains(b, "--readme /repo/README.md") || !strings.Contains(b, "--research /repo/research") {
 		t.Errorf("whatdotheythinkiam args wrong: %q", b)
 	}
 	// no root: just --once --state, no path flags to confuse the utility's parser
@@ -106,6 +143,58 @@ func TestFileSinkAppends(t *testing.T) {
 	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 	if len(lines) != 2 || lines[0] != `{"util":"a"}` || lines[1] != `{"util":"b"}` {
 		t.Errorf("the sink must append one clean line per Emit, got %q", data)
+	}
+}
+
+func TestFileSinkDropsNoiseAndIncompleteRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	sink := fileSink{path: path}
+	raw := []byte("not json with \"kind\"\n" +
+		`{"util":"repo_monitor","kind":"added","path":"a.md"}` + "\n" +
+		`{"util":"repo_monitor","kind":"modified"`)
+	if err := sink.Emit(raw); err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	got := strings.TrimSpace(string(data))
+	want := `{"util":"repo_monitor","kind":"added","path":"a.md"}`
+	if got != want {
+		t.Fatalf("sink must persist only complete valid JSONL records\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+func TestTagSartreEffectLines(t *testing.T) {
+	raw := []byte(`{"util":"repo_monitor","kind":"added","path":"a.md"}` + "\nnoise\n")
+	got := string(tagSartreEffectLines(raw, "reach1"))
+	if !strings.Contains(got, `"id":"reach1"`) ||
+		!strings.Contains(got, `"phase":"effect"`) ||
+		!strings.Contains(got, `"util":"repo_monitor"`) ||
+		strings.Contains(got, "noise") {
+		t.Fatalf("effect tagging failed: %q", got)
+	}
+}
+
+func TestFileSinkEmitEvent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	if err := (fileSink{path: path}).EmitEvent(willEvent{
+		ID:      "abc",
+		Phase:   "learning",
+		Outcome: "no_novelty",
+		Utility: willUtilOrigin,
+	}); err != nil {
+		t.Fatalf("EmitEvent: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"phase":"learning"`) ||
+		!strings.Contains(string(data), `"outcome":"no_novelty"`) ||
+		!strings.Contains(string(data), `"util":"whatdotheythinkiam"`) {
+		t.Fatalf("typed will event not written: %s", data)
 	}
 }
 
