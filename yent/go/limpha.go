@@ -165,6 +165,14 @@ CREATE TABLE IF NOT EXISTS seams (
 );
 CREATE INDEX IF NOT EXISTS idx_seams_timestamp ON seams(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_seams_session ON seams(session_id);
+CREATE TABLE IF NOT EXISTS sartre_event_ids (
+    event_key TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    phase TEXT DEFAULT '',
+    utility TEXT DEFAULT '',
+    recorded_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sartre_event_ids_event ON sartre_event_ids(event_id);
 `
 
 // all conversation columns in schema order — keep in sync with scanConvRow.
