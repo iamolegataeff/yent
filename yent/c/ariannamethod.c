@@ -6323,7 +6323,7 @@ static int aml_exec_line(AML_ExecCtx* ctx, int idx) {
 // Execute a block of lines [start, end)
 static int aml_exec_block(AML_ExecCtx* ctx, int start, int end) {
     int i = start;
-    while (i < end && i < ctx->nlines && !ctx->has_return) {
+    while (i < end && i < ctx->nlines && !ctx->has_return && !ctx->error[0]) {
         i = aml_exec_line(ctx, i);
     }
     return 0;
@@ -6368,8 +6368,12 @@ int am_exec(const char* script) {
     // second pass: execute top-level block
     aml_exec_block(&ctx, 0, nlines);
 
-    // v4.0: save globals to persistent storage, then clean up
-    persistent_save(&ctx.globals);
+    // v4.0: only successful blocks commit globals back to persistent storage.
+    // A failed script may have executed local assignments before the error; those
+    // belong to the failed transaction, not future ticks.
+    if (!ctx.error[0]) {
+        persistent_save(&ctx.globals);
+    }
     symtab_clear_arrays(&ctx.globals);
 
     free(lines);
@@ -6776,7 +6780,9 @@ int am_exec_compiled(void* handle) {
         if (ctx.error[0]) break;
     }
 
-    persistent_save(&ctx.globals);
+    if (!ctx.error[0]) {
+        persistent_save(&ctx.globals);
+    }
     symtab_clear_arrays(&ctx.globals);
 
     if (ctx.error[0]) {

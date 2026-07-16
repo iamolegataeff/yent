@@ -228,6 +228,31 @@ func TestPersistentVarBridge(t *testing.T) {
 	}
 }
 
+func TestPersistentExecFailureDoesNotCommitOrContinue(t *testing.T) {
+	Init()
+	b := New(nil)
+	b.PersistentMode(true)
+	defer b.PersistentMode(false)
+
+	if err := b.Exec("txn_guard = 1\nDESTINY 0.2"); err != nil {
+		t.Fatalf("seed persistent state: %v", err)
+	}
+	badPath := filepath.Join(t.TempDir(), "missing", "field.soma")
+	err := b.Exec(fmt.Sprintf("txn_guard = 7\nSAVE %q\nDESTINY 0.9\ntxn_after = 9", badPath))
+	if err == nil {
+		t.Fatal("SAVE into a missing parent should fail")
+	}
+	if got := b.GetVarFloat("txn_guard"); got != 1 {
+		t.Fatalf("failed exec must not commit pre-error persistent globals, txn_guard=%.3f want 1", got)
+	}
+	if got := b.GetVarFloat("txn_after"); got != 0 {
+		t.Fatalf("failed exec must not persist post-error globals, txn_after=%.3f want 0", got)
+	}
+	if got := b.Destiny(); got != 0.2 {
+		t.Fatalf("failed exec must stop before post-error field commands, destiny=%.3f want 0.2", got)
+	}
+}
+
 // TestExecFileRunsScript proves the multi-line file path Go loads the will script through,
 // and that a missing file surfaces an error rather than passing silently.
 func TestExecFileRunsScript(t *testing.T) {
