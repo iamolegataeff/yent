@@ -351,6 +351,67 @@ func TestWillTickTypedPhasesSurroundPerception(t *testing.T) {
 	}
 }
 
+func TestWillTickNoNoveltyExtendsNextCooldown(t *testing.T) {
+	sp := &fakeSpawner{}
+	sk := &typedFakeSink{}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp, &sk.fakeSink)
+	w.sink = sk
+	w.refractory = 2
+
+	if _, err := w.tick(context.Background()); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	if !sp.committed || !f.discharged {
+		t.Fatal("no-novelty still needs a durable state commit and tide discharge")
+	}
+	if w.quietRuns != 1 || w.cooldown != 3 {
+		t.Fatalf("first no-novelty should add one quiet cooldown breath, quiet=%d cooldown=%d", w.quietRuns, w.cooldown)
+	}
+	learn := sk.events[len(sk.events)-1]
+	if learn.Outcome != "no_novelty" || learn.EffectCount != 0 || learn.CooldownBreaths != 3 {
+		t.Fatalf("learning receipt must carry no-novelty plasticity, got %#v", learn)
+	}
+
+	w.cooldown = 0
+	f.vars["will_gaze"] = 1.5
+	f.vars["will_pressure_tide"] = 1.5
+	f.discharged = false
+	sp.committed = false
+	sk.events = nil
+	if _, err := w.tick(context.Background()); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	if w.quietRuns != 2 || w.cooldown != 4 {
+		t.Fatalf("second no-novelty should continue quiet plasticity, quiet=%d cooldown=%d", w.quietRuns, w.cooldown)
+	}
+}
+
+func TestWillTickPerceptionCommittedResetsQuietPlasticity(t *testing.T) {
+	sp := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"modified","path":"research/new.md"}`)}
+	sk := &typedFakeSink{}
+	w, _ := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp, &sk.fakeSink)
+	w.sink = sk
+	w.refractory = 2
+	w.quietRuns = 3
+
+	if _, err := w.tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if w.quietRuns != 0 || w.cooldown != 2 {
+		t.Fatalf("committed perception should return to the base refractory, quiet=%d cooldown=%d", w.quietRuns, w.cooldown)
+	}
+	learn := sk.events[len(sk.events)-1]
+	if learn.Outcome != "perception_committed" || learn.EffectCount != 1 || learn.CooldownBreaths != 2 {
+		t.Fatalf("learning receipt must carry committed-perception cooldown, got %#v", learn)
+	}
+}
+
 func TestWillTickOverflowDoesNotCommitOrDischarge(t *testing.T) {
 	sp := &fakeSpawner{
 		line:     []byte(`{"util":"repo_monitor","kind":"added","path":"a.md"}`),
