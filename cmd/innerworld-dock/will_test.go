@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -409,6 +410,78 @@ func TestWillTickPerceptionCommittedResetsQuietPlasticity(t *testing.T) {
 	learn := sk.events[len(sk.events)-1]
 	if learn.Outcome != "perception_committed" || learn.EffectCount != 1 || learn.CooldownBreaths != 2 {
 		t.Fatalf("learning receipt must carry committed-perception cooldown, got %#v", learn)
+	}
+}
+
+func TestWillTickPersistsQuietLearningState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state", "will-learning.state.json")
+	sp := &fakeSpawner{}
+	sk := &typedFakeSink{}
+	w, _ := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp, &sk.fakeSink)
+	w.sink = sk
+	w.refractory = 2
+	w.learningStatePath = path
+
+	if _, err := w.tick(context.Background()); err != nil {
+		t.Fatalf("no-novelty tick: %v", err)
+	}
+	st, err := loadWillLearningState(path)
+	if err != nil {
+		t.Fatalf("load learning state: %v", err)
+	}
+	if st.QuietRuns != 1 {
+		t.Fatalf("no-novelty must persist the quiet streak, got %#v", st)
+	}
+
+	sp2 := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"modified","path":"README.md"}`)}
+	sk2 := &typedFakeSink{}
+	w2, _ := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp2, &sk2.fakeSink)
+	w2.sink = sk2
+	w2.refractory = 2
+	w2.learningStatePath = path
+	w2.quietRuns = st.QuietRuns
+
+	if _, err := w2.tick(context.Background()); err != nil {
+		t.Fatalf("committed-perception tick: %v", err)
+	}
+	st, err = loadWillLearningState(path)
+	if err != nil {
+		t.Fatalf("reload learning state: %v", err)
+	}
+	if st.QuietRuns != 0 {
+		t.Fatalf("committed perception must persist quiet reset, got %#v", st)
+	}
+}
+
+func TestWillTickLearningStateErrorDoesNotDischarge(t *testing.T) {
+	sp := &fakeSpawner{}
+	sk := &typedFakeSink{}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp, &sk.fakeSink)
+	w.sink = sk
+	w.refractory = 2
+	w.learningStatePath = t.TempDir() // rename(file.pending, existing directory) must fail
+
+	util, err := w.tick(context.Background())
+	if err == nil {
+		t.Fatal("a learning-state write error must surface")
+	}
+	if util != willUtilPressure {
+		t.Fatalf("got util %q", util)
+	}
+	if f.discharged {
+		t.Fatal("the tide must not be spent when host-side learning was not durable")
+	}
+	if w.quietRuns != 0 || w.cooldown != 0 {
+		t.Fatalf("in-memory learning must not advance on a failed durable write, quiet=%d cooldown=%d", w.quietRuns, w.cooldown)
 	}
 }
 

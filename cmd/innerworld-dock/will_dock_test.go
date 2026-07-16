@@ -190,6 +190,33 @@ func TestWillStateDirNamespacesByRootAndOrganism(t *testing.T) {
 	}
 }
 
+func TestWillLearningStateRoundTrip(t *testing.T) {
+	path := willLearningStatePath(t.TempDir())
+	if st, err := loadWillLearningState(path); err != nil || st.QuietRuns != 0 {
+		t.Fatalf("missing learning state should load as zero state, st=%#v err=%v", st, err)
+	}
+	if err := saveWillLearningState(path, willLearningState{QuietRuns: 3}); err != nil {
+		t.Fatalf("save learning state: %v", err)
+	}
+	st, err := loadWillLearningState(path)
+	if err != nil {
+		t.Fatalf("load learning state: %v", err)
+	}
+	if st.Version != willLearningStateVersion || st.QuietRuns != 3 {
+		t.Fatalf("wrong learning state after round-trip: %#v", st)
+	}
+}
+
+func TestWillLearningStateRejectsCorruptQuietRuns(t *testing.T) {
+	path := willLearningStatePath(t.TempDir())
+	if err := os.WriteFile(path, []byte(`{"version":1,"quiet_runs":-1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadWillLearningState(path); err == nil {
+		t.Fatal("negative quiet_runs must fail loud instead of resetting the will silently")
+	}
+}
+
 func TestFileSinkAppends(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	sink := fileSink{path: path}

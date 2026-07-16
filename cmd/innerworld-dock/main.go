@@ -1088,25 +1088,34 @@ func main() {
 			stateDir := willStateDir(root)
 			if err := os.MkdirAll(stateDir, 0o755); err != nil {
 				fmt.Fprintf(os.Stderr, "[will] state dir %s: %v\n", stateDir, err)
-			}
-			wt := &willTicker{
-				field:  flowBody,
-				script: willScriptPath(),
-				spawner: osSpawner{
-					dir:      utilsDir,
-					root:     root,
-					stateDir: stateDir,
-					timeout:  willReachTimeout(),
-				},
-				sink:       fileSink{path: sinkPath},
-				rootID:     rootID,
-				refractory: willRefractoryTicks(),
-			}
-			go wt.run(ctx, willTickEvery())
-			fmt.Printf("=== will wired: confluence tide -> reach for a self-reading utility (utils=%s, root=%s, root_id=%s, state=%s, every %s) ===\n",
-				utilsDir, root, rootID, stateDir, willTickEvery())
-			if sinkPath == "" {
-				fmt.Println("    (YENT_SARTRE_EVENTS unset: the will reaches and reads, but the spiral cannot close)")
+			} else {
+				learningPath := willLearningStatePath(stateDir)
+				learningState, err := loadWillLearningState(learningPath)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[will] learning state %s: %v\n", learningPath, err)
+				} else {
+					wt := &willTicker{
+						field:  flowBody,
+						script: willScriptPath(),
+						spawner: osSpawner{
+							dir:      utilsDir,
+							root:     root,
+							stateDir: stateDir,
+							timeout:  willReachTimeout(),
+						},
+						sink:              fileSink{path: sinkPath},
+						rootID:            rootID,
+						learningStatePath: learningPath,
+						refractory:        willRefractoryTicks(),
+						quietRuns:         learningState.QuietRuns,
+					}
+					go wt.run(ctx, willTickEvery())
+					fmt.Printf("=== will wired: confluence tide -> reach for a self-reading utility (utils=%s, root=%s, root_id=%s, state=%s, quiet_runs=%d, every %s) ===\n",
+						utilsDir, root, rootID, stateDir, learningState.QuietRuns, willTickEvery())
+					if sinkPath == "" {
+						fmt.Println("    (YENT_SARTRE_EVENTS unset: the will reaches and reads, but the spiral cannot close)")
+					}
+				}
 			}
 		}
 	}

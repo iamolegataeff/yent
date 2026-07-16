@@ -119,6 +119,86 @@ func preparePendingWillState(statePath, pendingPath string) error {
 	return nil
 }
 
+const willLearningStateVersion = 1
+
+type willLearningState struct {
+	Version   int `json:"version"`
+	QuietRuns int `json:"quiet_runs"`
+}
+
+func willLearningStatePath(stateDir string) string {
+	return filepath.Join(stateDir, "will-learning.state.json")
+}
+
+func loadWillLearningState(path string) (willLearningState, error) {
+	st := willLearningState{Version: willLearningStateVersion}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return st, nil
+	}
+	if err != nil {
+		return st, err
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return st, fmt.Errorf("empty learning state")
+	}
+	if err := json.Unmarshal(data, &st); err != nil {
+		return st, err
+	}
+	if st.Version != willLearningStateVersion {
+		return st, fmt.Errorf("unsupported learning state version %d", st.Version)
+	}
+	if st.QuietRuns < 0 || st.QuietRuns > willQuietRunMax {
+		return st, fmt.Errorf("invalid quiet_runs %d", st.QuietRuns)
+	}
+	return st, nil
+}
+
+func saveWillLearningState(path string, st willLearningState) error {
+	if path == "" {
+		return nil
+	}
+	if st.QuietRuns < 0 {
+		st.QuietRuns = 0
+	}
+	if st.QuietRuns > willQuietRunMax {
+		st.QuietRuns = willQuietRunMax
+	}
+	st.Version = willLearningStateVersion
+	data, err := json.Marshal(st)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".pending"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if err := writeAll(f, data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
 // willMaxStdout caps how much of a utility's stdout the will buffers. A first scan over a large
 // root can emit one JSON record per eligible file, so an unbounded buffer could reach hundreds of
 // MB; 1 MiB is far more than any real reach's event stream and keeps memory bounded.
