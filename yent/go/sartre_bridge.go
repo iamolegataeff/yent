@@ -18,22 +18,26 @@ const (
 // SartreEvent is one bounded utility receipt from the SARTRE body organ.
 // It intentionally carries metadata, not file contents.
 type SartreEvent struct {
-	ID            string  `json:"id,omitempty"`
-	Phase         string  `json:"phase,omitempty"`
-	Outcome       string  `json:"outcome,omitempty"`
-	Utility       string  `json:"util"`
-	Kind          string  `json:"kind,omitempty"`
-	Path          string  `json:"path,omitempty"`
-	Tag           string  `json:"tag,omitempty"` // legacy context_processor readout; new receipts use Resonance
-	Resonance     float64 `json:"resonance,omitempty"`
-	Relevance     float64 `json:"relevance,omitempty"`
-	Pulse         float64 `json:"pulse,omitempty"`
-	Reduced       int     `json:"reduced,omitempty"`
-	Recognized    int     `json:"recognized,omitempty"`
-	Timestamp     int64   `json:"ts,omitempty"`
-	EffectCount   int     `json:"effect_count,omitempty"`
-	BytesCaptured int     `json:"bytes_captured,omitempty"`
-	BytesLimit    int     `json:"bytes_limit,omitempty"`
+	ID                string  `json:"id,omitempty"`
+	Phase             string  `json:"phase,omitempty"`
+	Outcome           string  `json:"outcome,omitempty"`
+	Utility           string  `json:"util"`
+	Kind              string  `json:"kind,omitempty"`
+	Path              string  `json:"path,omitempty"`
+	Tag               string  `json:"tag,omitempty"` // legacy context_processor readout; new receipts use Resonance
+	Resonance         float64 `json:"resonance,omitempty"`
+	Relevance         float64 `json:"relevance,omitempty"`
+	Pulse             float64 `json:"pulse,omitempty"`
+	Reduced           int     `json:"reduced,omitempty"`
+	Recognized        int     `json:"recognized,omitempty"`
+	Timestamp         int64   `json:"ts,omitempty"`
+	Breath            int     `json:"breath,omitempty"`
+	CadenceMS         int64   `json:"cadence_ms,omitempty"`
+	RefractoryBreaths int     `json:"refractory_breaths,omitempty"`
+	CooldownBreaths   int     `json:"cooldown_breaths,omitempty"`
+	EffectCount       int     `json:"effect_count,omitempty"`
+	BytesCaptured     int     `json:"bytes_captured,omitempty"`
+	BytesLimit        int     `json:"bytes_limit,omitempty"`
 }
 
 // SartreReceipt is the machine-readable memory_delta written into limpha.
@@ -171,6 +175,18 @@ func (ev SartreEvent) Trace() string {
 		if ev.Outcome != "" {
 			parts = append(parts, ev.Outcome)
 		}
+		if ev.Breath > 0 {
+			parts = append(parts, fmt.Sprintf("breath=%d", ev.Breath))
+		}
+		if ev.CadenceMS > 0 {
+			parts = append(parts, fmt.Sprintf("cadence_ms=%d", ev.CadenceMS))
+		}
+		if ev.RefractoryBreaths > 0 {
+			parts = append(parts, fmt.Sprintf("refractory_breaths=%d", ev.RefractoryBreaths))
+		}
+		if ev.CooldownBreaths > 0 {
+			parts = append(parts, fmt.Sprintf("cooldown_breaths=%d", ev.CooldownBreaths))
+		}
 		if ev.EffectCount > 0 {
 			parts = append(parts, fmt.Sprintf("effects=%d", ev.EffectCount))
 		}
@@ -291,6 +307,10 @@ func normalizeSartreEvent(ev SartreEvent) SartreEvent {
 	ev.Pulse = clamp01(ev.Pulse)
 	ev.Reduced = maxInt(0, ev.Reduced)
 	ev.Recognized = maxInt(0, ev.Recognized)
+	ev.Breath = maxInt(0, ev.Breath)
+	ev.CadenceMS = maxInt64(0, ev.CadenceMS)
+	ev.RefractoryBreaths = maxInt(0, ev.RefractoryBreaths)
+	ev.CooldownBreaths = maxInt(0, ev.CooldownBreaths)
 	ev.EffectCount = maxInt(0, ev.EffectCount)
 	ev.BytesCaptured = maxInt(0, ev.BytesCaptured)
 	ev.BytesLimit = maxInt(0, ev.BytesLimit)
@@ -347,6 +367,13 @@ func minInt(a, b int) int {
 }
 
 func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func maxInt64(a, b int64) int64 {
 	if a > b {
 		return a
 	}
