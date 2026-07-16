@@ -1122,26 +1122,39 @@ func main() {
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "[will] learning state %s: %v\n", learningPath, err)
 				} else {
-					wt := &willTicker{
-						field:  flowBody,
-						script: willScriptPath(),
-						spawner: osSpawner{
-							dir:      utilsDir,
-							root:     root,
-							stateDir: stateDir,
-							timeout:  willReachTimeout(),
-						},
-						sink:              fileSink{path: sinkPath},
-						rootID:            rootID,
-						learningStatePath: learningPath,
-						refractory:        willRefractoryTicks(),
-						quietRuns:         learningState.QuietRuns,
-					}
-					go wt.run(ctx, willTickEvery())
-					fmt.Printf("=== will wired: confluence tide -> reach for a self-reading utility (utils=%s, root=%s, root_id=%s, state=%s, quiet_runs=%d, every %s) ===\n",
-						utilsDir, root, rootID, stateDir, learningState.QuietRuns, willTickEvery())
-					if sinkPath == "" {
-						fmt.Println("    (YENT_SARTRE_EVENTS unset: the will reaches and reads, but the spiral cannot close)")
+					reachPath := willReachStatePath(stateDir)
+					reachState, err := loadWillReachState(reachPath)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "[will] reach state %s: %v\n", reachPath, err)
+					} else {
+						wt := &willTicker{
+							field:  flowBody,
+							script: willScriptPath(),
+							spawner: osSpawner{
+								dir:      utilsDir,
+								root:     root,
+								stateDir: stateDir,
+								timeout:  willReachTimeout(),
+							},
+							sink:              fileSink{path: sinkPath},
+							rootID:            rootID,
+							learningStatePath: learningPath,
+							reachStatePath:    reachPath,
+							refractory:        willRefractoryTicks(),
+							quietRuns:         learningState.QuietRuns,
+							nextReachSeq:      reachState.NextSeq,
+							pendingReach:      reachState.Pending,
+						}
+						go wt.run(ctx, willTickEvery())
+						pending := ""
+						if reachState.Pending != nil {
+							pending = fmt.Sprintf(", pending_reach=%s", reachState.Pending.ID)
+						}
+						fmt.Printf("=== will wired: confluence tide -> reach for a self-reading utility (utils=%s, root=%s, root_id=%s, state=%s, quiet_runs=%d, reach_seq=%d%s, every %s) ===\n",
+							utilsDir, root, rootID, stateDir, learningState.QuietRuns, reachState.NextSeq, pending, willTickEvery())
+						if sinkPath == "" {
+							fmt.Println("    (YENT_SARTRE_EVENTS unset: the will reaches and reads, but the spiral cannot close)")
+						}
 					}
 				}
 			}

@@ -217,6 +217,50 @@ func TestWillLearningStateRejectsCorruptQuietRuns(t *testing.T) {
 	}
 }
 
+func TestWillReachStateRoundTrip(t *testing.T) {
+	path := willReachStatePath(t.TempDir())
+	if st, err := loadWillReachState(path); err != nil || st.NextSeq != 1 || st.Pending != nil {
+		t.Fatalf("missing reach state should load as first sequence, st=%#v err=%v", st, err)
+	}
+	pending := &willPendingReach{
+		Seq:     3,
+		ID:      "reach3",
+		Utility: willUtilPressure,
+		Tide:    willTideSnapshot{Threshold: 1, Gaze: 1.5, PressureTide: 1.5},
+		Breath:  12,
+	}
+	if err := saveWillReachState(path, willReachState{NextSeq: 3, Pending: pending}); err != nil {
+		t.Fatalf("save pending reach: %v", err)
+	}
+	st, err := loadWillReachState(path)
+	if err != nil {
+		t.Fatalf("load pending reach: %v", err)
+	}
+	if st.NextSeq != 3 || st.Pending == nil || st.Pending.ID != "reach3" || st.Pending.Utility != willUtilPressure {
+		t.Fatalf("wrong pending reach after round-trip: %#v", st)
+	}
+	if err := saveWillReachState(path, willReachState{NextSeq: 4}); err != nil {
+		t.Fatalf("clear pending reach: %v", err)
+	}
+	st, err = loadWillReachState(path)
+	if err != nil {
+		t.Fatalf("reload cleared reach: %v", err)
+	}
+	if st.NextSeq != 4 || st.Pending != nil {
+		t.Fatalf("cleared reach state should advance sequence only, got %#v", st)
+	}
+}
+
+func TestWillReachStateRejectsCorruptPending(t *testing.T) {
+	path := willReachStatePath(t.TempDir())
+	if err := os.WriteFile(path, []byte(`{"version":1,"next_seq":2,"pending":{"seq":1,"id":"x","util":"repo_monitor"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadWillReachState(path); err == nil {
+		t.Fatal("pending reach with mismatched sequence must fail loud")
+	}
+}
+
 func TestFileSinkAppends(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	sink := fileSink{path: path}

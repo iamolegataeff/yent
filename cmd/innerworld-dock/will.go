@@ -61,12 +61,12 @@ const (
 )
 
 type willTideSnapshot struct {
-	Threshold    float32
-	Gaze         float32
-	PullOrigin   float32
-	PullPressure float32
-	OriginTide   float32
-	PressureTide float32
+	Threshold    float32 `json:"threshold"`
+	Gaze         float32 `json:"gaze"`
+	PullOrigin   float32 `json:"pull_origin"`
+	PullPressure float32 `json:"pull_pressure"`
+	OriginTide   float32 `json:"origin_tide"`
+	PressureTide float32 `json:"pressure_tide"`
 }
 
 func readWillTide(field willField) willTideSnapshot {
@@ -131,11 +131,14 @@ type willTicker struct {
 	sink              willSink
 	rootID            string        // stable identity of the root the will sensors read
 	learningStatePath string        // durable host-side quiet-run memory, under the namespaced state dir
+	reachStatePath    string        // durable pending reach id/sequence, so retries keep one causal identity
 	cadence           time.Duration // wall-clock pace of one will breath, recorded for receipts only
 	breath            int           // monotonically increasing will breath index
 	refractory        int           // breaths the will must wait after a reach before it can reach again
 	cooldown          int           // breaths remaining in the current refractory (state)
 	quietRuns         int           // consecutive completed reaches that found no novelty
+	nextReachSeq      int64         // next durable reach sequence in the namespaced state dir
+	pendingReach      *willPendingReach
 }
 
 // tick advances the will one step and, if the tide crests, reaches for the utility the dominant
@@ -153,11 +156,17 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	tide := readWillTide(w.field)
-	if tide.Threshold <= 0 || tide.Gaze < tide.Threshold {
+	if w.pendingReach == nil && (tide.Threshold <= 0 || tide.Gaze < tide.Threshold) {
 		return "", nil // the will has not gathered enough to reach
 	}
 	util := tide.dominantUtil()
-	eventID := newWillEventID(util, tide)
+	reach, err := w.beginReach(util, tide)
+	if err != nil {
+		return util, fmt.Errorf("will reach state %s: %w", util, err)
+	}
+	tide = reach.Tide
+	util = reach.Utility
+	eventID := reach.ID
 	if es, ok := w.sink.(willEventSink); ok {
 		if err := es.EmitEvent(w.event(tide, eventID, "intention", util, "crest")); err != nil {
 			return util, fmt.Errorf("will intent %s: %w", util, err)
@@ -217,12 +226,61 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 	if err := w.saveLearningState(nextQuiet); err != nil {
 		return util, fmt.Errorf("will learn %s state: %w", util, err)
 	}
+	if err := w.finishReach(reach.Seq); err != nil {
+		return util, fmt.Errorf("will finish %s reach: %w", util, err)
+	}
 	if err := dischargeWillTide(w.field); err != nil {
 		return util, fmt.Errorf("will discharge %s: %w", util, err)
 	}
 	w.quietRuns = nextQuiet
 	w.cooldown = nextCooldown
 	return util, nil
+}
+
+func (w *willTicker) beginReach(util string, tide willTideSnapshot) (willPendingReach, error) {
+	if w.pendingReach != nil {
+		return *w.pendingReach, nil
+	}
+	seq := w.nextReachSeq
+	if seq <= 0 {
+		seq = 1
+	}
+	reach := willPendingReach{
+		Seq:     seq,
+		ID:      newWillEventID(w.rootID, seq, util, tide),
+		Utility: util,
+		Tide:    tide,
+		Breath:  w.breath,
+	}
+	if err := w.saveReachState(seq, &reach); err != nil {
+		return willPendingReach{}, err
+	}
+	w.nextReachSeq = seq
+	w.pendingReach = &reach
+	return reach, nil
+}
+
+func (w *willTicker) finishReach(seq int64) error {
+	next := seq + 1
+	if next <= 0 {
+		return fmt.Errorf("invalid next reach sequence after %d", seq)
+	}
+	if err := w.saveReachState(next, nil); err != nil {
+		return err
+	}
+	w.nextReachSeq = next
+	w.pendingReach = nil
+	return nil
+}
+
+func (w *willTicker) saveReachState(nextSeq int64, pending *willPendingReach) error {
+	if w.reachStatePath == "" {
+		return nil
+	}
+	return saveWillReachState(w.reachStatePath, willReachState{
+		NextSeq: nextSeq,
+		Pending: pending,
+	})
 }
 
 const willQuietRefractoryMaxExtra = 4

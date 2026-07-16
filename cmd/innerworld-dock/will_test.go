@@ -242,6 +242,62 @@ func TestWillTickSpawnErrorSurfaces(t *testing.T) {
 	}
 }
 
+func TestWillTickReusesPendingReachIDAfterRetry(t *testing.T) {
+	sp := &fakeSpawner{err: errors.New("temporary sensor failure")}
+	sk := &typedFakeSink{}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp, &sk.fakeSink)
+	w.sink = sk
+	w.rootID = "rootabc"
+	w.reachStatePath = willReachStatePath(t.TempDir())
+
+	util, err := w.tick(context.Background())
+	if err == nil || util != willUtilPressure {
+		t.Fatalf("first reach should surface the sensor error, util=%q err=%v", util, err)
+	}
+	if f.discharged {
+		t.Fatal("a failed reach must not discharge the tide")
+	}
+	if len(sk.events) != 2 {
+		t.Fatalf("want intention and sensor_error learning events, got %#v", sk.events)
+	}
+	reachID := sk.events[0].ID
+	if reachID == "" || sk.events[1].ID != reachID {
+		t.Fatalf("failed reach phases must share a stable id, got %#v", sk.events)
+	}
+	st, err := loadWillReachState(w.reachStatePath)
+	if err != nil {
+		t.Fatalf("load pending reach: %v", err)
+	}
+	if st.Pending == nil || st.Pending.ID != reachID || st.NextSeq != 1 {
+		t.Fatalf("failed reach must remain pending for retry, got %#v", st)
+	}
+
+	sp.err = nil
+	sp.line = []byte(`{"util":"repo_monitor","kind":"modified","path":"README.md"}`)
+	sk.events = nil
+	if util, err = w.tick(context.Background()); err != nil || util != willUtilPressure {
+		t.Fatalf("retry should complete the same reach, util=%q err=%v", util, err)
+	}
+	if len(sk.events) != 3 {
+		t.Fatalf("retry should emit intention/act/learning, got %#v", sk.events)
+	}
+	for i, ev := range sk.events {
+		if ev.ID != reachID {
+			t.Fatalf("retry event %d changed reach id: got %#v want %s", i, ev, reachID)
+		}
+	}
+	st, err = loadWillReachState(w.reachStatePath)
+	if err != nil {
+		t.Fatalf("reload reach state: %v", err)
+	}
+	if st.Pending != nil || st.NextSeq != 2 {
+		t.Fatalf("completed retry should clear pending and advance sequence, got %#v", st)
+	}
+}
+
 func TestWillTickEmitErrorDoesNotDischarge(t *testing.T) {
 	sp, sk := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"added"}`)}, &fakeSink{err: errors.New("disk full")}
 	w, f := newWill(map[string]float32{
