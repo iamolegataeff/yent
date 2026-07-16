@@ -235,17 +235,25 @@ func tagSartreEffectLines(raw []byte, eventID string) []byte {
 }
 
 type willEvent struct {
-	ID        string `json:"id,omitempty"`
-	Phase     string `json:"phase,omitempty"`
-	Outcome   string `json:"outcome,omitempty"`
-	Utility   string `json:"util"`
-	Kind      string `json:"kind,omitempty"`
-	Path      string `json:"path,omitempty"`
-	Timestamp int64  `json:"ts,omitempty"`
+	ID           string  `json:"id,omitempty"`
+	Phase        string  `json:"phase,omitempty"`
+	Outcome      string  `json:"outcome,omitempty"`
+	Utility      string  `json:"util"`
+	Kind         string  `json:"kind,omitempty"`
+	Path         string  `json:"path,omitempty"`
+	Timestamp    int64   `json:"ts,omitempty"`
+	Gaze         float32 `json:"will_gaze,omitempty"`
+	Threshold    float32 `json:"will_threshold,omitempty"`
+	PullOrigin   float32 `json:"pull_origin,omitempty"`
+	PullPressure float32 `json:"pull_pressure,omitempty"`
+	OriginTide   float32 `json:"will_origin_tide,omitempty"`
+	PressureTide float32 `json:"will_pressure_tide,omitempty"`
 }
 
-func newWillEventID(util string, gaze, origin, pressure float32) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%.6f|%.6f|%.6f", util, time.Now().UnixNano(), gaze, origin, pressure)))
+func newWillEventID(util string, tide willTideSnapshot) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%.6f|%.6f|%.6f|%.6f|%.6f",
+		util, time.Now().UnixNano(), tide.Gaze, tide.PullOrigin, tide.PullPressure,
+		tide.OriginTide, tide.PressureTide)))
 	return hex.EncodeToString(sum[:8])
 }
 

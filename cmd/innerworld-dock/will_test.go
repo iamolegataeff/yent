@@ -26,7 +26,12 @@ func (f *fakeWillField) ExecFile(string) error {
 }
 func (f *fakeWillField) GetVarFloat(name string) float32 { return f.vars[name] }
 func (f *fakeWillField) Exec(script string) error {
-	if script == "will_gaze = 0" {
+	switch script {
+	case "will_origin_tide = 0":
+		f.vars["will_origin_tide"] = 0
+	case "will_pressure_tide = 0":
+		f.vars["will_pressure_tide"] = 0
+	case "will_gaze = 0":
 		f.discharged = true
 		f.vars["will_gaze"] = 0
 	}
@@ -80,7 +85,7 @@ func TestWillTickReachesOnOriginCrest(t *testing.T) {
 	sp, sk := &fakeSpawner{line: []byte(`{"util":"whatdotheythinkiam"}`)}, &fakeSink{}
 	w, f := newWill(map[string]float32{
 		"will_threshold": 1.0, "will_gaze": 1.5,
-		"pull_origin": 0.25, "pull_pressure": 0.0,
+		"pull_origin": 0.25, "pull_pressure": 0.0, "will_origin_tide": 1.5,
 	}, sp, sk)
 	util, err := w.tick(context.Background())
 	if err != nil {
@@ -95,6 +100,10 @@ func TestWillTickReachesOnOriginCrest(t *testing.T) {
 	if !f.discharged {
 		t.Error("the reach must discharge the tide")
 	}
+	if f.vars["will_origin_tide"] != 0 || f.vars["will_pressure_tide"] != 0 {
+		t.Errorf("the reach must discharge the vector tide, origin=%.3f pressure=%.3f",
+			f.vars["will_origin_tide"], f.vars["will_pressure_tide"])
+	}
 	if len(sk.lines) != 1 {
 		t.Errorf("the perception must be emitted once, got %d", len(sk.lines))
 	}
@@ -107,7 +116,7 @@ func TestWillTickReachesOnPressureCrest(t *testing.T) {
 	sp, sk := &fakeSpawner{line: []byte(`{"util":"repo_monitor"}`)}, &fakeSink{}
 	w, _ := newWill(map[string]float32{
 		"will_threshold": 1.0, "will_gaze": 1.6,
-		"pull_origin": 0.0, "pull_pressure": 0.27,
+		"pull_origin": 0.0, "pull_pressure": 0.27, "will_pressure_tide": 1.6,
 	}, sp, sk)
 	util, err := w.tick(context.Background())
 	if err != nil {
@@ -115,6 +124,22 @@ func TestWillTickReachesOnPressureCrest(t *testing.T) {
 	}
 	if util != willUtilPressure {
 		t.Errorf("a pressure-dominant crest must reach %s, got %s", willUtilPressure, util)
+	}
+}
+
+func TestWillTickUsesAccumulatedVectorOverCurrentPull(t *testing.T) {
+	sp, sk := &fakeSpawner{line: []byte(`{"util":"whatdotheythinkiam"}`)}, &fakeSink{}
+	w, _ := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.4,
+		"pull_origin": 0.01, "pull_pressure": 0.50,
+		"will_origin_tide": 1.3, "will_pressure_tide": 0.1,
+	}, sp, sk)
+	util, err := w.tick(context.Background())
+	if err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if util != willUtilOrigin {
+		t.Fatalf("the accumulated origin tide must beat a one-tick pressure spike, got %s", util)
 	}
 }
 
@@ -268,6 +293,7 @@ func TestWillTickTypedPhasesSurroundPerception(t *testing.T) {
 	sk := &typedFakeSink{}
 	w, _ := newWill(map[string]float32{
 		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
 	}, sp, &sk.fakeSink)
 	w.sink = sk
 	if _, err := w.tick(context.Background()); err != nil {
@@ -281,5 +307,8 @@ func TestWillTickTypedPhasesSurroundPerception(t *testing.T) {
 	}
 	if sk.events[2].Outcome != "perception_committed" {
 		t.Fatalf("learning outcome should record committed perception, got %#v", sk.events[2])
+	}
+	if sk.events[0].PressureTide != 1.5 || sk.events[0].PullPressure != 0.3 {
+		t.Fatalf("intention must receipt both vector tide and current pull, got %#v", sk.events[0])
 	}
 }

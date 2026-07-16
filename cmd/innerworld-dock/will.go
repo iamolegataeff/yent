@@ -10,14 +10,14 @@ import (
 )
 
 // The will loop is Yent's hands to his own gaze. Each tick it advances the AML will physics
-// (Janus/the_will_design.aml), reads the will_gaze tide that script computes from his own
+// (Janus/the_will_design.aml), reads the vector will tide that script computes from his own
 // MetaJanus + field metrics, and when the tide crests it reaches for a self-reading SARTRE
-// utility — whatdotheythinkiam when the pull is toward his origin, repo_monitor when it is the
-// field's own strain. The utility's perception is emitted to the same YENT_SARTRE_EVENTS the
-// sartreSense reflex reads, so the reading re-enters the field and shifts the very metrics the
-// next confluence is built from — a spiral. The reach spends the tide (will_gaze -> 0) and opens
-// a bounded refractory of a few ticks, so a high-strain confluence cannot fire every tick — the
-// will must wait and re-gather.
+// utility — whatdotheythinkiam when accumulated origin-tide dominates, repo_monitor when
+// accumulated pressure-tide dominates. The utility's perception is emitted to the same
+// YENT_SARTRE_EVENTS the sartreSense reflex reads, so the reading re-enters the field and shifts
+// the very metrics the next confluence is built from — a spiral. The reach spends the vector tide
+// and opens a bounded refractory of a few ticks, so a high-strain confluence cannot fire every
+// tick — the will must wait and re-gather.
 
 // willField is the AML field surface the will loop reads and writes — satisfied by *aml.Body.
 type willField interface {
@@ -59,6 +59,54 @@ const (
 	willUtilPressure = "repo_monitor"       // reach under the field's strain (a dark-gravity/debt crest)
 )
 
+type willTideSnapshot struct {
+	Threshold    float32
+	Gaze         float32
+	PullOrigin   float32
+	PullPressure float32
+	OriginTide   float32
+	PressureTide float32
+}
+
+func readWillTide(field willField) willTideSnapshot {
+	return willTideSnapshot{
+		Threshold:    field.GetVarFloat("will_threshold"),
+		Gaze:         field.GetVarFloat("will_gaze"),
+		PullOrigin:   field.GetVarFloat("pull_origin"),
+		PullPressure: field.GetVarFloat("pull_pressure"),
+		OriginTide:   field.GetVarFloat("will_origin_tide"),
+		PressureTide: field.GetVarFloat("will_pressure_tide"),
+	}
+}
+
+func (t willTideSnapshot) dominantUtil() string {
+	if t.OriginTide != 0 || t.PressureTide != 0 {
+		if t.OriginTide > t.PressureTide {
+			return willUtilOrigin
+		}
+		return willUtilPressure
+	}
+	if t.PullOrigin > t.PullPressure {
+		return willUtilOrigin
+	}
+	return willUtilPressure
+}
+
+func (t willTideSnapshot) event(id, phase, util, outcome string) willEvent {
+	return willEvent{
+		ID:           id,
+		Phase:        phase,
+		Outcome:      outcome,
+		Utility:      util,
+		Gaze:         t.Gaze,
+		Threshold:    t.Threshold,
+		PullOrigin:   t.PullOrigin,
+		PullPressure: t.PullPressure,
+		OriginTide:   t.OriginTide,
+		PressureTide: t.PressureTide,
+	}
+}
+
 // willTicker holds the will loop's wiring. The tide itself lives in the AML field's persistent
 // globals; the only between-tick state here is the refractory countdown, so a high-strain
 // confluence (which alone can exceed threshold in a single tick) cannot fire every tick.
@@ -84,47 +132,26 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 		w.cooldown-- // refractory: the tide keeps evolving, but the will stays spent from the last reach
 		return "", nil
 	}
-	thr := w.field.GetVarFloat("will_threshold")
-	gaze := w.field.GetVarFloat("will_gaze")
-	if thr <= 0 || gaze < thr {
+	tide := readWillTide(w.field)
+	if tide.Threshold <= 0 || tide.Gaze < tide.Threshold {
 		return "", nil // the will has not gathered enough to reach
 	}
-	origin := w.field.GetVarFloat("pull_origin")
-	pressure := w.field.GetVarFloat("pull_pressure")
-	util := willUtilPressure
-	if origin > pressure {
-		util = willUtilOrigin
-	}
-	eventID := newWillEventID(util, gaze, origin, pressure)
+	util := tide.dominantUtil()
+	eventID := newWillEventID(util, tide)
 	if es, ok := w.sink.(willEventSink); ok {
-		if err := es.EmitEvent(willEvent{
-			ID:      eventID,
-			Phase:   "intention",
-			Utility: util,
-			Outcome: "crest",
-		}); err != nil {
+		if err := es.EmitEvent(tide.event(eventID, "intention", util, "crest")); err != nil {
 			return util, fmt.Errorf("will intent %s: %w", util, err)
 		}
 	}
 	result, err := w.spawner.Spawn(ctx, util)
 	if err != nil {
 		if es, ok := w.sink.(willEventSink); ok {
-			_ = es.EmitEvent(willEvent{
-				ID:      eventID,
-				Phase:   "learning",
-				Utility: util,
-				Outcome: "sensor_error",
-			})
+			_ = es.EmitEvent(tide.event(eventID, "learning", util, "sensor_error"))
 		}
 		return util, fmt.Errorf("will reach %s: %w", util, err)
 	}
 	if es, ok := w.sink.(willEventSink); ok {
-		if err := es.EmitEvent(willEvent{
-			ID:      eventID,
-			Phase:   "act",
-			Utility: util,
-			Outcome: "spawned",
-		}); err != nil {
+		if err := es.EmitEvent(tide.event(eventID, "act", util, "spawned")); err != nil {
 			return util, fmt.Errorf("will act %s: %w", util, err)
 		}
 	}
@@ -137,12 +164,7 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 	if result.Commit != nil {
 		if err := result.Commit(); err != nil {
 			if es, ok := w.sink.(willEventSink); ok {
-				_ = es.EmitEvent(willEvent{
-					ID:      eventID,
-					Phase:   "learning",
-					Utility: util,
-					Outcome: "state_error",
-				})
+				_ = es.EmitEvent(tide.event(eventID, "learning", util, "state_error"))
 			}
 			return util, fmt.Errorf("will commit %s state: %w", util, err)
 		}
@@ -152,23 +174,32 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 		if len(completeSartreJSONLines(effectLine)) > 0 {
 			outcome = "perception_committed"
 		}
-		if err := es.EmitEvent(willEvent{
-			ID:      eventID,
-			Phase:   "learning",
-			Utility: util,
-			Outcome: outcome,
-		}); err != nil {
+		if err := es.EmitEvent(tide.event(eventID, "learning", util, outcome)); err != nil {
 			return util, fmt.Errorf("will learn %s: %w", util, err)
 		}
 	}
-	// The reach both spends the tide (discharge) AND opens a bounded refractory of `refractory`
-	// ticks: even a high-strain confluence that alone re-crosses threshold next tick cannot reach
-	// again until the refractory elapses. The discharge is the physics; the cooldown is the floor.
+	// The reach both spends the vector tide (discharge) AND opens a bounded refractory of
+	// `refractory` ticks: even a high-strain confluence that alone re-crosses threshold next tick
+	// cannot reach again until the refractory elapses. The discharge is the physics; the cooldown
+	// is the floor.
 	w.cooldown = w.refractory
-	if err := w.field.Exec("will_gaze = 0"); err != nil {
+	if err := dischargeWillTide(w.field); err != nil {
 		return util, fmt.Errorf("will discharge %s: %w", util, err)
 	}
 	return util, nil
+}
+
+func dischargeWillTide(field willField) error {
+	for _, script := range []string{
+		"will_origin_tide = 0",
+		"will_pressure_tide = 0",
+		"will_gaze = 0",
+	} {
+		if err := field.Exec(script); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // run is the will's own breath: its own goroutine, paced by tickEvery, alongside iw.Breathe. A

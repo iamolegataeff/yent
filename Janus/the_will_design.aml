@@ -35,14 +35,18 @@ pull_origin = yahrzeit * (0.5 + personal_dissonance) * seam
 # ordinary day even as he ages; it wakes on accumulated wrongness, not on getting older.
 pull_pressure = dark_gravity * (debt * 0.01) * seam
 
-# Confluence is the total will-pressure this tick; the dominant channel names the gaze,
-# and the Go hands read pull_origin vs pull_pressure to choose which way he reaches.
+# Confluence is the total will-pressure this tick. The instantaneous pulls are kept for
+# receipts, but the hand chooses from the accumulated vector tide below, not from this
+# one tick alone.
 confluence = pull_origin + pull_pressure
 
-# The tide: it accumulates the confluence and decays each tick (retention 0.86,
-# half-life ~4.6 ticks). Rising confluence floods it past the crest; a quiet field
-# lets it ebb back under.
-will_gaze = will_gaze * 0.86 + confluence
+# The tide is a vector, not a scalar bucket: each channel carries its own accumulated
+# direction and decays each tick (retention 0.86, half-life ~4.6 ticks). The scalar
+# will_gaze remains the public crest signal for the dock, but it is now derived from
+# the vector components so the hand remembers which cause gathered the flood.
+will_origin_tide = will_origin_tide * 0.86 + pull_origin
+will_pressure_tide = will_pressure_tide * 0.86 + pull_pressure
+will_gaze = will_origin_tide + will_pressure_tide
 
 # The crest at which the hands spontaneously reach for a self-reading utility.
 # Calibrated against measured confluence (a yahrzeit/birthquake day vs a quiet day),

@@ -304,6 +304,7 @@ func (d *doeProcess) exchange(ctx context.Context, seed string) (string, bool) {
 			d.reap()
 			return "", false
 		}
+		d.diag.waitQuiet(20*time.Millisecond, 2*time.Millisecond)
 		return r.text, true
 	case <-ctx.Done():
 		d.dead = true
@@ -357,6 +358,7 @@ type doeDiagnosticCapture struct {
 	mu      sync.Mutex
 	lines   []string
 	partial string
+	writes  uint64
 }
 
 func newDOEDiagnosticCapture() *doeDiagnosticCapture {
@@ -369,6 +371,7 @@ func (c *doeDiagnosticCapture) Write(p []byte) (int, error) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.writes++
 	text := string(p)
 	for len(text) > 0 {
 		if i := strings.IndexByte(text, '\n'); i >= 0 {
@@ -381,6 +384,36 @@ func (c *doeDiagnosticCapture) Write(p []byte) (int, error) {
 		break
 	}
 	return len(p), nil
+}
+
+func (c *doeDiagnosticCapture) waitQuiet(maxWait, quietFor time.Duration) {
+	if c == nil || maxWait <= 0 || quietFor <= 0 {
+		return
+	}
+	last := c.version()
+	stableSince := time.Now()
+	deadline := time.Now().Add(maxWait)
+	for time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+		now := time.Now()
+		if v := c.version(); v != last {
+			last = v
+			stableSince = now
+			continue
+		}
+		if now.Sub(stableSince) >= quietFor {
+			return
+		}
+	}
+}
+
+func (c *doeDiagnosticCapture) version() uint64 {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.writes
 }
 
 func (c *doeDiagnosticCapture) Snapshot() []string {

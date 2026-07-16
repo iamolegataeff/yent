@@ -115,10 +115,10 @@ func (b *Body) ExecFile(path string) error {
 }
 
 // PersistentMode enables (or disables) AML persistent globals, so a variable assigned in one
-// Exec/ExecFile survives into the next — the mechanism the will tide rides: will_gaze
-// accumulates and decays across ticks (will_gaze = will_gaze*decay + confluence). Disabling
-// frees the persistent globals. Init (am_init) clears them and turns the mode off, so a fresh
-// field always starts non-persistent — one enable at process start arms the tide.
+// Exec/ExecFile survives into the next — the mechanism the will tide rides: the vector tide
+// components accumulate and decay across ticks, and will_gaze is derived from their sum.
+// Disabling frees the persistent globals. Init (am_init) clears them and turns the mode off, so
+// a fresh field always starts non-persistent — one enable at process start arms the tide.
 func (b *Body) PersistentMode(enable bool) {
 	v := C.int(0)
 	if enable {
@@ -130,7 +130,7 @@ func (b *Body) PersistentMode(enable bool) {
 }
 
 // GetVarFloat reads a persistent AML global scalar by name (am_get_var_float) — how Go reads
-// back what an AML physics script computed: the will_gaze tide and the pull_* shares. Returns
+// back what an AML physics script computed: the will vector tide and the pull_* shares. Returns
 // 0 when the name is unset or persistent mode is off — the honest "no reading yet", not an error.
 func (b *Body) GetVarFloat(name string) float32 {
 	cs := C.CString(name)
