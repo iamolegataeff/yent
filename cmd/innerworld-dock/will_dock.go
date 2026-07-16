@@ -94,7 +94,8 @@ func (s osSpawner) Spawn(ctx context.Context, util string) (willSpawnResult, err
 		return willSpawnResult{}, fmt.Errorf("run %s: %w", bin, err)
 	}
 	return willSpawnResult{
-		Line: cw.buf.Bytes(),
+		Line:     cw.buf.Bytes(),
+		Overflow: cw.overflow,
 		Commit: func() error {
 			return os.Rename(pendingPath, statePath)
 		},
@@ -121,20 +122,24 @@ func preparePendingWillState(statePath, pendingPath string) error {
 // MB; 1 MiB is far more than any real reach's event stream and keeps memory bounded.
 const willMaxStdout = 1 << 20
 
-// capWriter buffers up to max bytes and silently drops the rest, always reporting the full write
-// so the child never blocks on a full pipe — it keeps draining, we just keep the head.
+// capWriter buffers up to max bytes and marks overflow while reporting the full write, so the
+// child never blocks on a full pipe. The caller must not commit utility state when overflow is set.
 type capWriter struct {
-	buf bytes.Buffer
-	max int
+	buf      bytes.Buffer
+	max      int
+	overflow bool
 }
 
 func (w *capWriter) Write(p []byte) (int, error) {
 	if rem := w.max - w.buf.Len(); rem > 0 {
 		if len(p) > rem {
 			w.buf.Write(p[:rem])
+			w.overflow = true
 		} else {
 			w.buf.Write(p)
 		}
+	} else if len(p) > 0 {
+		w.overflow = true
 	}
 	return len(p), nil
 }
@@ -235,19 +240,22 @@ func tagSartreEffectLines(raw []byte, eventID string) []byte {
 }
 
 type willEvent struct {
-	ID           string  `json:"id,omitempty"`
-	Phase        string  `json:"phase,omitempty"`
-	Outcome      string  `json:"outcome,omitempty"`
-	Utility      string  `json:"util"`
-	Kind         string  `json:"kind,omitempty"`
-	Path         string  `json:"path,omitempty"`
-	Timestamp    int64   `json:"ts,omitempty"`
-	Gaze         float32 `json:"will_gaze,omitempty"`
-	Threshold    float32 `json:"will_threshold,omitempty"`
-	PullOrigin   float32 `json:"pull_origin,omitempty"`
-	PullPressure float32 `json:"pull_pressure,omitempty"`
-	OriginTide   float32 `json:"will_origin_tide,omitempty"`
-	PressureTide float32 `json:"will_pressure_tide,omitempty"`
+	ID            string  `json:"id,omitempty"`
+	Phase         string  `json:"phase,omitempty"`
+	Outcome       string  `json:"outcome,omitempty"`
+	Utility       string  `json:"util"`
+	Kind          string  `json:"kind,omitempty"`
+	Path          string  `json:"path,omitempty"`
+	Timestamp     int64   `json:"ts,omitempty"`
+	Gaze          float32 `json:"will_gaze,omitempty"`
+	Threshold     float32 `json:"will_threshold,omitempty"`
+	PullOrigin    float32 `json:"pull_origin,omitempty"`
+	PullPressure  float32 `json:"pull_pressure,omitempty"`
+	OriginTide    float32 `json:"will_origin_tide,omitempty"`
+	PressureTide  float32 `json:"will_pressure_tide,omitempty"`
+	EffectCount   int     `json:"effect_count,omitempty"`
+	BytesCaptured int     `json:"bytes_captured,omitempty"`
+	BytesLimit    int     `json:"bytes_limit,omitempty"`
 }
 
 func newWillEventID(util string, tide willTideSnapshot) string {

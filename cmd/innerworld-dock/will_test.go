@@ -41,6 +41,7 @@ func (f *fakeWillField) Exec(script string) error {
 type fakeSpawner struct {
 	util      string // the last util asked for
 	line      []byte
+	overflow  bool
 	err       error
 	commitErr error
 	committed bool
@@ -52,7 +53,8 @@ func (s *fakeSpawner) Spawn(_ context.Context, util string) (willSpawnResult, er
 		return willSpawnResult{}, s.err
 	}
 	return willSpawnResult{
-		Line: s.line,
+		Line:     s.line,
+		Overflow: s.overflow,
 		Commit: func() error {
 			if s.commitErr != nil {
 				return s.commitErr
@@ -308,7 +310,48 @@ func TestWillTickTypedPhasesSurroundPerception(t *testing.T) {
 	if sk.events[2].Outcome != "perception_committed" {
 		t.Fatalf("learning outcome should record committed perception, got %#v", sk.events[2])
 	}
+	if sk.events[2].EffectCount != 1 {
+		t.Fatalf("learning must record committed effect count, got %#v", sk.events[2])
+	}
 	if sk.events[0].PressureTide != 1.5 || sk.events[0].PullPressure != 0.3 {
 		t.Fatalf("intention must receipt both vector tide and current pull, got %#v", sk.events[0])
+	}
+}
+
+func TestWillTickOverflowDoesNotCommitOrDischarge(t *testing.T) {
+	sp := &fakeSpawner{
+		line:     []byte(`{"util":"repo_monitor","kind":"added","path":"a.md"}`),
+		overflow: true,
+	}
+	sk := &typedFakeSink{}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp, &sk.fakeSink)
+	w.sink = sk
+
+	util, err := w.tick(context.Background())
+	if err == nil {
+		t.Fatal("overflow must surface as a delivery error")
+	}
+	if util != willUtilPressure {
+		t.Fatalf("got util %q", util)
+	}
+	if f.discharged {
+		t.Error("overflow must not spend the tide")
+	}
+	if sp.committed {
+		t.Error("overflow must not commit utility state")
+	}
+	if len(sk.lines) != 0 {
+		t.Fatalf("overflow must not emit partial effect lines, got %q", sk.lines)
+	}
+	if len(sk.events) != 3 {
+		t.Fatalf("want intention/act/learning overflow events, got %#v", sk.events)
+	}
+	learn := sk.events[2]
+	if learn.Phase != "learning" || learn.Outcome != "overflow" ||
+		learn.BytesCaptured != len(sp.line) || learn.BytesLimit != willMaxStdout {
+		t.Fatalf("overflow learning event not typed precisely: %#v", learn)
 	}
 }

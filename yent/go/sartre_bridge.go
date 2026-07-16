@@ -18,35 +18,39 @@ const (
 // SartreEvent is one bounded utility receipt from the SARTRE body organ.
 // It intentionally carries metadata, not file contents.
 type SartreEvent struct {
-	ID         string  `json:"id,omitempty"`
-	Phase      string  `json:"phase,omitempty"`
-	Outcome    string  `json:"outcome,omitempty"`
-	Utility    string  `json:"util"`
-	Kind       string  `json:"kind,omitempty"`
-	Path       string  `json:"path,omitempty"`
-	Tag        string  `json:"tag,omitempty"` // legacy context_processor readout; new receipts use Resonance
-	Resonance  float64 `json:"resonance,omitempty"`
-	Relevance  float64 `json:"relevance,omitempty"`
-	Pulse      float64 `json:"pulse,omitempty"`
-	Reduced    int     `json:"reduced,omitempty"`
-	Recognized int     `json:"recognized,omitempty"`
-	Timestamp  int64   `json:"ts,omitempty"`
+	ID            string  `json:"id,omitempty"`
+	Phase         string  `json:"phase,omitempty"`
+	Outcome       string  `json:"outcome,omitempty"`
+	Utility       string  `json:"util"`
+	Kind          string  `json:"kind,omitempty"`
+	Path          string  `json:"path,omitempty"`
+	Tag           string  `json:"tag,omitempty"` // legacy context_processor readout; new receipts use Resonance
+	Resonance     float64 `json:"resonance,omitempty"`
+	Relevance     float64 `json:"relevance,omitempty"`
+	Pulse         float64 `json:"pulse,omitempty"`
+	Reduced       int     `json:"reduced,omitempty"`
+	Recognized    int     `json:"recognized,omitempty"`
+	Timestamp     int64   `json:"ts,omitempty"`
+	EffectCount   int     `json:"effect_count,omitempty"`
+	BytesCaptured int     `json:"bytes_captured,omitempty"`
+	BytesLimit    int     `json:"bytes_limit,omitempty"`
 }
 
 // SartreReceipt is the machine-readable memory_delta written into limpha.
 type SartreReceipt struct {
-	Kind              string        `json:"kind"`
-	EventCount        int           `json:"event_count"`
-	Changed           int           `json:"changed"`
-	ReadmeChanged     bool          `json:"readme_changed,omitempty"`
-	MaxResonance      float64       `json:"max_resonance,omitempty"`
-	MaxRelevance      float64       `json:"max_relevance,omitempty"`
-	MaxPulse          float64       `json:"max_pulse,omitempty"`
-	FramingEventCount int           `json:"framing_event_count,omitempty"`
-	MaxReduced        int           `json:"max_reduced,omitempty"`
-	MaxRecognized     int           `json:"max_recognized,omitempty"`
-	Trace             []string      `json:"trace"`
-	Events            []SartreEvent `json:"events,omitempty"`
+	Kind              string         `json:"kind"`
+	EventCount        int            `json:"event_count"`
+	Changed           int            `json:"changed"`
+	ReadmeChanged     bool           `json:"readme_changed,omitempty"`
+	MaxResonance      float64        `json:"max_resonance,omitempty"`
+	MaxRelevance      float64        `json:"max_relevance,omitempty"`
+	MaxPulse          float64        `json:"max_pulse,omitempty"`
+	FramingEventCount int            `json:"framing_event_count,omitempty"`
+	MaxReduced        int            `json:"max_reduced,omitempty"`
+	MaxRecognized     int            `json:"max_recognized,omitempty"`
+	OutcomeCounts     map[string]int `json:"outcome_counts,omitempty"`
+	Trace             []string       `json:"trace"`
+	Events            []SartreEvent  `json:"events,omitempty"`
 }
 
 // ParseSartreEventsJSONL reads SARTRE utility stdout. Non-JSON status lines from
@@ -118,6 +122,12 @@ func BuildSartreReceipt(events []SartreEvent) SartreReceipt {
 			continue
 		}
 		receipt.EventCount++
+		if ev.Phase == "learning" && ev.Outcome != "" {
+			if receipt.OutcomeCounts == nil {
+				receipt.OutcomeCounts = make(map[string]int)
+			}
+			receipt.OutcomeCounts[ev.Outcome]++
+		}
 		actionable := ev.Phase == "" || ev.Phase == "effect"
 		if actionable && ev.Utility == "repo_monitor" && isSartreChangeKind(ev.Kind) {
 			receipt.Changed++
@@ -160,6 +170,12 @@ func (ev SartreEvent) Trace() string {
 		parts := []string{"will", ev.Utility, ev.Phase}
 		if ev.Outcome != "" {
 			parts = append(parts, ev.Outcome)
+		}
+		if ev.EffectCount > 0 {
+			parts = append(parts, fmt.Sprintf("effects=%d", ev.EffectCount))
+		}
+		if ev.BytesCaptured > 0 || ev.BytesLimit > 0 {
+			parts = append(parts, fmt.Sprintf("bytes=%d/%d", ev.BytesCaptured, ev.BytesLimit))
 		}
 		if ev.Kind != "" {
 			parts = append(parts, ev.Kind)
@@ -275,6 +291,9 @@ func normalizeSartreEvent(ev SartreEvent) SartreEvent {
 	ev.Pulse = clamp01(ev.Pulse)
 	ev.Reduced = maxInt(0, ev.Reduced)
 	ev.Recognized = maxInt(0, ev.Recognized)
+	ev.EffectCount = maxInt(0, ev.EffectCount)
+	ev.BytesCaptured = maxInt(0, ev.BytesCaptured)
+	ev.BytesLimit = maxInt(0, ev.BytesLimit)
 	return ev
 }
 
