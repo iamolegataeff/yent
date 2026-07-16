@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -199,6 +200,124 @@ func saveWillLearningState(path string, st willLearningState) error {
 	return nil
 }
 
+const willReachStateVersion = 1
+
+type willPendingReach struct {
+	Seq     int64            `json:"seq"`
+	ID      string           `json:"id"`
+	Utility string           `json:"util"`
+	Tide    willTideSnapshot `json:"tide"`
+	Breath  int              `json:"breath"`
+}
+
+type willReachState struct {
+	Version int               `json:"version"`
+	NextSeq int64             `json:"next_seq"`
+	Pending *willPendingReach `json:"pending,omitempty"`
+}
+
+func willReachStatePath(stateDir string) string {
+	return filepath.Join(stateDir, "will-reach.state.json")
+}
+
+func loadWillReachState(path string) (willReachState, error) {
+	st := willReachState{Version: willReachStateVersion, NextSeq: 1}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return st, nil
+	}
+	if err != nil {
+		return st, err
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return st, fmt.Errorf("empty reach state")
+	}
+	if err := json.Unmarshal(data, &st); err != nil {
+		return st, err
+	}
+	if err := validateWillReachState(st); err != nil {
+		return st, err
+	}
+	return st, nil
+}
+
+func saveWillReachState(path string, st willReachState) error {
+	if path == "" {
+		return nil
+	}
+	st.Version = willReachStateVersion
+	if err := validateWillReachState(st); err != nil {
+		return err
+	}
+	data, err := json.Marshal(st)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".pending"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if err := writeAll(f, data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func validateWillReachState(st willReachState) error {
+	if st.Version != willReachStateVersion {
+		return fmt.Errorf("unsupported reach state version %d", st.Version)
+	}
+	if st.NextSeq <= 0 {
+		return fmt.Errorf("invalid next reach sequence %d", st.NextSeq)
+	}
+	if st.Pending == nil {
+		return nil
+	}
+	p := st.Pending
+	if p.Seq <= 0 || p.Seq != st.NextSeq {
+		return fmt.Errorf("invalid pending reach sequence %d for next %d", p.Seq, st.NextSeq)
+	}
+	if strings.TrimSpace(p.ID) == "" {
+		return fmt.Errorf("pending reach has empty id")
+	}
+	if p.Utility != willUtilOrigin && p.Utility != willUtilPressure {
+		return fmt.Errorf("pending reach has unknown utility %q", p.Utility)
+	}
+	if !finiteWillTide(p.Tide) {
+		return fmt.Errorf("pending reach has non-finite tide")
+	}
+	return nil
+}
+
+func finiteWillTide(t willTideSnapshot) bool {
+	for _, v := range []float32{t.Threshold, t.Gaze, t.PullOrigin, t.PullPressure, t.OriginTide, t.PressureTide} {
+		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+			return false
+		}
+	}
+	return true
+}
+
 // willMaxStdout caps how much of a utility's stdout the will buffers. A first scan over a large
 // root can emit one JSON record per eligible file, so an unbounded buffer could reach hundreds of
 // MB; 1 MiB is far more than any real reach's event stream and keeps memory bounded.
@@ -377,9 +496,9 @@ type willEvent struct {
 	BytesLimit        int     `json:"bytes_limit,omitempty"`
 }
 
-func newWillEventID(util string, tide willTideSnapshot) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%.6f|%.6f|%.6f|%.6f|%.6f",
-		util, time.Now().UnixNano(), tide.Gaze, tide.PullOrigin, tide.PullPressure,
+func newWillEventID(rootID string, seq int64, util string, tide willTideSnapshot) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%s|%.6f|%.6f|%.6f|%.6f|%.6f",
+		rootID, seq, util, tide.Gaze, tide.PullOrigin, tide.PullPressure,
 		tide.OriginTide, tide.PressureTide)))
 	return hex.EncodeToString(sum[:8])
 }
