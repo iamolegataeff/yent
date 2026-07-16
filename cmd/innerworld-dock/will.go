@@ -218,14 +218,9 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 	if err := w.saveLearningState(nextQuiet); err != nil {
 		return util, fmt.Errorf("will learn %s state: %w", util, err)
 	}
-	if err := w.finishReach(reach.Seq); err != nil {
-		return util, fmt.Errorf("will finish %s reach: %w", util, err)
-	}
 	if err := dischargeWillTide(w.field); err != nil {
 		return util, fmt.Errorf("will discharge %s: %w", util, err)
 	}
-	w.quietRuns = nextQuiet
-	w.cooldown = nextCooldown
 	// Success learning is a receipt of committed host state plus spent tide, not a promise.
 	if es, ok := w.sink.(willEventSink); ok {
 		ev := w.event(tide, eventID, "learning", util, outcome)
@@ -235,6 +230,11 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 			return util, fmt.Errorf("will learn %s: %w", util, err)
 		}
 	}
+	if err := w.finishReach(reach.Seq); err != nil {
+		return util, fmt.Errorf("will finish %s reach: %w", util, err)
+	}
+	w.quietRuns = nextQuiet
+	w.cooldown = nextCooldown
 	return util, nil
 }
 
