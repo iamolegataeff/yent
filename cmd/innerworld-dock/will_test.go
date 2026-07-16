@@ -16,6 +16,7 @@ type fakeWillField struct {
 	vars           map[string]float32
 	execFileErr    error
 	execFileN      int
+	execErr        error
 	execScripts    []string
 	discharged     bool
 	reaccumulateTo float32 // if >0, ExecFile re-floods will_gaze to this each tick (sustained strain)
@@ -31,6 +32,9 @@ func (f *fakeWillField) ExecFile(string) error {
 func (f *fakeWillField) GetVarFloat(name string) float32 { return f.vars[name] }
 func (f *fakeWillField) Exec(script string) error {
 	f.execScripts = append(f.execScripts, script)
+	if f.execErr != nil {
+		return f.execErr
+	}
 	for _, line := range strings.Split(script, "\n") {
 		switch strings.TrimSpace(line) {
 		case "will_origin_tide = 0":
@@ -546,6 +550,37 @@ func TestWillTickLearningStateErrorDoesNotDischarge(t *testing.T) {
 	}
 	if w.quietRuns != 0 || w.cooldown != 0 {
 		t.Fatalf("in-memory learning must not advance on a failed durable write, quiet=%d cooldown=%d", w.quietRuns, w.cooldown)
+	}
+	if len(sk.events) != 2 || sk.events[0].Phase != "intention" || sk.events[1].Phase != "act" {
+		t.Fatalf("failed learning-state commit must not emit success learning, got %#v", sk.events)
+	}
+}
+
+func TestWillTickDischargeErrorDoesNotEmitSuccessLearning(t *testing.T) {
+	sp := &fakeSpawner{}
+	sk := &typedFakeSink{}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp, &sk.fakeSink)
+	w.sink = sk
+	f.execErr = errors.New("aml transaction failed")
+
+	util, err := w.tick(context.Background())
+	if err == nil {
+		t.Fatal("a discharge error must surface")
+	}
+	if util != willUtilPressure {
+		t.Fatalf("got util %q", util)
+	}
+	if f.discharged {
+		t.Fatal("a failed discharge transaction must not spend the tide")
+	}
+	if w.quietRuns != 0 || w.cooldown != 0 {
+		t.Fatalf("in-memory learning must not advance on a failed discharge, quiet=%d cooldown=%d", w.quietRuns, w.cooldown)
+	}
+	if len(sk.events) != 2 || sk.events[0].Phase != "intention" || sk.events[1].Phase != "act" {
+		t.Fatalf("failed discharge must not emit success learning, got %#v", sk.events)
 	}
 }
 
