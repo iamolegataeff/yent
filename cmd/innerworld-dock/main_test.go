@@ -239,9 +239,13 @@ func TestIngestSartreFromEnvStoresPerception(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("YENT_SARTRE_EVENTS", path)
+	t.Setenv("YENT_SARTRE_CURSOR", filepath.Join(t.TempDir(), "sartre.cursor.json"))
 
 	if got := ingestSartreFromEnv(lc, yent.LimphaState{Destiny: 0.2}); got != 2 {
 		t.Fatalf("want 2 ingested events, got %d", got)
+	}
+	if got := ingestSartreFromEnv(lc, yent.LimphaState{Destiny: 0.2}); got != 0 {
+		t.Fatalf("second ingest must not replay acknowledged events, got %d", got)
 	}
 	traces := yent.NewSartreMemory(lc).Recall(2)
 	if len(traces) != 1 || !strings.Contains(traces[0], "SARTRE perception") ||
