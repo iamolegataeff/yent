@@ -23,7 +23,7 @@ import (
 type willField interface {
 	ExecFile(path string) error      // advance the will physics one tick
 	GetVarFloat(name string) float32 // read a persistent global the script computed
-	Exec(script string) error        // discharge the tide after the reach
+	Exec(script string) error        // execute a transactional AML block
 }
 
 // compile-time: the native AML body is the will field.
@@ -317,16 +317,7 @@ func (w *willTicker) saveLearningState(quietRuns int) error {
 }
 
 func dischargeWillTide(field willField) error {
-	for _, script := range []string{
-		"will_origin_tide = 0",
-		"will_pressure_tide = 0",
-		"will_gaze = 0",
-	} {
-		if err := field.Exec(script); err != nil {
-			return err
-		}
-	}
-	return nil
+	return field.Exec("will_origin_tide = 0\nwill_pressure_tide = 0\nwill_gaze = 0")
 }
 
 // run is the will's own breath: its own goroutine, paced by tickEvery, alongside iw.Breathe. A
