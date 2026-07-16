@@ -39,8 +39,9 @@ func willScriptPath() string {
 	return rel
 }
 
-// willTickEvery is the will's cadence (YENT_WILL_TICK_SEC), default 500ms — the tide needs ~6
-// ticks to crest from rest, so a slower cadence would never fire inside a short-lived dock run.
+// willTickEvery is the will's host cadence (YENT_WILL_TICK_SEC), default 500ms. The AML physics
+// is breath-counted: retention and refractory are per will breath, not per wall-clock second.
+// Changing this value changes how often breaths happen in real time; receipts record cadence_ms.
 func willTickEvery() time.Duration {
 	if d := durationEnv("YENT_WILL_TICK_SEC"); d > 0 {
 		return d
@@ -48,9 +49,9 @@ func willTickEvery() time.Duration {
 	return 500 * time.Millisecond
 }
 
-// willRefractoryTicks is how many ticks the will waits after a reach before it can reach again
-// (YENT_WILL_REFRACTORY_TICKS), default 6 — long enough that even a sustained high-strain crest
-// spaces its reaches out instead of firing every tick.
+// willRefractoryTicks is how many will breaths the hand waits after a reach before it can reach
+// again (YENT_WILL_REFRACTORY_TICKS), default 6 — long enough that even a sustained high-strain
+// crest spaces its reaches out instead of firing every breath.
 func willRefractoryTicks() int {
 	if n := positiveIntEnv("YENT_WILL_REFRACTORY_TICKS"); n > 0 {
 		return n
@@ -240,22 +241,26 @@ func tagSartreEffectLines(raw []byte, eventID string) []byte {
 }
 
 type willEvent struct {
-	ID            string  `json:"id,omitempty"`
-	Phase         string  `json:"phase,omitempty"`
-	Outcome       string  `json:"outcome,omitempty"`
-	Utility       string  `json:"util"`
-	Kind          string  `json:"kind,omitempty"`
-	Path          string  `json:"path,omitempty"`
-	Timestamp     int64   `json:"ts,omitempty"`
-	Gaze          float32 `json:"will_gaze,omitempty"`
-	Threshold     float32 `json:"will_threshold,omitempty"`
-	PullOrigin    float32 `json:"pull_origin,omitempty"`
-	PullPressure  float32 `json:"pull_pressure,omitempty"`
-	OriginTide    float32 `json:"will_origin_tide,omitempty"`
-	PressureTide  float32 `json:"will_pressure_tide,omitempty"`
-	EffectCount   int     `json:"effect_count,omitempty"`
-	BytesCaptured int     `json:"bytes_captured,omitempty"`
-	BytesLimit    int     `json:"bytes_limit,omitempty"`
+	ID                string  `json:"id,omitempty"`
+	Phase             string  `json:"phase,omitempty"`
+	Outcome           string  `json:"outcome,omitempty"`
+	Utility           string  `json:"util"`
+	Kind              string  `json:"kind,omitempty"`
+	Path              string  `json:"path,omitempty"`
+	Timestamp         int64   `json:"ts,omitempty"`
+	Gaze              float32 `json:"will_gaze,omitempty"`
+	Threshold         float32 `json:"will_threshold,omitempty"`
+	PullOrigin        float32 `json:"pull_origin,omitempty"`
+	PullPressure      float32 `json:"pull_pressure,omitempty"`
+	OriginTide        float32 `json:"will_origin_tide,omitempty"`
+	PressureTide      float32 `json:"will_pressure_tide,omitempty"`
+	Breath            int     `json:"breath,omitempty"`
+	CadenceMS         int64   `json:"cadence_ms,omitempty"`
+	RefractoryBreaths int     `json:"refractory_breaths,omitempty"`
+	CooldownBreaths   int     `json:"cooldown_breaths,omitempty"`
+	EffectCount       int     `json:"effect_count,omitempty"`
+	BytesCaptured     int     `json:"bytes_captured,omitempty"`
+	BytesLimit        int     `json:"bytes_limit,omitempty"`
 }
 
 func newWillEventID(util string, tide willTideSnapshot) string {

@@ -108,16 +108,29 @@ func (t willTideSnapshot) event(id, phase, util, outcome string) willEvent {
 	}
 }
 
+func (w *willTicker) event(t willTideSnapshot, id, phase, util, outcome string) willEvent {
+	ev := t.event(id, phase, util, outcome)
+	ev.Breath = w.breath
+	if w.cadence > 0 {
+		ev.CadenceMS = int64(w.cadence / time.Millisecond)
+	}
+	ev.RefractoryBreaths = w.refractory
+	ev.CooldownBreaths = w.cooldown
+	return ev
+}
+
 // willTicker holds the will loop's wiring. The tide itself lives in the AML field's persistent
-// globals; the only between-tick state here is the refractory countdown, so a high-strain
-// confluence (which alone can exceed threshold in a single tick) cannot fire every tick.
+// globals; the only between-breath state here is the refractory countdown, so a high-strain
+// confluence (which alone can exceed threshold in a single breath) cannot fire every breath.
 type willTicker struct {
 	field      willField
 	script     string
 	spawner    willSpawner
 	sink       willSink
-	refractory int // ticks the will must wait after a reach before it can reach again (0 = none)
-	cooldown   int // ticks remaining in the current refractory (state)
+	cadence    time.Duration // wall-clock pace of one will breath, recorded for receipts only
+	breath     int           // monotonically increasing will breath index
+	refractory int           // breaths the will must wait after a reach before it can reach again
+	cooldown   int           // breaths remaining in the current refractory (state)
 }
 
 // tick advances the will one step and, if the tide crests, reaches for the utility the dominant
@@ -126,6 +139,7 @@ type willTicker struct {
 // returned without spending the tide: the hand did not become a durable event, so the cause stays
 // available for retry instead of disappearing from memory.
 func (w *willTicker) tick(ctx context.Context) (string, error) {
+	w.breath++
 	if err := w.field.ExecFile(w.script); err != nil {
 		return "", fmt.Errorf("will physics: %w", err)
 	}
@@ -140,25 +154,25 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 	util := tide.dominantUtil()
 	eventID := newWillEventID(util, tide)
 	if es, ok := w.sink.(willEventSink); ok {
-		if err := es.EmitEvent(tide.event(eventID, "intention", util, "crest")); err != nil {
+		if err := es.EmitEvent(w.event(tide, eventID, "intention", util, "crest")); err != nil {
 			return util, fmt.Errorf("will intent %s: %w", util, err)
 		}
 	}
 	result, err := w.spawner.Spawn(ctx, util)
 	if err != nil {
 		if es, ok := w.sink.(willEventSink); ok {
-			_ = es.EmitEvent(tide.event(eventID, "learning", util, "sensor_error"))
+			_ = es.EmitEvent(w.event(tide, eventID, "learning", util, "sensor_error"))
 		}
 		return util, fmt.Errorf("will reach %s: %w", util, err)
 	}
 	if es, ok := w.sink.(willEventSink); ok {
-		if err := es.EmitEvent(tide.event(eventID, "act", util, "spawned")); err != nil {
+		if err := es.EmitEvent(w.event(tide, eventID, "act", util, "spawned")); err != nil {
 			return util, fmt.Errorf("will act %s: %w", util, err)
 		}
 	}
 	if result.Overflow {
 		if es, ok := w.sink.(willEventSink); ok {
-			ev := tide.event(eventID, "learning", util, "overflow")
+			ev := w.event(tide, eventID, "learning", util, "overflow")
 			ev.BytesCaptured = len(result.Line)
 			ev.BytesLimit = willMaxStdout
 			if err := es.EmitEvent(ev); err != nil {
@@ -177,7 +191,7 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 	if result.Commit != nil {
 		if err := result.Commit(); err != nil {
 			if es, ok := w.sink.(willEventSink); ok {
-				_ = es.EmitEvent(tide.event(eventID, "learning", util, "state_error"))
+				_ = es.EmitEvent(w.event(tide, eventID, "learning", util, "state_error"))
 			}
 			return util, fmt.Errorf("will commit %s state: %w", util, err)
 		}
@@ -187,14 +201,14 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 		if effectCount > 0 {
 			outcome = "perception_committed"
 		}
-		ev := tide.event(eventID, "learning", util, outcome)
+		ev := w.event(tide, eventID, "learning", util, outcome)
 		ev.EffectCount = effectCount
 		if err := es.EmitEvent(ev); err != nil {
 			return util, fmt.Errorf("will learn %s: %w", util, err)
 		}
 	}
 	// The reach both spends the vector tide (discharge) AND opens a bounded refractory of
-	// `refractory` ticks: even a high-strain confluence that alone re-crosses threshold next tick
+	// `refractory` breaths: even a high-strain confluence that alone re-crosses threshold next breath
 	// cannot reach again until the refractory elapses. The discharge is the physics; the cooldown
 	// is the floor.
 	w.cooldown = w.refractory
@@ -223,6 +237,7 @@ func (w *willTicker) run(ctx context.Context, tickEvery time.Duration) {
 	if tickEvery <= 0 {
 		tickEvery = 2 * time.Second
 	}
+	w.cadence = tickEvery
 	t := time.NewTicker(tickEvery)
 	defer t.Stop()
 	for {
