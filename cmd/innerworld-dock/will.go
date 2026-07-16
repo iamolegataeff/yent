@@ -33,8 +33,9 @@ var _ willField = (*aml.Body)(nil)
 // baseline. The commit must run only after the events are durably emitted; otherwise a sink error
 // would make the utility forget a change the organism never received.
 type willSpawnResult struct {
-	Line   []byte
-	Commit func() error
+	Line     []byte
+	Overflow bool
+	Commit   func() error
 }
 
 // willSpawner runs a self-reading utility and returns its SARTRE event line(s), or an error.
@@ -155,7 +156,19 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 			return util, fmt.Errorf("will act %s: %w", util, err)
 		}
 	}
+	if result.Overflow {
+		if es, ok := w.sink.(willEventSink); ok {
+			ev := tide.event(eventID, "learning", util, "overflow")
+			ev.BytesCaptured = len(result.Line)
+			ev.BytesLimit = willMaxStdout
+			if err := es.EmitEvent(ev); err != nil {
+				return util, fmt.Errorf("will overflow %s: %w", util, err)
+			}
+		}
+		return util, fmt.Errorf("will reach %s overflowed stdout cap (%d bytes)", util, willMaxStdout)
+	}
 	effectLine := tagSartreEffectLines(result.Line, eventID)
+	effectCount := len(completeSartreJSONLines(effectLine))
 	if len(effectLine) > 0 {
 		if err := w.sink.Emit(effectLine); err != nil {
 			return util, fmt.Errorf("will emit %s: %w", util, err)
@@ -171,10 +184,12 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 	}
 	if es, ok := w.sink.(willEventSink); ok {
 		outcome := "no_novelty"
-		if len(completeSartreJSONLines(effectLine)) > 0 {
+		if effectCount > 0 {
 			outcome = "perception_committed"
 		}
-		if err := es.EmitEvent(tide.event(eventID, "learning", util, outcome)); err != nil {
+		ev := tide.event(eventID, "learning", util, outcome)
+		ev.EffectCount = effectCount
+		if err := es.EmitEvent(ev); err != nil {
 			return util, fmt.Errorf("will learn %s: %w", util, err)
 		}
 	}

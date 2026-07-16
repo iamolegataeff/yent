@@ -117,18 +117,28 @@ func TestBuildSartreReceiptKeepsWillPhasesOutOfChangeCounts(t *testing.T) {
 		{ID: "r1", Phase: "intention", Outcome: "crest", Utility: "repo_monitor", Kind: "modified", Path: "README.md"},
 		{ID: "r1", Phase: "act", Outcome: "spawned", Utility: "repo_monitor"},
 		{ID: "r1", Phase: "learning", Outcome: "no_novelty", Utility: "repo_monitor"},
+		{ID: "r2", Phase: "learning", Outcome: "overflow", Utility: "repo_monitor", BytesCaptured: 1024, BytesLimit: 2048},
 		{ID: "r2", Phase: "effect", Utility: "repo_monitor", Kind: "modified", Path: "README.md"},
+		{ID: "r2", Phase: "learning", Outcome: "perception_committed", Utility: "repo_monitor", EffectCount: 1},
 	}
 	receipt := BuildSartreReceipt(events)
-	if receipt.EventCount != 4 {
+	if receipt.EventCount != 6 {
 		t.Fatalf("all typed events should be counted as received, got %d", receipt.EventCount)
 	}
 	if receipt.Changed != 1 || !receipt.ReadmeChanged {
 		t.Fatalf("only the actual effect/change event should move change counters: %+v", receipt)
 	}
+	if receipt.OutcomeCounts["no_novelty"] != 1 ||
+		receipt.OutcomeCounts["overflow"] != 1 ||
+		receipt.OutcomeCounts["perception_committed"] != 1 {
+		t.Fatalf("learning outcomes should be typed counters: %+v", receipt.OutcomeCounts)
+	}
+	trace := strings.Join(receipt.Trace, " | ")
 	if len(receipt.Trace) < 2 ||
-		!strings.Contains(strings.Join(receipt.Trace, " | "), "will repo_monitor intention crest") ||
-		!strings.Contains(strings.Join(receipt.Trace, " | "), "repo_monitor modified README.md") {
+		!strings.Contains(trace, "will repo_monitor intention crest") ||
+		!strings.Contains(trace, "will repo_monitor learning overflow bytes=1024/2048") ||
+		!strings.Contains(trace, "will repo_monitor learning perception_committed effects=1") ||
+		!strings.Contains(trace, "repo_monitor modified README.md") {
 		t.Fatalf("receipt should preserve will phases and effect trace: %#v", receipt.Trace)
 	}
 }
