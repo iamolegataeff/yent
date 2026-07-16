@@ -373,12 +373,20 @@ func TestWillTickStateCommitErrorDoesNotDischarge(t *testing.T) {
 
 type typedFakeSink struct {
 	fakeSink
-	events []willEvent
+	events    []willEvent
+	failPhase string
+	phaseErr  error
 }
 
 func (s *typedFakeSink) EmitEvent(ev willEvent) error {
 	if s.err != nil {
 		return s.err
+	}
+	if s.failPhase != "" && ev.Phase == s.failPhase {
+		if s.phaseErr != nil {
+			return s.phaseErr
+		}
+		return errors.New("phase delivery failed")
 	}
 	s.events = append(s.events, ev)
 	return nil
@@ -564,6 +572,8 @@ func TestWillTickDischargeErrorDoesNotEmitSuccessLearning(t *testing.T) {
 		"will_pressure_tide": 1.5,
 	}, sp, &sk.fakeSink)
 	w.sink = sk
+	w.rootID = "rootabc"
+	w.reachStatePath = willReachStatePath(t.TempDir())
 	f.execErr = errors.New("aml transaction failed")
 
 	util, err := w.tick(context.Background())
@@ -581,6 +591,49 @@ func TestWillTickDischargeErrorDoesNotEmitSuccessLearning(t *testing.T) {
 	}
 	if len(sk.events) != 2 || sk.events[0].Phase != "intention" || sk.events[1].Phase != "act" {
 		t.Fatalf("failed discharge must not emit success learning, got %#v", sk.events)
+	}
+	st, err := loadWillReachState(w.reachStatePath)
+	if err != nil {
+		t.Fatalf("load reach state: %v", err)
+	}
+	if st.Pending == nil || st.Pending.ID != sk.events[0].ID || st.NextSeq != 1 {
+		t.Fatalf("failed discharge must keep the reach pending for retry, got %#v", st)
+	}
+}
+
+func TestWillTickLearningReceiptErrorKeepsPendingReach(t *testing.T) {
+	sp := &fakeSpawner{}
+	sk := &typedFakeSink{failPhase: "learning", phaseErr: errors.New("sink down")}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp, &sk.fakeSink)
+	w.sink = sk
+	w.rootID = "rootabc"
+	w.reachStatePath = willReachStatePath(t.TempDir())
+
+	util, err := w.tick(context.Background())
+	if err == nil {
+		t.Fatal("a learning receipt delivery error must surface")
+	}
+	if util != willUtilPressure {
+		t.Fatalf("got util %q", util)
+	}
+	if !f.discharged {
+		t.Fatal("learning receipt happens after the tide is spent")
+	}
+	if w.quietRuns != 0 || w.cooldown != 0 {
+		t.Fatalf("in-memory learning must not advance until reach finish, quiet=%d cooldown=%d", w.quietRuns, w.cooldown)
+	}
+	if len(sk.events) != 2 || sk.events[0].Phase != "intention" || sk.events[1].Phase != "act" {
+		t.Fatalf("failed learning receipt should leave only intention/act delivered, got %#v", sk.events)
+	}
+	st, err := loadWillReachState(w.reachStatePath)
+	if err != nil {
+		t.Fatalf("load reach state: %v", err)
+	}
+	if st.Pending == nil || st.Pending.ID != sk.events[0].ID || st.NextSeq != 1 {
+		t.Fatalf("failed learning receipt must keep the reach pending for retry, got %#v", st)
 	}
 }
 
