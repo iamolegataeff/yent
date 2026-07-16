@@ -31,6 +31,7 @@ type SartreEvent struct {
 	Reduced           int     `json:"reduced,omitempty"`
 	Recognized        int     `json:"recognized,omitempty"`
 	Timestamp         int64   `json:"ts,omitempty"`
+	RootID            string  `json:"root_id,omitempty"`
 	Breath            int     `json:"breath,omitempty"`
 	CadenceMS         int64   `json:"cadence_ms,omitempty"`
 	RefractoryBreaths int     `json:"refractory_breaths,omitempty"`
@@ -175,6 +176,9 @@ func (ev SartreEvent) Trace() string {
 		if ev.Outcome != "" {
 			parts = append(parts, ev.Outcome)
 		}
+		if ev.RootID != "" {
+			parts = append(parts, "root="+ev.RootID)
+		}
 		if ev.Breath > 0 {
 			parts = append(parts, fmt.Sprintf("breath=%d", ev.Breath))
 		}
@@ -302,6 +306,7 @@ func normalizeSartreEvent(ev SartreEvent) SartreEvent {
 	ev.Kind = strings.TrimSpace(ev.Kind)
 	ev.Path = safeSartrePath(ev.Path)
 	ev.Tag = strings.TrimSpace(ev.Tag)
+	ev.RootID = strings.TrimSpace(ev.RootID)
 	ev.Resonance = clamp01(ev.Resonance)
 	ev.Relevance = clamp01(ev.Relevance)
 	ev.Pulse = clamp01(ev.Pulse)

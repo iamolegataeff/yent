@@ -147,10 +147,9 @@ func (w *capWriter) Write(p []byte) (int, error) {
 
 // willUtilArgs builds each utility's one-shot argv from its own CLI (they differ): both take
 // --once and keep a --state file so a reach diffs against the last; repo_monitor scans --path
-// <root>, whatdotheythinkiam reads --readme/--research under <root>. The dock always supplies a
-// root (default: its working directory), because repo_monitor scans NOTHING without --path — so
-// a pressure crest must never resolve to an empty scan. An empty root here (tests) drops the path
-// flags, which is repo_monitor's silent-no-op case, exactly what the wiring's default prevents.
+// <root>, whatdotheythinkiam reads --readme <root>/README.md and --research <root>/research.
+// Production wiring passes a canonical root resolved by resolveWillRoot; an empty root here
+// (tests) drops the path flags, which is repo_monitor's silent-no-op case.
 func willUtilArgs(util, root, stateDir string) []string {
 	return willUtilArgsWithState(util, root, filepath.Join(stateDir, util+".state"))
 }
@@ -219,7 +218,7 @@ func completeSartreJSONLines(raw []byte) [][]byte {
 	return out
 }
 
-func tagSartreEffectLines(raw []byte, eventID string) []byte {
+func tagSartreEffectLines(raw []byte, eventID, rootID string) []byte {
 	var out bytes.Buffer
 	for _, line := range completeSartreJSONLines(raw) {
 		var obj map[string]any
@@ -228,6 +227,9 @@ func tagSartreEffectLines(raw []byte, eventID string) []byte {
 		}
 		if _, ok := obj["id"]; !ok && eventID != "" {
 			obj["id"] = eventID
+		}
+		if _, ok := obj["root_id"]; !ok && rootID != "" {
+			obj["root_id"] = rootID
 		}
 		obj["phase"] = "effect"
 		b, err := json.Marshal(obj)
@@ -254,6 +256,7 @@ type willEvent struct {
 	PullPressure      float32 `json:"pull_pressure,omitempty"`
 	OriginTide        float32 `json:"will_origin_tide,omitempty"`
 	PressureTide      float32 `json:"will_pressure_tide,omitempty"`
+	RootID            string  `json:"root_id,omitempty"`
 	Breath            int     `json:"breath,omitempty"`
 	CadenceMS         int64   `json:"cadence_ms,omitempty"`
 	RefractoryBreaths int     `json:"refractory_breaths,omitempty"`
@@ -271,16 +274,118 @@ func newWillEventID(util string, tide willTideSnapshot) string {
 }
 
 func willStateDir(root string) string {
-	if stateDir := strings.TrimSpace(os.Getenv("YENT_WILL_STATE_DIR")); stateDir != "" {
-		return stateDir
+	base := strings.TrimSpace(os.Getenv("YENT_WILL_STATE_DIR"))
+	if base == "" {
+		base = filepath.Join(os.TempDir(), "yent-will-state")
 	}
-	key := "none"
-	if root != "" {
-		if abs, err := filepath.Abs(root); err == nil {
-			root = abs
+	return filepath.Join(base, willStateNamespace(root))
+}
+
+func willStateNamespace(root string) string {
+	organism := safeWillNamespacePart(willOrganismID())
+	rootID := willRootID(root)
+	cfgID := willSensorConfigID(root)
+	return fmt.Sprintf("org-%s-root-%s-cfg-%s", organism, rootID, cfgID)
+}
+
+func willOrganismID() string {
+	for _, name := range []string{"YENT_WILL_ORGANISM_ID", "YENT_ORGANISM_ID"} {
+		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+			return v
 		}
-		keyBytes := sha256.Sum256([]byte(filepath.Clean(root)))
-		key = hex.EncodeToString(keyBytes[:8])
 	}
-	return filepath.Join(os.TempDir(), "yent-will-"+key)
+	return "yent"
+}
+
+func willRootID(root string) string {
+	sum := sha256.Sum256([]byte(canonicalWillPath(root)))
+	return hex.EncodeToString(sum[:8])
+}
+
+func willSensorConfigID(root string) string {
+	croot := canonicalWillPath(root)
+	cfg := strings.Join([]string{
+		"will-state:v2",
+		"repo_monitor:root:" + croot + ":ext=.md,.txt,.rs,.c,.h,.go,.json",
+		"whatdotheythinkiam:readme:" + filepath.Join(croot, "README.md") + ":research:" + filepath.Join(croot, "research") + ":ext=.md,.txt",
+	}, "\n")
+	sum := sha256.Sum256([]byte(cfg))
+	return hex.EncodeToString(sum[:8])
+}
+
+func safeWillNamespacePart(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return "yent"
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+		if b.Len() >= 48 {
+			break
+		}
+	}
+	if b.Len() == 0 {
+		return "yent"
+	}
+	return b.String()
+}
+
+func resolveWillRoot(raw string) (string, error) {
+	if root := strings.TrimSpace(raw); root != "" {
+		return canonicalWillPath(root), nil
+	}
+	if exe, err := os.Executable(); err == nil {
+		if root, ok := findWillRepoRoot(filepath.Dir(exe)); ok {
+			return root, nil
+		}
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		if root, ok := findWillRepoRoot(cwd); ok {
+			return root, nil
+		}
+	}
+	return "", fmt.Errorf("YENT_WILL_ROOT is unset and no Yent repo root was found from executable or cwd")
+}
+
+func findWillRepoRoot(start string) (string, bool) {
+	root := canonicalWillPath(start)
+	for i := 0; i < 8; i++ {
+		if isWillRepoRoot(root) {
+			return root, true
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			break
+		}
+		root = parent
+	}
+	return "", false
+}
+
+func isWillRepoRoot(root string) bool {
+	for _, rel := range []string{"README.md", "Janus/the_will_design.aml", "sartre/utils/repo_monitor", "sartre/utils/whatdotheythinkiam"} {
+		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func canonicalWillPath(path string) string {
+	if path == "" {
+		return "none"
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	path = filepath.Clean(path)
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
+	return filepath.Clean(path)
 }

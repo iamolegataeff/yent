@@ -114,7 +114,7 @@ func TestBuildSartreReceiptCapsTraceButCountsMetrics(t *testing.T) {
 
 func TestBuildSartreReceiptKeepsWillPhasesOutOfChangeCounts(t *testing.T) {
 	events := []SartreEvent{
-		{ID: "r1", Phase: "intention", Outcome: "crest", Utility: "repo_monitor", Kind: "modified", Path: "README.md", Breath: 2, CadenceMS: 750, RefractoryBreaths: 3},
+		{ID: "r1", Phase: "intention", Outcome: "crest", Utility: "repo_monitor", Kind: "modified", Path: "README.md", RootID: "rootabc", Breath: 2, CadenceMS: 750, RefractoryBreaths: 3},
 		{ID: "r1", Phase: "act", Outcome: "spawned", Utility: "repo_monitor"},
 		{ID: "r1", Phase: "learning", Outcome: "no_novelty", Utility: "repo_monitor"},
 		{ID: "r2", Phase: "learning", Outcome: "overflow", Utility: "repo_monitor", BytesCaptured: 1024, BytesLimit: 2048},
@@ -136,6 +136,7 @@ func TestBuildSartreReceiptKeepsWillPhasesOutOfChangeCounts(t *testing.T) {
 	trace := strings.Join(receipt.Trace, " | ")
 	if len(receipt.Trace) < 2 ||
 		!strings.Contains(trace, "will repo_monitor intention crest") ||
+		!strings.Contains(trace, "root=rootabc") ||
 		!strings.Contains(trace, "breath=2 cadence_ms=750 refractory_breaths=3") ||
 		!strings.Contains(trace, "will repo_monitor learning overflow bytes=1024/2048") ||
 		!strings.Contains(trace, "will repo_monitor learning perception_committed effects=1") ||

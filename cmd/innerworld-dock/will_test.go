@@ -299,6 +299,7 @@ func TestWillTickTypedPhasesSurroundPerception(t *testing.T) {
 		"will_pressure_tide": 1.5,
 	}, sp, &sk.fakeSink)
 	w.sink = sk
+	w.rootID = "rootabc"
 	w.cadence = 750 * time.Millisecond
 	w.refractory = 3
 	if _, err := w.tick(context.Background()); err != nil {
@@ -320,7 +321,7 @@ func TestWillTickTypedPhasesSurroundPerception(t *testing.T) {
 		t.Fatalf("intention must receipt both vector tide and current pull, got %#v", sk.events[0])
 	}
 	for i, ev := range sk.events {
-		if ev.Breath != 1 || ev.CadenceMS != 750 || ev.RefractoryBreaths != 3 {
+		if ev.RootID != "rootabc" || ev.Breath != 1 || ev.CadenceMS != 750 || ev.RefractoryBreaths != 3 {
 			t.Fatalf("event %d must receipt breath-counted time domain, got %#v", i, ev)
 		}
 	}

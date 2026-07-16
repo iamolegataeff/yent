@@ -136,6 +136,60 @@ func TestWillUtilArgs(t *testing.T) {
 	}
 }
 
+func TestFindWillRepoRootFromSubdir(t *testing.T) {
+	root := t.TempDir()
+	for _, rel := range []string{
+		"README.md",
+		"Janus/the_will_design.aml",
+		"sartre/utils/repo_monitor/.keep",
+		"sartre/utils/whatdotheythinkiam/.keep",
+		"cmd/innerworld-dock/.keep",
+	} {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, ok := findWillRepoRoot(filepath.Join(root, "cmd", "innerworld-dock"))
+	if !ok {
+		t.Fatal("expected repo root to be found from a nested start path")
+	}
+	if got != canonicalWillPath(root) {
+		t.Fatalf("wrong root\ngot:  %s\nwant: %s", got, canonicalWillPath(root))
+	}
+}
+
+func TestWillStateDirNamespacesByRootAndOrganism(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("YENT_WILL_STATE_DIR", base)
+	t.Setenv("YENT_WILL_ORGANISM_ID", "Yent Prime")
+	root1 := filepath.Join(t.TempDir(), "repo-a")
+	root2 := filepath.Join(t.TempDir(), "repo-b")
+	if err := os.MkdirAll(root1, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(root2, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := willStateDir(root1)
+	b := willStateDir(root2)
+	if filepath.Dir(a) != base || filepath.Dir(b) != base {
+		t.Fatalf("YENT_WILL_STATE_DIR must be treated as a base dir, got %q / %q", a, b)
+	}
+	if a == b {
+		t.Fatalf("different canonical roots must not share state dir: %q", a)
+	}
+	if !strings.Contains(filepath.Base(a), "org-yent_prime-root-") {
+		t.Fatalf("state dir must include a sanitized organism id and root hash, got %q", a)
+	}
+	if !strings.Contains(filepath.Base(a), "-cfg-") {
+		t.Fatalf("state dir must include sensor config namespace, got %q", a)
+	}
+}
+
 func TestFileSinkAppends(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	sink := fileSink{path: path}
@@ -177,8 +231,9 @@ func TestFileSinkDropsNoiseAndIncompleteRecords(t *testing.T) {
 
 func TestTagSartreEffectLines(t *testing.T) {
 	raw := []byte(`{"util":"repo_monitor","kind":"added","path":"a.md"}` + "\nnoise\n")
-	got := string(tagSartreEffectLines(raw, "reach1"))
+	got := string(tagSartreEffectLines(raw, "reach1", "rootabc"))
 	if !strings.Contains(got, `"id":"reach1"`) ||
+		!strings.Contains(got, `"root_id":"rootabc"`) ||
 		!strings.Contains(got, `"phase":"effect"`) ||
 		!strings.Contains(got, `"util":"repo_monitor"`) ||
 		strings.Contains(got, "noise") {

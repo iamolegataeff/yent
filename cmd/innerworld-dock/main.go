@@ -926,31 +926,34 @@ func main() {
 	if utilsDir := strings.TrimSpace(os.Getenv("YENT_WILL_UTILS_DIR")); utilsDir != "" {
 		flowBody.PersistentMode(true)
 		sinkPath := strings.TrimSpace(os.Getenv("YENT_SARTRE_EVENTS"))
-		root := strings.TrimSpace(os.Getenv("YENT_WILL_ROOT"))
-		if root == "" {
-			root = "." // repo_monitor scans nothing without a --path, so default to the working dir
-		}
-		stateDir := willStateDir(root)
-		if err := os.MkdirAll(stateDir, 0o755); err != nil {
-			fmt.Fprintf(os.Stderr, "[will] state dir %s: %v\n", stateDir, err)
-		}
-		wt := &willTicker{
-			field:  flowBody,
-			script: willScriptPath(),
-			spawner: osSpawner{
-				dir:      utilsDir,
-				root:     root,
-				stateDir: stateDir,
-				timeout:  willReachTimeout(),
-			},
-			sink:       fileSink{path: sinkPath},
-			refractory: willRefractoryTicks(),
-		}
-		go wt.run(ctx, willTickEvery())
-		fmt.Printf("=== will wired: confluence tide -> reach for a self-reading utility (utils=%s, every %s) ===\n",
-			utilsDir, willTickEvery())
-		if sinkPath == "" {
-			fmt.Println("    (YENT_SARTRE_EVENTS unset: the will reaches and reads, but the spiral cannot close)")
+		root, err := resolveWillRoot(os.Getenv("YENT_WILL_ROOT"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[will] root: %v\n", err)
+		} else {
+			rootID := willRootID(root)
+			stateDir := willStateDir(root)
+			if err := os.MkdirAll(stateDir, 0o755); err != nil {
+				fmt.Fprintf(os.Stderr, "[will] state dir %s: %v\n", stateDir, err)
+			}
+			wt := &willTicker{
+				field:  flowBody,
+				script: willScriptPath(),
+				spawner: osSpawner{
+					dir:      utilsDir,
+					root:     root,
+					stateDir: stateDir,
+					timeout:  willReachTimeout(),
+				},
+				sink:       fileSink{path: sinkPath},
+				rootID:     rootID,
+				refractory: willRefractoryTicks(),
+			}
+			go wt.run(ctx, willTickEvery())
+			fmt.Printf("=== will wired: confluence tide -> reach for a self-reading utility (utils=%s, root=%s, root_id=%s, state=%s, every %s) ===\n",
+				utilsDir, root, rootID, stateDir, willTickEvery())
+			if sinkPath == "" {
+				fmt.Println("    (YENT_SARTRE_EVENTS unset: the will reaches and reads, but the spiral cannot close)")
+			}
 		}
 	}
 

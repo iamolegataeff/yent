@@ -110,6 +110,7 @@ func (t willTideSnapshot) event(id, phase, util, outcome string) willEvent {
 
 func (w *willTicker) event(t willTideSnapshot, id, phase, util, outcome string) willEvent {
 	ev := t.event(id, phase, util, outcome)
+	ev.RootID = w.rootID
 	ev.Breath = w.breath
 	if w.cadence > 0 {
 		ev.CadenceMS = int64(w.cadence / time.Millisecond)
@@ -127,6 +128,7 @@ type willTicker struct {
 	script     string
 	spawner    willSpawner
 	sink       willSink
+	rootID     string        // stable identity of the root the will sensors read
 	cadence    time.Duration // wall-clock pace of one will breath, recorded for receipts only
 	breath     int           // monotonically increasing will breath index
 	refractory int           // breaths the will must wait after a reach before it can reach again
@@ -181,7 +183,7 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 		}
 		return util, fmt.Errorf("will reach %s overflowed stdout cap (%d bytes)", util, willMaxStdout)
 	}
-	effectLine := tagSartreEffectLines(result.Line, eventID)
+	effectLine := tagSartreEffectLines(result.Line, eventID, w.rootID)
 	effectCount := len(completeSartreJSONLines(effectLine))
 	if len(effectLine) > 0 {
 		if err := w.sink.Emit(effectLine); err != nil {
