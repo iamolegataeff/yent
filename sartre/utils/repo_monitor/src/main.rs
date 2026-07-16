@@ -86,7 +86,11 @@ fn parse_args() -> Config {
                             if e.is_empty() {
                                 continue;
                             }
-                            exts.push(if e.starts_with('.') { e } else { format!(".{}", e) });
+                            exts.push(if e.starts_with('.') {
+                                e
+                            } else {
+                                format!(".{}", e)
+                            });
                         }
                     }
                     i += 1;
@@ -96,7 +100,10 @@ fn parse_args() -> Config {
             }
             Some("--interval") => {
                 if has_val(i) {
-                    interval = args[i + 1].to_str().and_then(|v| v.parse().ok()).unwrap_or(30);
+                    interval = args[i + 1]
+                        .to_str()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(30);
                     i += 1;
                 } else {
                     eprintln!("[repo_monitor] --interval needs a value");
@@ -111,7 +118,10 @@ fn parse_args() -> Config {
                 }
             }
             Some("--once") => once = true,
-            other => eprintln!("[repo_monitor] ignoring unknown arg: {}", other.unwrap_or("<non-utf8>")),
+            other => eprintln!(
+                "[repo_monitor] ignoring unknown arg: {}",
+                other.unwrap_or("<non-utf8>")
+            ),
         }
         i += 1;
     }
@@ -126,7 +136,13 @@ fn parse_args() -> Config {
         interval = 1;
     }
 
-    Config { paths, exts, interval, once, state_file }
+    Config {
+        paths,
+        exts,
+        interval,
+        once,
+        state_file,
+    }
 }
 
 fn has_ext(p: &Path, exts: &[String]) -> bool {
@@ -191,14 +207,23 @@ fn diff(prev: &State, cur: &State) -> Vec<Change> {
     let mut out = Vec::new();
     for (p, s) in cur {
         match prev.get(p) {
-            None => out.push(Change { kind: "added", path: p.clone() }),
-            Some(ps) if ps != s => out.push(Change { kind: "modified", path: p.clone() }),
+            None => out.push(Change {
+                kind: "added",
+                path: p.clone(),
+            }),
+            Some(ps) if ps != s => out.push(Change {
+                kind: "modified",
+                path: p.clone(),
+            }),
             _ => {}
         }
     }
     for p in prev.keys() {
         if !cur.contains_key(p) {
-            out.push(Change { kind: "removed", path: p.clone() });
+            out.push(Change {
+                kind: "removed",
+                path: p.clone(),
+            });
         }
     }
     out
@@ -244,7 +269,12 @@ fn load_state(p: &Path) -> State {
     m
 }
 
-fn save_state(p: &Path, m: &State) {
+fn state_tmp_path(p: &Path) -> PathBuf {
+    let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("state");
+    p.with_file_name(format!("{}.tmp.{}", name, std::process::id()))
+}
+
+fn save_state(p: &Path, m: &State) -> io::Result<()> {
     let mut s = String::new();
     for (path, sha) in m {
         s.push_str(sha);
@@ -252,26 +282,48 @@ fn save_state(p: &Path, m: &State) {
         s.push_str(path);
         s.push('\n');
     }
-    let _ = fs::write(p, s);
+    if let Some(parent) = p.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp = state_tmp_path(p);
+    let res = (|| {
+        fs::write(&tmp, s)?;
+        fs::rename(&tmp, p)
+    })();
+    if res.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    res
 }
 
 fn main() {
     let cfg = parse_args();
 
     if cfg.once {
-        let prev = cfg.state_file.as_ref().map(|f| load_state(f)).unwrap_or_default();
+        let prev = cfg
+            .state_file
+            .as_ref()
+            .map(|f| load_state(f))
+            .unwrap_or_default();
         let cur = scan(&cfg);
         {
             let mut out = io::stdout().lock();
             for ch in diff(&prev, &cur) {
-                if emit(&mut out, &ch).is_err() {
-                    break;
+                if let Err(err) = emit(&mut out, &ch) {
+                    eprintln!("[repo_monitor] emit failed: {}", err);
+                    std::process::exit(1);
                 }
             }
-            let _ = out.flush();
+            if let Err(err) = out.flush() {
+                eprintln!("[repo_monitor] flush failed: {}", err);
+                std::process::exit(1);
+            }
         }
         if let Some(f) = &cfg.state_file {
-            save_state(f, &cur);
+            if let Err(err) = save_state(f, &cur) {
+                eprintln!("[repo_monitor] save state {} failed: {}", f.display(), err);
+                std::process::exit(1);
+            }
         }
         return;
     }
@@ -282,7 +334,13 @@ fn main() {
     let exts = cfg.exts.clone();
     let interval = cfg.interval;
     thread::spawn(move || {
-        let scfg = Config { paths, exts, interval, once: false, state_file: None };
+        let scfg = Config {
+            paths,
+            exts,
+            interval,
+            once: false,
+            state_file: None,
+        };
         let mut state = scan(&scfg); // baseline is silent
         loop {
             thread::sleep(Duration::from_secs(interval));
@@ -310,7 +368,10 @@ mod tests {
     use super::*;
 
     fn st(pairs: &[(&str, &str)]) -> State {
-        pairs.iter().map(|(p, s)| (p.to_string(), s.to_string())).collect()
+        pairs
+            .iter()
+            .map(|(p, s)| (p.to_string(), s.to_string()))
+            .collect()
     }
 
     #[test]

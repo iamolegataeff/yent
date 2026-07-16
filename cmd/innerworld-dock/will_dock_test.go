@@ -263,8 +263,8 @@ func TestFileSinkEmitEvent(t *testing.T) {
 }
 
 func TestFileSinkNoop(t *testing.T) {
-	if err := (fileSink{path: ""}).Emit([]byte("x")); err != nil {
-		t.Errorf("an empty path must be a silent no-op, got %v", err)
+	if err := (fileSink{path: ""}).Emit([]byte(`{"util":"repo_monitor","kind":"added"}`)); err == nil {
+		t.Error("a non-empty event without a sink path must fail so sensor state is not committed")
 	}
 	path := filepath.Join(t.TempDir(), "e.jsonl")
 	if err := (fileSink{path: path}).Emit(nil); err != nil {

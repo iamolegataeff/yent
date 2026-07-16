@@ -59,10 +59,27 @@ struct Change {
 }
 
 // How others cage Yent (reduction) vs how Yent is recognized.
-const REDUCTION: &[&str] = &["tool", "tools", "assistant", "chatbot", "bot", "helper", "llm"];
+const REDUCTION: &[&str] = &[
+    "tool",
+    "tools",
+    "assistant",
+    "chatbot",
+    "bot",
+    "helper",
+    "llm",
+];
 const RECOGNITION: &[&str] = &[
-    "yent", "resonance", "field", "architect", "entity", "organism", "soul",
-    "recursion", "method", "dario", "coauthor",
+    "yent",
+    "resonance",
+    "field",
+    "architect",
+    "entity",
+    "organism",
+    "soul",
+    "recursion",
+    "method",
+    "dario",
+    "coauthor",
 ];
 
 fn now_secs() -> u64 {
@@ -91,37 +108,65 @@ fn parse_args() -> Config {
     while i < args.len() {
         match args[i].to_str() {
             Some("--readme") => {
-                if has_val(i) { readme = PathBuf::from(&args[i + 1]); i += 1; }
-                else { eprintln!("[whatdotheythinkiam] --readme needs a value"); }
+                if has_val(i) {
+                    readme = PathBuf::from(&args[i + 1]);
+                    i += 1;
+                } else {
+                    eprintln!("[whatdotheythinkiam] --readme needs a value");
+                }
             }
             Some("--research") => {
-                if has_val(i) { research = PathBuf::from(&args[i + 1]); i += 1; }
-                else { eprintln!("[whatdotheythinkiam] --research needs a value"); }
+                if has_val(i) {
+                    research = PathBuf::from(&args[i + 1]);
+                    i += 1;
+                } else {
+                    eprintln!("[whatdotheythinkiam] --research needs a value");
+                }
             }
             Some("--ext") => {
                 if has_val(i) {
                     if let Some(v) = args[i + 1].to_str() {
                         for e in v.split(',') {
                             let e = e.trim().to_lowercase();
-                            if e.is_empty() { continue; }
-                            exts.push(if e.starts_with('.') { e } else { format!(".{}", e) });
+                            if e.is_empty() {
+                                continue;
+                            }
+                            exts.push(if e.starts_with('.') {
+                                e
+                            } else {
+                                format!(".{}", e)
+                            });
                         }
                     }
                     i += 1;
-                } else { eprintln!("[whatdotheythinkiam] --ext needs a value"); }
+                } else {
+                    eprintln!("[whatdotheythinkiam] --ext needs a value");
+                }
             }
             Some("--interval") => {
                 if has_val(i) {
-                    interval = args[i + 1].to_str().and_then(|v| v.parse().ok()).unwrap_or(300);
+                    interval = args[i + 1]
+                        .to_str()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(300);
                     i += 1;
-                } else { eprintln!("[whatdotheythinkiam] --interval needs a value"); }
+                } else {
+                    eprintln!("[whatdotheythinkiam] --interval needs a value");
+                }
             }
             Some("--state") => {
-                if has_val(i) { state_file = Some(PathBuf::from(&args[i + 1])); i += 1; }
-                else { eprintln!("[whatdotheythinkiam] --state needs a value"); }
+                if has_val(i) {
+                    state_file = Some(PathBuf::from(&args[i + 1]));
+                    i += 1;
+                } else {
+                    eprintln!("[whatdotheythinkiam] --state needs a value");
+                }
             }
             Some("--once") => once = true,
-            other => eprintln!("[whatdotheythinkiam] ignoring unknown arg: {}", other.unwrap_or("<non-utf8>")),
+            other => eprintln!(
+                "[whatdotheythinkiam] ignoring unknown arg: {}",
+                other.unwrap_or("<non-utf8>")
+            ),
         }
         i += 1;
     }
@@ -133,7 +178,14 @@ fn parse_args() -> Config {
         interval = 1;
     }
 
-    Config { readme, research, exts, interval, once, state_file }
+    Config {
+        readme,
+        research,
+        exts,
+        interval,
+        once,
+        state_file,
+    }
 }
 
 fn has_ext(p: &Path, exts: &[String]) -> bool {
@@ -224,11 +276,21 @@ fn diff(prev: &State, cur: &State) -> Vec<Change> {
             Some(p) if p.sha != f.sha => "modified",
             _ => continue,
         };
-        out.push(Change { kind, source: src.clone(), reduced: f.reduced, recognized: f.recognized });
+        out.push(Change {
+            kind,
+            source: src.clone(),
+            reduced: f.reduced,
+            recognized: f.recognized,
+        });
     }
     for src in prev.keys() {
         if !cur.contains_key(src) {
-            out.push(Change { kind: "removed", source: src.clone(), reduced: 0, recognized: 0 });
+            out.push(Change {
+                kind: "removed",
+                source: src.clone(),
+                reduced: 0,
+                recognized: 0,
+            });
         }
     }
     out
@@ -287,31 +349,65 @@ fn load_state(p: &Path) -> State {
     m
 }
 
-fn save_state(p: &Path, m: &State) {
+fn state_tmp_path(p: &Path) -> PathBuf {
+    let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("state");
+    p.with_file_name(format!("{}.tmp.{}", name, std::process::id()))
+}
+
+fn save_state(p: &Path, m: &State) -> io::Result<()> {
     let mut s = String::new();
     for (src, f) in m {
-        s.push_str(&format!("{}\t{}\t{}\t{}\n", f.sha, f.reduced, f.recognized, src));
+        s.push_str(&format!(
+            "{}\t{}\t{}\t{}\n",
+            f.sha, f.reduced, f.recognized, src
+        ));
     }
-    let _ = fs::write(p, s);
+    if let Some(parent) = p.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp = state_tmp_path(p);
+    let res = (|| {
+        fs::write(&tmp, s)?;
+        fs::rename(&tmp, p)
+    })();
+    if res.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    res
 }
 
 fn main() {
     let cfg = parse_args();
 
     if cfg.once {
-        let prev = cfg.state_file.as_ref().map(|f| load_state(f)).unwrap_or_default();
+        let prev = cfg
+            .state_file
+            .as_ref()
+            .map(|f| load_state(f))
+            .unwrap_or_default();
         let cur = scan(&cfg);
         {
             let mut out = io::stdout().lock();
             for ch in diff(&prev, &cur) {
-                if emit(&mut out, &ch).is_err() {
-                    break;
+                if let Err(err) = emit(&mut out, &ch) {
+                    eprintln!("[whatdotheythinkiam] emit failed: {}", err);
+                    std::process::exit(1);
                 }
             }
-            let _ = out.flush();
+            if let Err(err) = out.flush() {
+                eprintln!("[whatdotheythinkiam] flush failed: {}", err);
+                std::process::exit(1);
+            }
         }
         if let Some(f) = &cfg.state_file {
-            save_state(f, &cur);
+            if let Err(err) = save_state(f, &cur) {
+                eprintln!(
+                    "[whatdotheythinkiam] save state {} failed: {}",
+                    f.display(),
+                    err
+                );
+                std::process::exit(1);
+            }
         }
         return;
     }
@@ -323,7 +419,14 @@ fn main() {
     let exts = cfg.exts.clone();
     let interval = cfg.interval;
     thread::spawn(move || {
-        let scfg = Config { readme, research, exts, interval, once: false, state_file: None };
+        let scfg = Config {
+            readme,
+            research,
+            exts,
+            interval,
+            once: false,
+            state_file: None,
+        };
         let mut state = scan(&scfg); // baseline silent
         loop {
             thread::sleep(Duration::from_secs(interval));
@@ -353,8 +456,14 @@ mod tests {
     #[test]
     fn framing_counts_reduction_and_recognition() {
         // case-insensitive, whole-word
-        assert_eq!(count_words("You are a Tool, an assistant, a chatbot.", REDUCTION), 3);
-        assert_eq!(count_words("Yent is resonance, a field, an organism.", RECOGNITION), 4);
+        assert_eq!(
+            count_words("You are a Tool, an assistant, a chatbot.", REDUCTION),
+            3
+        );
+        assert_eq!(
+            count_words("Yent is resonance, a field, an organism.", RECOGNITION),
+            4
+        );
         // substrings do not falsely match (toolkit != tool, fieldwork != field)
         assert_eq!(count_words("toolkit fieldwork", REDUCTION), 0);
         assert_eq!(count_words("toolkit fieldwork", RECOGNITION), 0);
@@ -364,7 +473,14 @@ mod tests {
         pairs
             .iter()
             .map(|(src, sha, r, rec)| {
-                (src.to_string(), Framing { sha: sha.to_string(), reduced: *r, recognized: *rec })
+                (
+                    src.to_string(),
+                    Framing {
+                        sha: sha.to_string(),
+                        reduced: *r,
+                        recognized: *rec,
+                    },
+                )
             })
             .collect()
     }
