@@ -125,16 +125,17 @@ func (w *willTicker) event(t willTideSnapshot, id, phase, util, outcome string) 
 // sustained strain cannot fire every breath and repeated no-novelty can slow the next reach
 // without changing model weights or AML origin facts.
 type willTicker struct {
-	field      willField
-	script     string
-	spawner    willSpawner
-	sink       willSink
-	rootID     string        // stable identity of the root the will sensors read
-	cadence    time.Duration // wall-clock pace of one will breath, recorded for receipts only
-	breath     int           // monotonically increasing will breath index
-	refractory int           // breaths the will must wait after a reach before it can reach again
-	cooldown   int           // breaths remaining in the current refractory (state)
-	quietRuns  int           // consecutive completed reaches that found no novelty
+	field             willField
+	script            string
+	spawner           willSpawner
+	sink              willSink
+	rootID            string        // stable identity of the root the will sensors read
+	learningStatePath string        // durable host-side quiet-run memory, under the namespaced state dir
+	cadence           time.Duration // wall-clock pace of one will breath, recorded for receipts only
+	breath            int           // monotonically increasing will breath index
+	refractory        int           // breaths the will must wait after a reach before it can reach again
+	cooldown          int           // breaths remaining in the current refractory (state)
+	quietRuns         int           // consecutive completed reaches that found no novelty
 }
 
 // tick advances the will one step and, if the tide crests, reaches for the utility the dominant
@@ -213,6 +214,9 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 			return util, fmt.Errorf("will learn %s: %w", util, err)
 		}
 	}
+	if err := w.saveLearningState(nextQuiet); err != nil {
+		return util, fmt.Errorf("will learn %s state: %w", util, err)
+	}
 	if err := dischargeWillTide(w.field); err != nil {
 		return util, fmt.Errorf("will discharge %s: %w", util, err)
 	}
@@ -222,6 +226,7 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 }
 
 const willQuietRefractoryMaxExtra = 4
+const willQuietRunMax = 1 << 20
 
 func (w *willTicker) plannedLearningState(outcome string) (quietRuns, cooldown int) {
 	base := w.refractory
@@ -231,6 +236,9 @@ func (w *willTicker) plannedLearningState(outcome string) (quietRuns, cooldown i
 	switch outcome {
 	case "no_novelty":
 		quietRuns = w.quietRuns + 1
+		if quietRuns < 0 || quietRuns > willQuietRunMax {
+			quietRuns = willQuietRunMax
+		}
 		extra := quietRuns
 		if extra > willQuietRefractoryMaxExtra {
 			extra = willQuietRefractoryMaxExtra
@@ -241,6 +249,13 @@ func (w *willTicker) plannedLearningState(outcome string) (quietRuns, cooldown i
 	default:
 		return w.quietRuns, base
 	}
+}
+
+func (w *willTicker) saveLearningState(quietRuns int) error {
+	if w.learningStatePath == "" {
+		return nil
+	}
+	return saveWillLearningState(w.learningStatePath, willLearningState{QuietRuns: quietRuns})
 }
 
 func dischargeWillTide(field willField) error {
