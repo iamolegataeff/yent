@@ -128,10 +128,11 @@ func TestSartreSenseCursorConsumes(t *testing.T) {
 
 func TestSartreSenseKeepsPartialRecordUntilNewline(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
+	cursor := filepath.Join(t.TempDir(), "cursor.json")
 	if err := os.WriteFile(path, []byte(`{"util":"repo_monitor","kind":"added"`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s := &sartreSense{eventsPath: path}
+	s := &sartreSense{eventsPath: path, cursorPath: cursor}
 	if got := s.readNew(); got != nil {
 		t.Fatalf("a partial record must not be consumed as an event, got %q", got)
 	}
@@ -143,9 +144,80 @@ func TestSartreSenseKeepsPartialRecordUntilNewline(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.Close()
-	got := string(s.readNew())
+	got := string((&sartreSense{eventsPath: path, cursorPath: cursor}).readNew())
 	if !strings.Contains(got, `"path":"late.md"`) {
 		t.Fatalf("the completed record must be perceived after its newline, got %q", got)
+	}
+}
+
+func TestSartreSensePersistentCursorSuppressesRestartReplay(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	cursor := filepath.Join(t.TempDir(), "cursor.json")
+	if err := os.WriteFile(path, []byte(`{"util":"repo_monitor","kind":"added","path":"first.md"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := string((&sartreSense{eventsPath: path, cursorPath: cursor}).readNew()); !strings.Contains(got, "first.md") {
+		t.Fatalf("first process should read first event, got %q", got)
+	}
+	if got := (&sartreSense{eventsPath: path, cursorPath: cursor}).readNew(); len(got) != 0 {
+		t.Fatalf("second process must not replay acknowledged event, got %q", got)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"util":"repo_monitor","kind":"modified","path":"second.md"}` + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	got := string((&sartreSense{eventsPath: path, cursorPath: cursor}).readNew())
+	if !strings.Contains(got, "second.md") || strings.Contains(got, "first.md") {
+		t.Fatalf("persistent cursor should read only new event, got %q", got)
+	}
+}
+
+func TestSartreSensePersistentCursorDoesNotAckPartialAcrossRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	cursor := filepath.Join(t.TempDir(), "cursor.json")
+	if err := os.WriteFile(path, []byte(`{"util":"repo_monitor","kind":"added"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := (&sartreSense{eventsPath: path, cursorPath: cursor}).readNew(); len(got) != 0 {
+		t.Fatalf("partial record must not be read, got %q", got)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`,"path":"after-restart.md"}` + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	got := string((&sartreSense{eventsPath: path, cursorPath: cursor}).readNew())
+	if !strings.Contains(got, "after-restart.md") {
+		t.Fatalf("partial prefix should remain unacknowledged across restart, got %q", got)
+	}
+}
+
+func TestSartreSenseCursorResetsOnFileReplacement(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	cursor := filepath.Join(t.TempDir(), "cursor.json")
+	if err := os.WriteFile(path, []byte(`{"util":"repo_monitor","kind":"added","path":"old.md"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := string((&sartreSense{eventsPath: path, cursorPath: cursor}).readNew()); !strings.Contains(got, "old.md") {
+		t.Fatalf("first file should be read, got %q", got)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"util":"repo_monitor","kind":"added","path":"new.md"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := string((&sartreSense{eventsPath: path, cursorPath: cursor}).readNew())
+	if !strings.Contains(got, "new.md") {
+		t.Fatalf("replacement file should reset persisted cursor, got %q", got)
 	}
 }
 

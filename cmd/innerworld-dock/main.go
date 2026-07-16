@@ -38,6 +38,8 @@ import "C"
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -204,60 +206,190 @@ func newBody(name, bin, model, workdir string, args []string) *yent.DOEBody {
 // ratchet.
 type sartreSense struct {
 	eventsPath string
-	offset     int64 // cursor: how much of the events file has already been perceived
-	tail       []byte
+	cursorPath string
+	offset     int64 // cursor: byte offset of the last acknowledged complete record
+	fileID     sartreFileID
+	loaded     bool
 	limpha     *yent.LimphaClient
 	state      func() yent.LimphaState
 }
 
-// readNew returns only complete JSONL events appended since the last read, advancing the cursor
-// while preserving a partial trailing record for the next read — so each complete event is
-// perceived exactly once, never replayed every ripple, and never consumed half-written. A file
-// shorter than the cursor was truncated/rotated, so it re-reads from the start. No cgo here, so
-// the consume semantics are unit-tested directly (readNew).
+type sartreFileID struct {
+	Path string `json:"path"`
+	Dev  uint64 `json:"dev,omitempty"`
+	Ino  uint64 `json:"ino,omitempty"`
+}
+
+type sartreCursorState struct {
+	File   sartreFileID `json:"file"`
+	Offset int64        `json:"offset"`
+}
+
+type sartreReadBatch struct {
+	raw       []byte
+	ackOffset int64
+	fileID    sartreFileID
+	ok        bool
+}
+
+// readNew returns only complete JSONL events appended since the last acknowledged record. It is
+// a test/convenience wrapper around readNewBatch; production callers ack after parse/store.
 func (s *sartreSense) readNew() []byte {
+	batch := s.readNewBatch()
+	if !batch.ok {
+		return nil
+	}
+	if err := s.ackSartreBatch(batch); err != nil {
+		fmt.Fprintf(os.Stderr, "[dock] SARTRE cursor ack: %v\n", err)
+	}
+	return batch.raw
+}
+
+// readNewBatch reads from the persisted file cursor, but does not acknowledge the bytes yet.
+// The cursor advances only to the newline after the last complete record; a half-written append
+// remains unread and will be retried from the same offset. Rotation/replacement is detected with
+// file identity, not only size.
+func (s *sartreSense) readNewBatch() sartreReadBatch {
 	f, err := os.Open(s.eventsPath)
 	if err != nil {
-		return nil
+		return sartreReadBatch{}
 	}
 	defer f.Close()
-	if fi, statErr := f.Stat(); statErr == nil && fi.Size() < s.offset {
-		s.offset = 0
-		s.tail = nil
+	fi, err := f.Stat()
+	if err != nil {
+		return sartreReadBatch{}
 	}
+	fileID := sartreFileIdentity(s.eventsPath, fi)
+	s.loadSartreCursor(fileID, fi.Size())
 	if _, err := f.Seek(s.offset, io.SeekStart); err != nil {
-		return nil
+		return sartreReadBatch{}
 	}
 	raw, err := io.ReadAll(f)
 	if err != nil || len(raw) == 0 {
-		return nil
+		return sartreReadBatch{}
 	}
-	s.offset += int64(len(raw))
-	buf := append(append([]byte(nil), s.tail...), raw...)
-	cut := bytes.LastIndexByte(buf, '\n')
+	cut := bytes.LastIndexByte(raw, '\n')
 	if cut < 0 {
-		s.tail = buf
-		return nil
+		return sartreReadBatch{}
 	}
-	complete := buf[:cut+1]
-	s.tail = append(s.tail[:0], buf[cut+1:]...)
+	ackOffset := s.offset + int64(cut+1)
+	complete := raw[:cut+1]
 	lines := completeSartreJSONLines(complete)
-	if len(lines) == 0 {
+	return sartreReadBatch{
+		raw:       bytes.Join(lines, []byte{'\n'}),
+		ackOffset: ackOffset,
+		fileID:    fileID,
+		ok:        true,
+	}
+}
+
+func (s *sartreSense) loadSartreCursor(fileID sartreFileID, size int64) {
+	if s.loaded {
+		if !sameSartreFile(s.fileID, fileID) || size < s.offset {
+			s.offset = 0
+		}
+		s.fileID = fileID
+		return
+	}
+	s.loaded = true
+	s.fileID = fileID
+	if s.offset < 0 || s.offset > size {
+		s.offset = 0
+	}
+	path := s.sartreCursorPath()
+	if path == "" {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var st sartreCursorState
+	if err := json.Unmarshal(data, &st); err != nil {
+		return
+	}
+	if sameSartreFile(st.File, fileID) && st.Offset >= 0 && st.Offset <= size {
+		s.offset = st.Offset
+	}
+}
+
+func (s *sartreSense) ackSartreBatch(batch sartreReadBatch) error {
+	if !batch.ok {
 		return nil
 	}
-	return bytes.Join(lines, []byte{'\n'})
+	s.offset = batch.ackOffset
+	s.fileID = batch.fileID
+	path := s.sartreCursorPath()
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	st := sartreCursorState{File: s.fileID, Offset: s.offset}
+	data, err := json.Marshal(st)
+	if err != nil {
+		return err
+	}
+	tmp := fmt.Sprintf("%s.tmp.%d", path, os.Getpid())
+	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func (s *sartreSense) sartreCursorPath() string {
+	if strings.TrimSpace(s.cursorPath) != "" {
+		return s.cursorPath
+	}
+	return sartreCursorPath(s.eventsPath)
+}
+
+func sartreCursorPath(eventsPath string) string {
+	if path := strings.TrimSpace(os.Getenv("YENT_SARTRE_CURSOR")); path != "" {
+		return path
+	}
+	base := strings.TrimSpace(os.Getenv("YENT_SARTRE_CURSOR_DIR"))
+	if base == "" {
+		base = filepath.Join(os.TempDir(), "yent-sartre-cursors")
+	}
+	sum := sha256.Sum256([]byte(canonicalWillPath(eventsPath)))
+	return filepath.Join(base, hex.EncodeToString(sum[:8])+".json")
+}
+
+func sartreFileIdentity(path string, fi os.FileInfo) sartreFileID {
+	out := sartreFileID{Path: canonicalWillPath(path)}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+		out.Dev = uint64(st.Dev)
+		out.Ino = uint64(st.Ino)
+	}
+	return out
+}
+
+func sameSartreFile(a, b sartreFileID) bool {
+	if a.Dev != 0 || a.Ino != 0 || b.Dev != 0 || b.Ino != 0 {
+		return a.Dev == b.Dev && a.Ino == b.Ino && a.Dev != 0 && a.Ino != 0
+	}
+	return a.Path != "" && a.Path == b.Path
 }
 
 func (s *sartreSense) Pressure() (string, bool) {
 	if s.eventsPath == "" {
 		return "", false
 	}
-	raw := s.readNew() // only NEW events since the last ripple — no latched replay of history
-	if len(raw) == 0 {
+	batch := s.readNewBatch() // only NEW events since the last ack — no latched replay of history
+	if !batch.ok {
 		return "", false
 	}
-	events := yent.ParseSartreEventsJSONL(string(raw))
+	events := yent.ParseSartreEventsJSONL(string(batch.raw))
 	if len(events) == 0 {
+		if err := s.ackSartreBatch(batch); err != nil {
+			fmt.Fprintf(os.Stderr, "[dock] SARTRE cursor ack: %v\n", err)
+		}
 		return "", false
 	}
 	if s.limpha != nil {
@@ -267,9 +399,14 @@ func (s *sartreSense) Pressure() (string, bool) {
 		}
 		if _, err := s.limpha.StoreSartreEvents(events, st); err != nil {
 			fmt.Fprintf(os.Stderr, "[dock] SARTRE live limpha store: %v\n", err)
+			return "", false
 		}
 	}
-	return sartreFieldAML(events)
+	aml, ok := sartreFieldAML(events)
+	if err := s.ackSartreBatch(batch); err != nil {
+		fmt.Fprintf(os.Stderr, "[dock] SARTRE cursor ack: %v\n", err)
+	}
+	return aml, ok
 }
 
 func sartreEOFOffset(path string) int64 {
@@ -521,25 +658,38 @@ func ingestSartreFromEnv(lc *yent.LimphaClient, st yent.LimphaState) int {
 		fmt.Fprintf(os.Stderr, "[dock] YENT_SARTRE_EVENTS set but YENT_LIMPHA_DB is not; SARTRE receipts need limpha\n")
 		return 0
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// A fresh will-events path does not exist yet — the will's fileSink creates it on the
-			// first reach (O_CREATE). A missing file is "no events yet", not a fatal misconfiguration.
-			fmt.Printf("=== SARTRE wired: events file %s not present yet (the will creates it on first reach) ===\n", path)
-			return 0
+	reader := &sartreSense{eventsPath: path}
+	batch := reader.readNewBatch()
+	if !batch.ok {
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				// A fresh will-events path does not exist yet — the will's fileSink creates it on the
+				// first reach (O_CREATE). A missing file is "no events yet", not a fatal misconfiguration.
+				fmt.Printf("=== SARTRE wired: events file %s not present yet (the will creates it on first reach) ===\n", path)
+				return 0
+			}
+			fmt.Fprintf(os.Stderr, "[dock] SARTRE events open %s: %v\n", path, err)
+			os.Exit(1)
 		}
-		fmt.Fprintf(os.Stderr, "[dock] SARTRE events open %s: %v\n", path, err)
-		os.Exit(1)
+		fmt.Printf("=== SARTRE wired: no new complete utility events found in %s ===\n", path)
+		return 0
 	}
-	events := yent.ParseSartreEventsJSONL(string(data))
+	events := yent.ParseSartreEventsJSONL(string(batch.raw))
 	if len(events) == 0 {
+		if err := reader.ackSartreBatch(batch); err != nil {
+			fmt.Fprintf(os.Stderr, "[dock] SARTRE events cursor %s: %v\n", path, err)
+			os.Exit(1)
+		}
 		fmt.Printf("=== SARTRE wired: no utility events found in %s ===\n", path)
 		return 0
 	}
 	seamID, err := lc.StoreSartreEvents(events, st)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[dock] SARTRE events store %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	if err := reader.ackSartreBatch(batch); err != nil {
+		fmt.Fprintf(os.Stderr, "[dock] SARTRE events cursor %s: %v\n", path, err)
 		os.Exit(1)
 	}
 	fmt.Printf("=== SARTRE wired: %d utility event(s) stored as limpha seam #%d from %s ===\n", len(events), seamID, path)
@@ -753,11 +903,16 @@ func main() {
 	iw.AddConsolidator(&innerworld.FlowConsolidator{Flow: flowBody})
 	iw.SetSleepTrigger(func(innerworld.Field) bool { return flowBody.AutumnEnergy() > 0.6 })
 
+	ingestSartreFromEnv(limpha, limphaStateFromCanonical())
 	// SARTRE sense: the environment (utility events) is a live field reflex — it shifts
 	// the field's posture (VELOCITY/PROPHECY) before each ripple, the fast present-time
 	// twin of the slow limpha recall pressure. Same YENT_SARTRE_EVENTS as the limpha path.
 	if ev := strings.TrimSpace(os.Getenv("YENT_SARTRE_EVENTS")); ev != "" {
-		iw.SetSense(&sartreSense{eventsPath: ev, offset: sartreEOFOffset(ev), limpha: limpha, state: limphaStateFromCanonical})
+		initialOffset := int64(0)
+		if limpha == nil {
+			initialOffset = sartreEOFOffset(ev)
+		}
+		iw.SetSense(&sartreSense{eventsPath: ev, offset: initialOffset, limpha: limpha, state: limphaStateFromCanonical})
 		fmt.Println("=== SARTRE sense wired: environment perception is a live field reflex (before the circles) ===")
 	}
 
@@ -779,7 +934,6 @@ func main() {
 	}
 
 	var memories []innerworld.Memory
-	ingestSartreFromEnv(limpha, limphaStateFromCanonical())
 	// Close the loop: recall past inner monologues from limpha so new thinking is
 	// shaped by what Yent thought before. The write side (dock -> limpha) lands the
 	// seams; this reads them back into the seed.
