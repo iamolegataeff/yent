@@ -320,6 +320,38 @@ func TestSartreSenseStoresIdentityEventWithoutForcingRun(t *testing.T) {
 	}
 }
 
+func TestSartreSenseDuplicateStableEventDoesNotMoveField(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	cursor := filepath.Join(dir, "cursor.json")
+	line := `{"id":"reach-dup","root_id":"root-a","phase":"effect","util":"repo_monitor","kind":"modified","path":"README.md"}`
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lc, err := yent.NewLimphaClientAt(filepath.Join(dir, "limpha.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lc.Close()
+	if _, err := lc.StoreSartreEvents(yent.ParseSartreEventsJSONL(line+"\n"), yent.LimphaState{}); err != nil {
+		t.Fatal(err)
+	}
+	aml, ok := (&sartreSense{eventsPath: path, cursorPath: cursor, limpha: lc}).Pressure()
+	if ok || aml != "" {
+		t.Fatalf("duplicate stable event should be acknowledged without live field pressure, got ok=%v aml=%q", ok, aml)
+	}
+	if got := (&sartreSense{eventsPath: path, cursorPath: cursor, limpha: lc}).readNew(); len(got) != 0 {
+		t.Fatalf("duplicate event should still advance the cursor, got %q", got)
+	}
+	stats, err := lc.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats["total_conversations"].(int64) != 1 || stats["total_seams"].(int64) != 1 {
+		t.Fatalf("duplicate live event should not grow limpha, got %v / %v", stats["total_conversations"], stats["total_seams"])
+	}
+}
+
 func TestSartreSenseIdentityReductionCarriesSharperProphecy(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	event := `{"util":"whatdotheythinkiam","kind":"framing","reduced":6,"recognized":2}`

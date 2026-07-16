@@ -1,6 +1,9 @@
 package yent
 
 import (
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -88,21 +91,68 @@ func ParseSartreEventsJSONL(jsonl string) []SartreEvent {
 // StoreSartreEvents persists one SARTRE perception packet into limpha. It writes
 // both a conversation row for search and a seam row for typed downstream recall.
 func (c *LimphaClient) StoreSartreEvents(events []SartreEvent, st LimphaState) (int64, error) {
+	id, _, err := c.StoreNewSartreEvents(events, st)
+	return id, err
+}
+
+// StoreNewSartreEvents persists only stable SARTRE events not already recorded in
+// limpha. Retried will receipts reuse the same causal ids; those retries must be
+// acknowledged without adding duplicate seams or moving the live field twice.
+func (c *LimphaClient) StoreNewSartreEvents(events []SartreEvent, st LimphaState) (int64, []SartreEvent, error) {
 	if c == nil || !c.connected || len(events) == 0 {
-		return 0, nil
+		return 0, nil, nil
 	}
-	receipt := BuildSartreReceipt(events)
+	tx, err := c.db.Begin()
+	if err != nil {
+		c.recordMemoryFailure("conversation", err)
+		return 0, nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	accepted := make([]SartreEvent, 0, len(events))
+	now := nowSeconds()
+	for _, ev := range events {
+		ev = normalizeSartreEvent(ev)
+		if ev.Utility == "" {
+			continue
+		}
+		if key, ok := sartreEventKey(ev); ok {
+			res, err := tx.Exec(
+				`INSERT OR IGNORE INTO sartre_event_ids
+				 (event_key, event_id, phase, utility, recorded_at)
+				 VALUES (?, ?, ?, ?, ?)`,
+				key, ev.ID, ev.Phase, ev.Utility, now)
+			if err != nil {
+				c.recordMemoryFailure("conversation", err)
+				return 0, nil, err
+			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				c.recordMemoryFailure("conversation", err)
+				return 0, nil, err
+			}
+			if n == 0 {
+				continue
+			}
+		}
+		accepted = append(accepted, ev)
+	}
+	receipt := BuildSartreReceipt(accepted)
 	if len(receipt.Trace) == 0 {
-		return 0, nil
+		return 0, nil, nil
 	}
 	response := strings.Join(receipt.Trace, "\n")
 	prompt := "[sartre/perception] utility receipts"
-	convID, err := c.StoreTurn(prompt, response, st)
+	convID, err := c.storeSartreConversationTx(tx, prompt, response, st, now)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	delta, _ := json.Marshal(receipt)
-	return c.StoreSeam(Seam{
+	seamID, err := c.storeSartreSeamTx(tx, Seam{
 		ConversationID: convID,
 		BodyA:          "sartre",
 		BodyB:          "limpha",
@@ -115,6 +165,86 @@ func (c *LimphaClient) StoreSartreEvents(events []SartreEvent, st LimphaState) (
 		Reason:         SartreSeamReason,
 		MemoryDelta:    string(delta),
 	})
+	if err != nil {
+		return 0, nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		c.recordMemoryFailure("seam", err)
+		return 0, nil, err
+	}
+	committed = true
+	return seamID, accepted, nil
+}
+
+func (c *LimphaClient) storeSartreConversationTx(tx *sql.Tx, prompt, response string, st LimphaState, now float64) (int64, error) {
+	quality := computeQuality(prompt, response)
+	res, err := tx.Exec(
+		`INSERT INTO conversations
+		 (timestamp, session_id, prompt, response,
+		  temperature, destiny, pain, tension, debt, velocity, alpha, quality)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		now, c.sessionID, prompt, response,
+		st.Temperature, st.Destiny, st.Pain, st.Tension, st.Debt, st.Velocity, st.Alpha, quality)
+	if err != nil {
+		c.recordMemoryFailure("conversation", err)
+		return 0, err
+	}
+	id, _ := res.LastInsertId()
+	if _, err := tx.Exec(
+		`UPDATE sessions SET last_active = ?, turn_count = turn_count + 1,
+		   avg_quality = (avg_quality * turn_count + ?) / (turn_count + 1)
+		 WHERE session_id = ?`, now, quality, c.sessionID); err != nil {
+		c.recordMemoryFailure("conversation", err)
+		return 0, err
+	}
+	return id, nil
+}
+
+func (c *LimphaClient) storeSartreSeamTx(tx *sql.Tx, s Seam) (int64, error) {
+	var convID interface{}
+	if s.ConversationID > 0 {
+		convID = s.ConversationID
+	}
+	res, err := tx.Exec(
+		`INSERT INTO seams
+		 (timestamp, session_id, conversation_id, body_a, body_b, prompt,
+		  a_claim, b_claim, agreement, tension, winner, reason, memory_delta)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		nowSeconds(), c.sessionID, convID, s.BodyA, s.BodyB, s.Prompt,
+		s.AClaim, s.BClaim, s.Agreement, s.Tension, s.Winner, s.Reason, s.MemoryDelta)
+	if err != nil {
+		c.recordMemoryFailure("seam", err)
+		return 0, err
+	}
+	id, _ := res.LastInsertId()
+	return id, nil
+}
+
+func sartreEventKey(ev SartreEvent) (string, bool) {
+	ev = normalizeSartreEvent(ev)
+	if ev.ID == "" {
+		return "", false
+	}
+	parts := []string{
+		ev.RootID,
+		ev.ID,
+		ev.Phase,
+		ev.Outcome,
+		ev.Utility,
+		ev.Kind,
+		ev.Path,
+		ev.Tag,
+		fmt.Sprintf("%.6f", ev.Resonance),
+		fmt.Sprintf("%.6f", ev.Relevance),
+		fmt.Sprintf("%.6f", ev.Pulse),
+		fmt.Sprintf("%d", ev.Reduced),
+		fmt.Sprintf("%d", ev.Recognized),
+		fmt.Sprintf("%d", ev.EffectCount),
+		fmt.Sprintf("%d", ev.BytesCaptured),
+		fmt.Sprintf("%d", ev.BytesLimit),
+	}
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return hex.EncodeToString(sum[:]), true
 }
 
 // BuildSartreReceipt summarises utility events into compact pressure traces.

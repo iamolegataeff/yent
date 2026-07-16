@@ -89,6 +89,76 @@ func TestStoreSartreEventsAndRecall(t *testing.T) {
 	}
 }
 
+func TestStoreSartreEventsDeduplicatesStableEventIDs(t *testing.T) {
+	lc := newTestLimpha(t)
+	event := SartreEvent{
+		ID:        "reach-1",
+		RootID:    "root-a",
+		Phase:     "effect",
+		Utility:   "repo_monitor",
+		Kind:      "modified",
+		Path:      "/repo/README.md",
+		Timestamp: 10,
+		Breath:    3,
+	}
+	id, accepted, err := lc.StoreNewSartreEvents([]SartreEvent{event}, LimphaState{Destiny: 0.3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == 0 || len(accepted) != 1 {
+		t.Fatalf("first stable event should store one seam, id=%d accepted=%#v", id, accepted)
+	}
+	retry := event
+	retry.Timestamp = 99
+	retry.Breath = 8
+	id, accepted, err = lc.StoreNewSartreEvents([]SartreEvent{retry}, LimphaState{Destiny: 0.3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != 0 || len(accepted) != 0 {
+		t.Fatalf("retry of the same causal event should be a no-op, id=%d accepted=%#v", id, accepted)
+	}
+	stats, err := lc.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats["total_conversations"].(int64) != 1 || stats["total_seams"].(int64) != 1 {
+		t.Fatalf("duplicate retry should not grow memory, got %v / %v", stats["total_conversations"], stats["total_seams"])
+	}
+}
+
+func TestStoreNewSartreEventsKeepsNewPhaseForSameReach(t *testing.T) {
+	lc := newTestLimpha(t)
+	first := SartreEvent{
+		ID:      "reach-2",
+		RootID:  "root-a",
+		Phase:   "intention",
+		Outcome: "crest",
+		Utility: "repo_monitor",
+	}
+	if id, accepted, err := lc.StoreNewSartreEvents([]SartreEvent{first}, LimphaState{}); err != nil || id == 0 || len(accepted) != 1 {
+		t.Fatalf("first phase should store: id=%d accepted=%#v err=%v", id, accepted, err)
+	}
+	second := []SartreEvent{
+		first,
+		{ID: "reach-2", RootID: "root-a", Phase: "learning", Outcome: "perception_committed", Utility: "repo_monitor", EffectCount: 1},
+	}
+	id, accepted, err := lc.StoreNewSartreEvents(second, LimphaState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == 0 || len(accepted) != 1 || accepted[0].Phase != "learning" {
+		t.Fatalf("a new phase on the same reach should pass while duplicate intention is skipped, id=%d accepted=%#v", id, accepted)
+	}
+	stats, err := lc.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats["total_conversations"].(int64) != 2 || stats["total_seams"].(int64) != 2 {
+		t.Fatalf("two distinct phases should produce two seams, got %v / %v", stats["total_conversations"], stats["total_seams"])
+	}
+}
+
 func TestBuildSartreReceiptCapsTraceButCountsMetrics(t *testing.T) {
 	var events []SartreEvent
 	for i := 0; i < 20; i++ {

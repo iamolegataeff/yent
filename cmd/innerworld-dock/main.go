@@ -425,10 +425,18 @@ func (s *sartreSense) Pressure() (string, bool) {
 		if s.state != nil {
 			st = s.state()
 		}
-		if _, err := s.limpha.StoreSartreEvents(events, st); err != nil {
+		_, accepted, err := s.limpha.StoreNewSartreEvents(events, st)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "[dock] SARTRE live limpha store: %v\n", err)
 			return "", false
 		}
+		if len(accepted) == 0 {
+			if err := s.ackSartreBatch(batch); err != nil {
+				fmt.Fprintf(os.Stderr, "[dock] SARTRE cursor ack: %v\n", err)
+			}
+			return "", false
+		}
+		events = accepted
 	}
 	aml, ok := sartreFieldAML(events)
 	if err := s.ackSartreBatch(batch); err != nil {
@@ -711,7 +719,7 @@ func ingestSartreFromEnv(lc *yent.LimphaClient, st yent.LimphaState) int {
 		fmt.Printf("=== SARTRE wired: no utility events found in %s ===\n", path)
 		return 0
 	}
-	seamID, err := lc.StoreSartreEvents(events, st)
+	seamID, accepted, err := lc.StoreNewSartreEvents(events, st)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[dock] SARTRE events store %s: %v\n", path, err)
 		os.Exit(1)
@@ -720,8 +728,12 @@ func ingestSartreFromEnv(lc *yent.LimphaClient, st yent.LimphaState) int {
 		fmt.Fprintf(os.Stderr, "[dock] SARTRE events cursor %s: %v\n", path, err)
 		os.Exit(1)
 	}
-	fmt.Printf("=== SARTRE wired: %d utility event(s) stored as limpha seam #%d from %s ===\n", len(events), seamID, path)
-	return len(events)
+	if len(accepted) == 0 || seamID == 0 {
+		fmt.Printf("=== SARTRE wired: %d utility event(s) already known; no new limpha seam from %s ===\n", len(events), path)
+		return 0
+	}
+	fmt.Printf("=== SARTRE wired: %d/%d new utility event(s) stored as limpha seam #%d from %s ===\n", len(accepted), len(events), seamID, path)
+	return len(accepted)
 }
 
 func printMemoryPreview(mem innerworld.Memory, n int) {
