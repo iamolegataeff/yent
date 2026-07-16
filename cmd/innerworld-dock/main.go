@@ -260,7 +260,10 @@ func (s *sartreSense) readNewBatch() sartreReadBatch {
 		return sartreReadBatch{}
 	}
 	fileID := sartreFileIdentity(s.eventsPath, fi)
-	s.loadSartreCursor(fileID, fi.Size())
+	if err := s.loadSartreCursor(fileID, fi.Size()); err != nil {
+		fmt.Fprintf(os.Stderr, "[dock] SARTRE cursor load: %v\n", err)
+		return sartreReadBatch{}
+	}
 	if _, err := f.Seek(s.offset, io.SeekStart); err != nil {
 		return sartreReadBatch{}
 	}
@@ -283,13 +286,13 @@ func (s *sartreSense) readNewBatch() sartreReadBatch {
 	}
 }
 
-func (s *sartreSense) loadSartreCursor(fileID sartreFileID, size int64) {
+func (s *sartreSense) loadSartreCursor(fileID sartreFileID, size int64) error {
 	if s.loaded {
 		if !sameSartreFile(s.fileID, fileID) || size < s.offset {
 			s.offset = 0
 		}
 		s.fileID = fileID
-		return
+		return nil
 	}
 	s.loaded = true
 	s.fileID = fileID
@@ -298,19 +301,29 @@ func (s *sartreSense) loadSartreCursor(fileID sartreFileID, size int64) {
 	}
 	path := s.sartreCursorPath()
 	if path == "" {
-		return
+		return nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return fmt.Errorf("empty cursor %s", path)
 	}
 	var st sartreCursorState
 	if err := json.Unmarshal(data, &st); err != nil {
-		return
+		return fmt.Errorf("decode cursor %s: %w", path, err)
 	}
-	if sameSartreFile(st.File, fileID) && st.Offset >= 0 && st.Offset <= size {
+	if sameSartreFile(st.File, fileID) {
+		if st.Offset < 0 || st.Offset > size {
+			return fmt.Errorf("cursor %s offset %d outside file size %d", path, st.Offset, size)
+		}
 		s.offset = st.Offset
 	}
+	return nil
 }
 
 func (s *sartreSense) ackSartreBatch(batch sartreReadBatch) error {
@@ -332,7 +345,22 @@ func (s *sartreSense) ackSartreBatch(batch sartreReadBatch) error {
 		return err
 	}
 	tmp := fmt.Sprintf("%s.tmp.%d", path, os.Getpid())
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if err := writeAll(f, append(data, '\n')); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {

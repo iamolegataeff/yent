@@ -199,6 +199,47 @@ func TestSartreSensePersistentCursorDoesNotAckPartialAcrossRestart(t *testing.T)
 	}
 }
 
+func TestSartreSenseCorruptPersistentCursorFailsClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	cursor := filepath.Join(t.TempDir(), "cursor.json")
+	if err := os.WriteFile(path, []byte(`{"util":"repo_monitor","kind":"added","path":"old.md"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cursor, []byte(`{"file":`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := (&sartreSense{eventsPath: path, cursorPath: cursor}).readNew(); len(got) != 0 {
+		t.Fatalf("corrupt cursor must fail closed instead of replaying history, got %q", got)
+	}
+}
+
+func TestSartreSenseInvalidPersistentCursorOffsetFailsClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	cursor := filepath.Join(t.TempDir(), "cursor.json")
+	body := []byte(`{"util":"repo_monitor","kind":"added","path":"old.md"}` + "\n")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := sartreCursorState{
+		File:   sartreFileIdentity(path, fi),
+		Offset: int64(len(body) + 10),
+	}
+	data, err := json.Marshal(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cursor, append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := (&sartreSense{eventsPath: path, cursorPath: cursor}).readNew(); len(got) != 0 {
+		t.Fatalf("invalid cursor offset must fail closed instead of replaying history, got %q", got)
+	}
+}
+
 func TestSartreSenseCursorResetsOnFileReplacement(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "events.jsonl")
