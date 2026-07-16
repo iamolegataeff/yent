@@ -215,14 +215,6 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 		outcome = "perception_committed"
 	}
 	nextQuiet, nextCooldown := w.plannedLearningState(outcome)
-	if es, ok := w.sink.(willEventSink); ok {
-		ev := w.event(tide, eventID, "learning", util, outcome)
-		ev.EffectCount = effectCount
-		ev.CooldownBreaths = nextCooldown
-		if err := es.EmitEvent(ev); err != nil {
-			return util, fmt.Errorf("will learn %s: %w", util, err)
-		}
-	}
 	if err := w.saveLearningState(nextQuiet); err != nil {
 		return util, fmt.Errorf("will learn %s state: %w", util, err)
 	}
@@ -234,6 +226,15 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 	}
 	w.quietRuns = nextQuiet
 	w.cooldown = nextCooldown
+	// Success learning is a receipt of committed host state plus spent tide, not a promise.
+	if es, ok := w.sink.(willEventSink); ok {
+		ev := w.event(tide, eventID, "learning", util, outcome)
+		ev.EffectCount = effectCount
+		ev.CooldownBreaths = nextCooldown
+		if err := es.EmitEvent(ev); err != nil {
+			return util, fmt.Errorf("will learn %s: %w", util, err)
+		}
+	}
 	return util, nil
 }
 
