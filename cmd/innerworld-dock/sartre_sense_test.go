@@ -11,10 +11,10 @@ import (
 	yent "github.com/ariannamethod/yent/yent/go"
 )
 
-// TestSartreSensePerceivesMotion proves the cgo perception binding end to end on Neo
-// (no model): events -> sartre_perceive_from_events -> sartre_perceive_to_aml. Two
-// changes including a README -> prophecy 2+2+7=11, matching the C self-test case.
-func TestSartreSensePerceivesMotion(t *testing.T) {
+// TestSartreSenseSelfSurfaceChangeRuns proves the live field reflex is typed: a
+// self-surface change is urgent enough to RUN, with README still carrying the old
+// prophecy bonus (2 changes + README = 11).
+func TestSartreSenseSelfSurfaceChangeRuns(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "events.jsonl")
 	events := `{"util":"repo_monitor","kind":"added","path":"/r/x.rs","ts":1}
@@ -29,6 +29,47 @@ func TestSartreSensePerceivesMotion(t *testing.T) {
 	}
 	if !strings.Contains(aml, "VELOCITY RUN") || !strings.Contains(aml, "PROPHECY 11") {
 		t.Errorf("perception AML mismatch, got %q (want VELOCITY RUN + PROPHECY 11)", aml)
+	}
+}
+
+func TestSartreSenseRoutineNoveltyWalks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	event := `{"util":"repo_monitor","phase":"effect","kind":"modified","path":"/r/research/note.md","ts":1}`
+	if err := os.WriteFile(path, []byte(event+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	aml, ok := (&sartreSense{eventsPath: path}).Pressure()
+	if !ok {
+		t.Fatal("a routine repo effect should produce a bounded reflex")
+	}
+	if !strings.Contains(aml, "VELOCITY WALK") || !strings.Contains(aml, "PROPHECY 3") {
+		t.Fatalf("routine novelty should walk, not run, got %q", aml)
+	}
+}
+
+func TestSartreSenseLearningOutcomeDoesNotForceRun(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	event := `{"util":"repo_monitor","phase":"learning","outcome":"no_novelty","effect_count":0,"ts":1}`
+	if err := os.WriteFile(path, []byte(event+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if aml, ok := (&sartreSense{eventsPath: path}).Pressure(); ok {
+		t.Fatalf("learning outcomes are ledger data, not immediate field motion, got %q", aml)
+	}
+}
+
+func TestSartreSenseSensorFailureIsTypedButStill(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	event := `{"util":"repo_monitor","phase":"learning","outcome":"sensor_error","ts":1}`
+	if err := os.WriteFile(path, []byte(event+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	aml, ok := (&sartreSense{eventsPath: path}).Pressure()
+	if !ok {
+		t.Fatal("sensor failure should be a typed field consequence")
+	}
+	if strings.Contains(aml, "VELOCITY") || !strings.Contains(aml, "PROPHECY 3") {
+		t.Fatalf("sensor failure should be still prophecy, not movement, got %q", aml)
 	}
 }
 
@@ -153,12 +194,31 @@ func TestSartreSenseStoresIdentityEventWithoutForcingRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lc.Close()
-	if aml, ok := (&sartreSense{eventsPath: path, limpha: lc}).Pressure(); ok {
-		t.Fatalf("identity framing is memory pressure, not a coarse field RUN, got %q", aml)
+	aml, ok := (&sartreSense{eventsPath: path, limpha: lc}).Pressure()
+	if !ok {
+		t.Fatal("identity framing should have a typed live-field consequence")
+	}
+	if strings.Contains(aml, "VELOCITY RUN") || strings.Contains(aml, "VELOCITY WALK") || !strings.Contains(aml, "PROPHECY 8") {
+		t.Fatalf("identity recognition should affect prophecy without coarse motion, got %q", aml)
 	}
 	traces := yent.NewSartreMemory(lc).Recall(1)
 	if len(traces) != 1 || !strings.Contains(traces[0], "whatdotheythinkiam README.md modified reduced=3 recognized=7") {
 		t.Fatalf("identity event should be stored in limpha, got %#v", traces)
+	}
+}
+
+func TestSartreSenseIdentityReductionCarriesSharperProphecy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	event := `{"util":"whatdotheythinkiam","kind":"framing","reduced":6,"recognized":2}`
+	if err := os.WriteFile(path, []byte(event+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	aml, ok := (&sartreSense{eventsPath: path}).Pressure()
+	if !ok {
+		t.Fatal("identity reduction should have a typed live-field consequence")
+	}
+	if strings.Contains(aml, "VELOCITY") || !strings.Contains(aml, "PROPHECY 9") {
+		t.Fatalf("identity reduction should be still but sharper than recognition, got %q", aml)
 	}
 }
 
