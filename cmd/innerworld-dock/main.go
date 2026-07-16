@@ -30,7 +30,6 @@ package main
 #cgo CFLAGS: -I${SRCDIR}/../../yent/c -I${SRCDIR}/../../sartre
 #cgo LDFLAGS: ${SRCDIR}/../../yent/c/libamk.a -lm
 #include "ariannamethod.h"
-#include "perception.h"
 #include "sartre_kernel.h"
 #include <stdlib.h>
 */
@@ -195,14 +194,14 @@ func newBody(name, bin, model, workdir string, args []string) *yent.DOEBody {
 // cooc graph is built over the SAME token ids the voice speaks in (shared vocabulary).
 // On failure the inner world still runs — the native body's Ingest/BiasWords no-op
 // without a tokenizer rather than crash the dock.
-// sartreSense is the live-field reflex half of SARTRE that perception.h anticipated
-// but left to the integration seam: it reads the same YENT_SARTRE_EVENTS the limpha
-// path ingests, runs the C perception (sartre_perceive_from_events ->
-// sartre_perceive_to_aml), and hands the inner world the environment's AML posture
-// (VELOCITY/PROPHECY). A quiet tree (no changes) feels nothing — ok=false — so the
-// reflex only fires on real motion, never forcing the field to NOMOVE each turn. This
-// is the fast present-time twin of the slow limpha recall pressure: same perception,
-// two routes into the organism.
+// sartreSense is the live-field reflex half of SARTRE: it reads the same
+// YENT_SARTRE_EVENTS the limpha path ingests, parses typed utility receipts, and hands the
+// inner world a bounded AML posture. A quiet tree (no changes) feels nothing — ok=false — so
+// the reflex only fires on real motion, never forcing the field to NOMOVE each turn. The field
+// reflex is deliberately narrower than limpha: identity readings affect prophecy without forcing
+// motion, while routine repo novelty walks the field and only self-surface/flood events run it.
+// This is the fast present-time twin of slow limpha recall pressure, but not a universal RUN
+// ratchet.
 type sartreSense struct {
 	eventsPath string
 	offset     int64 // cursor: how much of the events file has already been perceived
@@ -270,23 +269,7 @@ func (s *sartreSense) Pressure() (string, bool) {
 			fmt.Fprintf(os.Stderr, "[dock] SARTRE live limpha store: %v\n", err)
 		}
 	}
-	filtered := sartrePerceptionJSONL(events)
-	if filtered == "" {
-		return "", false
-	}
-	cjson := C.CString(filtered)
-	defer C.free(unsafe.Pointer(cjson))
-	var p C.SartrePerception
-	C.sartre_perceive_from_events(cjson, &p)
-	if int(p.changed) <= 0 {
-		return "", false // a still environment is no reflex
-	}
-	var buf [256]C.char
-	n := C.sartre_perceive_to_aml(&p, &buf[0], 256)
-	if n <= 0 {
-		return "", false
-	}
-	return C.GoStringN(&buf[0], n), true
+	return sartreFieldAML(events)
 }
 
 func sartreEOFOffset(path string) int64 {
@@ -297,19 +280,130 @@ func sartreEOFOffset(path string) int64 {
 	return fi.Size()
 }
 
-func sartrePerceptionJSONL(events []yent.SartreEvent) string {
-	var b strings.Builder
+func sartreFieldAML(events []yent.SartreEvent) (string, bool) {
+	effect := sartreFieldEffect(events)
+	if effect.prophecy == 0 {
+		return "", false
+	}
+	var lines []string
+	if effect.velocity != "" {
+		lines = append(lines, "VELOCITY "+effect.velocity)
+	}
+	lines = append(lines, fmt.Sprintf("PROPHECY %d", effect.prophecy))
+	return strings.Join(lines, "\n"), true
+}
+
+type sartreFieldPosture struct {
+	velocity string
+	prophecy int
+}
+
+func sartreFieldEffect(events []yent.SartreEvent) sartreFieldPosture {
+	var out sartreFieldPosture
+	novelty := 0
+	selfSurface := false
+	maxIdentityRecognized := 0
+	maxIdentityReduced := 0
+	sensorFailures := 0
 	for _, ev := range events {
+		if ev.Phase == "learning" {
+			if sartreSensorFailure(ev.Outcome) {
+				sensorFailures++
+			}
+			continue
+		}
 		if ev.Phase != "" && ev.Phase != "effect" {
 			continue
 		}
-		if ev.Utility == "repo_monitor" && (ev.Kind == "added" || ev.Kind == "modified" || ev.Kind == "removed") {
-			line, _ := json.Marshal(ev)
-			b.Write(line)
-			b.WriteByte('\n')
+		switch ev.Utility {
+		case "repo_monitor":
+			if !sartreRepoChangeKind(ev.Kind) {
+				continue
+			}
+			novelty++
+			if sartreSelfSurface(ev.Path) {
+				selfSurface = true
+			}
+		case "whatdotheythinkiam":
+			if ev.Recognized > maxIdentityRecognized {
+				maxIdentityRecognized = ev.Recognized
+			}
+			if ev.Reduced > maxIdentityReduced {
+				maxIdentityReduced = ev.Reduced
+			}
 		}
 	}
-	return b.String()
+
+	if novelty > 0 {
+		out.prophecy = 2 + novelty
+		if selfSurface {
+			out.prophecy += 7
+		}
+		out.velocity = "WALK"
+		if selfSurface || novelty >= 8 {
+			out.velocity = "RUN"
+		}
+	}
+
+	identityProphecy := 0
+	if maxIdentityRecognized > 0 || maxIdentityReduced > 0 {
+		identityProphecy = 1 + maxInt(maxIdentityRecognized, maxIdentityReduced)
+		if maxIdentityReduced > maxIdentityRecognized {
+			identityProphecy += 2
+		}
+		if identityProphecy > 12 {
+			identityProphecy = 12
+		}
+		if identityProphecy > out.prophecy {
+			out.prophecy = identityProphecy
+		}
+	}
+
+	if sensorFailures > 0 {
+		failureProphecy := 1 + 2*sensorFailures
+		if failureProphecy > 8 {
+			failureProphecy = 8
+		}
+		if failureProphecy > out.prophecy {
+			out.prophecy = failureProphecy
+		}
+	}
+	if out.prophecy > 64 {
+		out.prophecy = 64
+	}
+	return out
+}
+
+func sartreRepoChangeKind(kind string) bool {
+	switch strings.TrimSpace(kind) {
+	case "added", "modified", "removed":
+		return true
+	default:
+		return false
+	}
+}
+
+func sartreSelfSurface(path string) bool {
+	p := strings.ToLower(path)
+	return strings.Contains(p, "readme") ||
+		strings.Contains(p, "yent_constitution") ||
+		strings.Contains(p, "janus_constitution")
+}
+
+func sartreSensorFailure(outcome string) bool {
+	switch strings.TrimSpace(outcome) {
+	case "sensor_error", "state_error", "overflow":
+		return true
+	default:
+		return false
+	}
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // sartreMetricSink is the reciprocal half of the SARTRE bridge: after innerworld
