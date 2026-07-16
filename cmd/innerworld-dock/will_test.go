@@ -261,6 +261,30 @@ func TestWillTickEmitErrorDoesNotDischarge(t *testing.T) {
 	}
 }
 
+func TestWillTickEmptyFileSinkDoesNotReachOrCommit(t *testing.T) {
+	sp := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"added"}`)}
+	f := &fakeWillField{vars: map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+	}}
+	w := &willTicker{field: f, script: "x.aml", spawner: sp, sink: fileSink{}}
+	util, err := w.tick(context.Background())
+	if err == nil {
+		t.Fatal("a missing SARTRE event sink must surface before the sensor can advance")
+	}
+	if util != willUtilPressure {
+		t.Fatalf("got util %q", util)
+	}
+	if sp.util != "" {
+		t.Fatalf("the will must not spawn a sensor before intention delivery is durable, spawned %q", sp.util)
+	}
+	if sp.committed {
+		t.Error("utility state must not commit without a durable event sink")
+	}
+	if f.discharged {
+		t.Error("the tide must not be spent without a durable event sink")
+	}
+}
+
 func TestWillTickStateCommitErrorDoesNotDischarge(t *testing.T) {
 	sp, sk := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"added"}`), commitErr: errors.New("rename")}, &fakeSink{}
 	w, f := newWill(map[string]float32{

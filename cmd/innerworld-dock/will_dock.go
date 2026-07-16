@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -171,26 +172,56 @@ func willUtilArgsWithState(util, root, statePath string) []string {
 
 // fileSink appends complete JSONL utility events to YENT_SARTRE_EVENTS — the same file the
 // sartreSense reflex reads each ripple, so the reach's perception re-enters the field and shifts
-// the next confluence (the spiral). An empty path or empty line is a silent no-op.
+// the next confluence (the spiral). An empty line is a silent no-op; a non-empty event without a
+// path is a delivery error, because the will must not commit sensor state into the void.
 type fileSink struct{ path string }
 
 func (s fileSink) Emit(line []byte) error {
-	if s.path == "" || len(line) == 0 {
+	if len(line) == 0 {
 		return nil
 	}
 	lines := completeSartreJSONLines(line)
 	if len(lines) == 0 {
 		return nil
 	}
+	if s.path == "" {
+		return fmt.Errorf("SARTRE event sink path is empty")
+	}
 	f, err := os.OpenFile(s.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	closed := false
+	defer func() {
+		if !closed {
+			_ = f.Close()
+		}
+	}()
 	for _, body := range lines {
-		if _, err := f.Write(append(body, '\n')); err != nil {
+		if err := writeAll(f, append(body, '\n')); err != nil {
 			return err
 		}
+	}
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	closed = true
+	return nil
+}
+
+func writeAll(w io.Writer, p []byte) error {
+	for len(p) > 0 {
+		n, err := w.Write(p)
+		if err != nil {
+			return err
+		}
+		if n <= 0 {
+			return io.ErrShortWrite
+		}
+		p = p[n:]
 	}
 	return nil
 }
