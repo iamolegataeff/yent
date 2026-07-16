@@ -18,6 +18,9 @@ const (
 // SartreEvent is one bounded utility receipt from the SARTRE body organ.
 // It intentionally carries metadata, not file contents.
 type SartreEvent struct {
+	ID         string  `json:"id,omitempty"`
+	Phase      string  `json:"phase,omitempty"`
+	Outcome    string  `json:"outcome,omitempty"`
 	Utility    string  `json:"util"`
 	Kind       string  `json:"kind,omitempty"`
 	Path       string  `json:"path,omitempty"`
@@ -27,6 +30,7 @@ type SartreEvent struct {
 	Pulse      float64 `json:"pulse,omitempty"`
 	Reduced    int     `json:"reduced,omitempty"`
 	Recognized int     `json:"recognized,omitempty"`
+	Timestamp  int64   `json:"ts,omitempty"`
 }
 
 // SartreReceipt is the machine-readable memory_delta written into limpha.
@@ -114,10 +118,11 @@ func BuildSartreReceipt(events []SartreEvent) SartreReceipt {
 			continue
 		}
 		receipt.EventCount++
-		if ev.Utility == "repo_monitor" && ev.Kind != "" {
+		actionable := ev.Phase == "" || ev.Phase == "effect"
+		if actionable && ev.Utility == "repo_monitor" && isSartreChangeKind(ev.Kind) {
 			receipt.Changed++
 		}
-		if strings.Contains(strings.ToLower(ev.Path), "readme") {
+		if actionable && isSartreChangeKind(ev.Kind) && strings.Contains(strings.ToLower(ev.Path), "readme") {
 			receipt.ReadmeChanged = true
 		}
 		if ev.Resonance > receipt.MaxResonance {
@@ -129,7 +134,7 @@ func BuildSartreReceipt(events []SartreEvent) SartreReceipt {
 		if ev.Pulse > receipt.MaxPulse {
 			receipt.MaxPulse = ev.Pulse
 		}
-		if ev.Utility == "whatdotheythinkiam" {
+		if actionable && ev.Utility == "whatdotheythinkiam" && isSartreChangeKind(ev.Kind) {
 			receipt.FramingEventCount++
 			if ev.Reduced > receipt.MaxReduced {
 				receipt.MaxReduced = ev.Reduced
@@ -151,6 +156,19 @@ func BuildSartreReceipt(events []SartreEvent) SartreReceipt {
 
 // Trace formats one event as a compact memory pressure line.
 func (ev SartreEvent) Trace() string {
+	if ev.Phase != "" && (ev.Phase != "effect" || ev.Outcome != "") {
+		parts := []string{"will", ev.Utility, ev.Phase}
+		if ev.Outcome != "" {
+			parts = append(parts, ev.Outcome)
+		}
+		if ev.Kind != "" {
+			parts = append(parts, ev.Kind)
+		}
+		if ev.Path != "" {
+			parts = append(parts, ev.Path)
+		}
+		return compactLine(strings.Join(parts, " "), 180)
+	}
 	switch ev.Utility {
 	case "repo_monitor":
 		if ev.Kind == "" && ev.Path == "" {
@@ -245,6 +263,9 @@ func sartreTraceFromSeam(seam map[string]interface{}) string {
 }
 
 func normalizeSartreEvent(ev SartreEvent) SartreEvent {
+	ev.ID = strings.TrimSpace(ev.ID)
+	ev.Phase = strings.ToLower(strings.TrimSpace(ev.Phase))
+	ev.Outcome = strings.ToLower(strings.TrimSpace(ev.Outcome))
 	ev.Utility = strings.TrimSpace(ev.Utility)
 	ev.Kind = strings.TrimSpace(ev.Kind)
 	ev.Path = safeSartrePath(ev.Path)
@@ -255,6 +276,15 @@ func normalizeSartreEvent(ev SartreEvent) SartreEvent {
 	ev.Reduced = maxInt(0, ev.Reduced)
 	ev.Recognized = maxInt(0, ev.Recognized)
 	return ev
+}
+
+func isSartreChangeKind(kind string) bool {
+	switch strings.TrimSpace(kind) {
+	case "added", "modified", "removed":
+		return true
+	default:
+		return false
+	}
 }
 
 func safeSartrePath(path string) string {

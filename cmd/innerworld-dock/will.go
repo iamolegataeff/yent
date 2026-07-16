@@ -29,16 +29,28 @@ type willField interface {
 // compile-time: the native AML body is the will field.
 var _ willField = (*aml.Body)(nil)
 
-// willSpawner runs a self-reading utility and returns its SARTRE event line (JSON), or an error.
+// willSpawnResult is a utility read plus the pending state commit that makes that read the new
+// baseline. The commit must run only after the events are durably emitted; otherwise a sink error
+// would make the utility forget a change the organism never received.
+type willSpawnResult struct {
+	Line   []byte
+	Commit func() error
+}
+
+// willSpawner runs a self-reading utility and returns its SARTRE event line(s), or an error.
 // The real implementation execs the utility binary under a timeout; tests use a fake.
 type willSpawner interface {
-	Spawn(ctx context.Context, util string) ([]byte, error)
+	Spawn(ctx context.Context, util string) (willSpawnResult, error)
 }
 
 // willSink receives a utility's event line — the real sink appends it to YENT_SARTRE_EVENTS so
 // the sartreSense reflex perceives it on the next ripple.
 type willSink interface {
 	Emit(line []byte) error
+}
+
+type willEventSink interface {
+	EmitEvent(ev willEvent) error
 }
 
 // The two utilities the will can reach for, chosen by which pull dominates the confluence.
@@ -60,10 +72,10 @@ type willTicker struct {
 }
 
 // tick advances the will one step and, if the tide crests, reaches for the utility the dominant
-// pull points to, emits its perception, and discharges the tide. Returns the utility reached for
-// this tick, or "" if the tide stayed under the crest. A physics/exec error is returned without a
-// reach; a spawn/emit error is returned after the (already-applied) discharge — the will reached
-// even if the hand came back empty.
+// pull points to, emits its perception, and only then discharges the tide. Returns the utility
+// reached for this tick, or "" if the tide stayed under the crest. A physics/spawn/emit error is
+// returned without spending the tide: the hand did not become a durable event, so the cause stays
+// available for retry instead of disappearing from memory.
 func (w *willTicker) tick(ctx context.Context) (string, error) {
 	if err := w.field.ExecFile(w.script); err != nil {
 		return "", fmt.Errorf("will physics: %w", err)
@@ -77,23 +89,84 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 	if thr <= 0 || gaze < thr {
 		return "", nil // the will has not gathered enough to reach
 	}
+	origin := w.field.GetVarFloat("pull_origin")
+	pressure := w.field.GetVarFloat("pull_pressure")
 	util := willUtilPressure
-	if w.field.GetVarFloat("pull_origin") > w.field.GetVarFloat("pull_pressure") {
+	if origin > pressure {
 		util = willUtilOrigin
+	}
+	eventID := newWillEventID(util, gaze, origin, pressure)
+	if es, ok := w.sink.(willEventSink); ok {
+		if err := es.EmitEvent(willEvent{
+			ID:      eventID,
+			Phase:   "intention",
+			Utility: util,
+			Outcome: "crest",
+		}); err != nil {
+			return util, fmt.Errorf("will intent %s: %w", util, err)
+		}
+	}
+	result, err := w.spawner.Spawn(ctx, util)
+	if err != nil {
+		if es, ok := w.sink.(willEventSink); ok {
+			_ = es.EmitEvent(willEvent{
+				ID:      eventID,
+				Phase:   "learning",
+				Utility: util,
+				Outcome: "sensor_error",
+			})
+		}
+		return util, fmt.Errorf("will reach %s: %w", util, err)
+	}
+	if es, ok := w.sink.(willEventSink); ok {
+		if err := es.EmitEvent(willEvent{
+			ID:      eventID,
+			Phase:   "act",
+			Utility: util,
+			Outcome: "spawned",
+		}); err != nil {
+			return util, fmt.Errorf("will act %s: %w", util, err)
+		}
+	}
+	effectLine := tagSartreEffectLines(result.Line, eventID)
+	if len(effectLine) > 0 {
+		if err := w.sink.Emit(effectLine); err != nil {
+			return util, fmt.Errorf("will emit %s: %w", util, err)
+		}
+	}
+	if result.Commit != nil {
+		if err := result.Commit(); err != nil {
+			if es, ok := w.sink.(willEventSink); ok {
+				_ = es.EmitEvent(willEvent{
+					ID:      eventID,
+					Phase:   "learning",
+					Utility: util,
+					Outcome: "state_error",
+				})
+			}
+			return util, fmt.Errorf("will commit %s state: %w", util, err)
+		}
+	}
+	if es, ok := w.sink.(willEventSink); ok {
+		outcome := "no_novelty"
+		if len(completeSartreJSONLines(effectLine)) > 0 {
+			outcome = "perception_committed"
+		}
+		if err := es.EmitEvent(willEvent{
+			ID:      eventID,
+			Phase:   "learning",
+			Utility: util,
+			Outcome: outcome,
+		}); err != nil {
+			return util, fmt.Errorf("will learn %s: %w", util, err)
+		}
 	}
 	// The reach both spends the tide (discharge) AND opens a bounded refractory of `refractory`
 	// ticks: even a high-strain confluence that alone re-crosses threshold next tick cannot reach
 	// again until the refractory elapses. The discharge is the physics; the cooldown is the floor.
 	w.cooldown = w.refractory
-	_ = w.field.Exec("will_gaze = 0")
-	line, err := w.spawner.Spawn(ctx, util)
-	if err != nil {
-		return util, fmt.Errorf("will reach %s: %w", util, err)
-	}
-	if len(line) > 0 {
-		if err := w.sink.Emit(line); err != nil {
-			return util, fmt.Errorf("will emit %s: %w", util, err)
-		}
+	if err := w.field.Exec("will_gaze = 0"); err != nil {
+		return util, fmt.Errorf("will discharge %s: %w", util, err)
 	}
 	return util, nil
 }

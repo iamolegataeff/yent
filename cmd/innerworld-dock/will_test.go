@@ -34,19 +34,39 @@ func (f *fakeWillField) Exec(script string) error {
 }
 
 type fakeSpawner struct {
-	util string // the last util asked for
-	line []byte
-	err  error
+	util      string // the last util asked for
+	line      []byte
+	err       error
+	commitErr error
+	committed bool
 }
 
-func (s *fakeSpawner) Spawn(_ context.Context, util string) ([]byte, error) {
+func (s *fakeSpawner) Spawn(_ context.Context, util string) (willSpawnResult, error) {
 	s.util = util
-	return s.line, s.err
+	if s.err != nil {
+		return willSpawnResult{}, s.err
+	}
+	return willSpawnResult{
+		Line: s.line,
+		Commit: func() error {
+			if s.commitErr != nil {
+				return s.commitErr
+			}
+			s.committed = true
+			return nil
+		},
+	}, nil
 }
 
-type fakeSink struct{ lines [][]byte }
+type fakeSink struct {
+	lines [][]byte
+	err   error
+}
 
 func (s *fakeSink) Emit(line []byte) error {
+	if s.err != nil {
+		return s.err
+	}
 	s.lines = append(s.lines, append([]byte(nil), line...))
 	return nil
 }
@@ -77,6 +97,9 @@ func TestWillTickReachesOnOriginCrest(t *testing.T) {
 	}
 	if len(sk.lines) != 1 {
 		t.Errorf("the perception must be emitted once, got %d", len(sk.lines))
+	}
+	if !sp.committed {
+		t.Error("utility state must commit after the perception is emitted")
 	}
 }
 
@@ -179,10 +202,84 @@ func TestWillTickSpawnErrorSurfaces(t *testing.T) {
 	if util != willUtilOrigin {
 		t.Errorf("the chosen util is still reported on a spawn error, got %s", util)
 	}
-	if !f.discharged {
-		t.Error("the tide is spent even if the spawn failed — the will reached")
+	if f.discharged {
+		t.Error("the tide must not be spent when the reach did not become a durable event")
 	}
 	if len(sk.lines) != 0 {
 		t.Error("nothing is emitted when the spawn failed")
+	}
+	if sp.committed {
+		t.Error("utility state must not commit when spawn failed")
+	}
+}
+
+func TestWillTickEmitErrorDoesNotDischarge(t *testing.T) {
+	sp, sk := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"added"}`)}, &fakeSink{err: errors.New("disk full")}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+	}, sp, sk)
+	util, err := w.tick(context.Background())
+	if err == nil {
+		t.Fatal("an emit error must surface")
+	}
+	if util != willUtilPressure {
+		t.Fatalf("got util %q", util)
+	}
+	if f.discharged {
+		t.Error("the tide must not be spent when the perception was not durably emitted")
+	}
+	if sp.committed {
+		t.Error("utility state must not commit when event delivery failed")
+	}
+}
+
+func TestWillTickStateCommitErrorDoesNotDischarge(t *testing.T) {
+	sp, sk := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"added"}`), commitErr: errors.New("rename")}, &fakeSink{}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+	}, sp, sk)
+	util, err := w.tick(context.Background())
+	if err == nil {
+		t.Fatal("a state commit error must surface")
+	}
+	if util != willUtilPressure {
+		t.Fatalf("got util %q", util)
+	}
+	if f.discharged {
+		t.Error("the tide must not be spent when the sensor state did not commit")
+	}
+}
+
+type typedFakeSink struct {
+	fakeSink
+	events []willEvent
+}
+
+func (s *typedFakeSink) EmitEvent(ev willEvent) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.events = append(s.events, ev)
+	return nil
+}
+
+func TestWillTickTypedPhasesSurroundPerception(t *testing.T) {
+	sp := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"added","path":"README.md"}`)}
+	sk := &typedFakeSink{}
+	w, _ := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+	}, sp, &sk.fakeSink)
+	w.sink = sk
+	if _, err := w.tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if len(sk.events) != 3 {
+		t.Fatalf("want intention/act/learning, got %#v", sk.events)
+	}
+	if sk.events[0].Phase != "intention" || sk.events[1].Phase != "act" || sk.events[2].Phase != "learning" {
+		t.Fatalf("wrong phase order: %#v", sk.events)
+	}
+	if sk.events[2].Outcome != "perception_committed" {
+		t.Fatalf("learning outcome should record committed perception, got %#v", sk.events[2])
 	}
 }
