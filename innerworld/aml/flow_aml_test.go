@@ -86,9 +86,9 @@ func TestScarDepositAndIgnore(t *testing.T) {
 	if n := b.Scars(); n != 1 {
 		t.Errorf("a real scar should deposit, n=%d", n)
 	}
-	b.Scar("", 1.0)             // empty text ignored
-	b.Scar("ghost", 0)          // non-positive gravity ignored
-	b.Scar("ghost", -1)         // negative gravity ignored
+	b.Scar("", 1.0)     // empty text ignored
+	b.Scar("ghost", 0)  // non-positive gravity ignored
+	b.Scar("ghost", -1) // negative gravity ignored
 	if n := b.Scars(); n != 1 {
 		t.Errorf("empty/non-positive-gravity scars must be ignored, n=%d", n)
 	}
@@ -199,8 +199,8 @@ func TestFieldBridge(t *testing.T) {
 
 // TestPersistentVarBridge proves the will-tide mechanism: with persistent mode a global
 // assigned in one exec is restored into the next, so an accumulation survives across ticks;
-// without it, nothing is readable. This is exactly how will_gaze = will_gaze*decay + confluence
-// carries the tide from tick to tick, and how Go reads it back.
+// without it, nothing is readable. This is how the will vector tide carries direction from tick
+// to tick, and how Go reads it back.
 func TestPersistentVarBridge(t *testing.T) {
 	Init()
 	b := New(nil)
