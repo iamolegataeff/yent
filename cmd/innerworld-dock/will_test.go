@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -15,6 +16,7 @@ type fakeWillField struct {
 	vars           map[string]float32
 	execFileErr    error
 	execFileN      int
+	execScripts    []string
 	discharged     bool
 	reaccumulateTo float32 // if >0, ExecFile re-floods will_gaze to this each tick (sustained strain)
 }
@@ -28,14 +30,17 @@ func (f *fakeWillField) ExecFile(string) error {
 }
 func (f *fakeWillField) GetVarFloat(name string) float32 { return f.vars[name] }
 func (f *fakeWillField) Exec(script string) error {
-	switch script {
-	case "will_origin_tide = 0":
-		f.vars["will_origin_tide"] = 0
-	case "will_pressure_tide = 0":
-		f.vars["will_pressure_tide"] = 0
-	case "will_gaze = 0":
-		f.discharged = true
-		f.vars["will_gaze"] = 0
+	f.execScripts = append(f.execScripts, script)
+	for _, line := range strings.Split(script, "\n") {
+		switch strings.TrimSpace(line) {
+		case "will_origin_tide = 0":
+			f.vars["will_origin_tide"] = 0
+		case "will_pressure_tide = 0":
+			f.vars["will_pressure_tide"] = 0
+		case "will_gaze = 0":
+			f.discharged = true
+			f.vars["will_gaze"] = 0
+		}
 	}
 	return nil
 }
@@ -103,6 +108,9 @@ func TestWillTickReachesOnOriginCrest(t *testing.T) {
 	}
 	if !f.discharged {
 		t.Error("the reach must discharge the tide")
+	}
+	if len(f.execScripts) != 1 || !strings.Contains(f.execScripts[0], "will_origin_tide = 0\nwill_pressure_tide = 0\nwill_gaze = 0") {
+		t.Fatalf("the tide discharge must be one transactional AML block, got %#v", f.execScripts)
 	}
 	if f.vars["will_origin_tide"] != 0 || f.vars["will_pressure_tide"] != 0 {
 		t.Errorf("the reach must discharge the vector tide, origin=%.3f pressure=%.3f",
