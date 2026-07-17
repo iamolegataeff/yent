@@ -982,3 +982,37 @@ func TestWillTickOverflowDoesNotCommitOrDischarge(t *testing.T) {
 		t.Fatalf("overflow learning event not typed precisely: %#v", learn)
 	}
 }
+
+func TestWillTickMalformedUtilityOutputDoesNotCommitOrDischarge(t *testing.T) {
+	sp := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"modified"`)}
+	sk := &typedFakeSink{}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp, &sk.fakeSink)
+	w.sink = sk
+
+	util, err := w.tick(context.Background())
+	if err == nil {
+		t.Fatal("malformed utility stdout must fail closed instead of becoming no_novelty")
+	}
+	if util != willUtilPressure {
+		t.Fatalf("got util %q", util)
+	}
+	if f.discharged {
+		t.Error("malformed utility stdout must not spend the tide")
+	}
+	if sp.committed {
+		t.Error("malformed utility stdout must not commit utility state")
+	}
+	if len(sk.lines) != 0 {
+		t.Fatalf("malformed output must not emit effect records, got %q", sk.lines)
+	}
+	if len(sk.events) != 3 {
+		t.Fatalf("want intention/act/learning sensor_error events, got %#v", sk.events)
+	}
+	learn := sk.events[2]
+	if learn.Phase != "learning" || learn.Outcome != willOutcomeSensorError || learn.BytesCaptured != len(sp.line) {
+		t.Fatalf("malformed output must become a typed sensor_error receipt, got %#v", learn)
+	}
+}
