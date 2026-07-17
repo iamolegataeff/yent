@@ -159,6 +159,37 @@ func TestStoreNewSartreEventsKeepsNewPhaseForSameReach(t *testing.T) {
 	}
 }
 
+func TestStoreNewSartreEventsAcknowledgesTraceEmptyStableEvent(t *testing.T) {
+	lc := newTestLimpha(t)
+	ev := SartreEvent{
+		ID:      "reach-empty",
+		RootID:  "root-a",
+		Phase:   "effect",
+		Utility: "repo_monitor",
+	}
+	id, accepted, err := lc.StoreNewSartreEvents([]SartreEvent{ev}, LimphaState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != 0 || len(accepted) != 1 {
+		t.Fatalf("trace-empty stable event should ack ids without a seam, id=%d accepted=%#v", id, accepted)
+	}
+	id, accepted, err = lc.StoreNewSartreEvents([]SartreEvent{ev}, LimphaState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != 0 || len(accepted) != 0 {
+		t.Fatalf("trace-empty stable event should dedupe on retry, id=%d accepted=%#v", id, accepted)
+	}
+	stats, err := lc.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats["total_conversations"].(int64) != 0 || stats["total_seams"].(int64) != 0 {
+		t.Fatalf("trace-empty ack should not write memory rows, got %v / %v", stats["total_conversations"], stats["total_seams"])
+	}
+}
+
 func TestBuildSartreReceiptCapsTraceButCountsMetrics(t *testing.T) {
 	var events []SartreEvent
 	for i := 0; i < 20; i++ {

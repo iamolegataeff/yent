@@ -37,9 +37,13 @@ type fakeField struct {
 	scripts []string
 	steps   int
 	debt    float32
+	failOn  string
 }
 
 func (f *fakeField) Exec(s string) error {
+	if f.failOn != "" && strings.Contains(s, f.failOn) {
+		return fmt.Errorf("fake field rejected %q", s)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.scripts = append(f.scripts, s)

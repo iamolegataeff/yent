@@ -728,9 +728,13 @@ func ingestSartreFromEnv(lc *yent.LimphaClient, st yent.LimphaState) int {
 		fmt.Fprintf(os.Stderr, "[dock] SARTRE events cursor %s: %v\n", path, err)
 		os.Exit(1)
 	}
-	if len(accepted) == 0 || seamID == 0 {
+	if len(accepted) == 0 {
 		fmt.Printf("=== SARTRE wired: %d utility event(s) already known; no new limpha seam from %s ===\n", len(events), path)
 		return 0
+	}
+	if seamID == 0 {
+		fmt.Printf("=== SARTRE wired: %d/%d new utility event(s) acknowledged without a limpha seam from %s ===\n", len(accepted), len(events), path)
+		return len(accepted)
 	}
 	fmt.Printf("=== SARTRE wired: %d/%d new utility event(s) stored as limpha seam #%d from %s ===\n", len(accepted), len(events), seamID, path)
 	return len(accepted)

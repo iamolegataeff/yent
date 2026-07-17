@@ -260,3 +260,33 @@ func TestIngestSartreFromEnvStoresPerception(t *testing.T) {
 		t.Fatalf("ingest should store one conversation and one seam, got %v / %v", stats["total_conversations"], stats["total_seams"])
 	}
 }
+
+func TestIngestSartreFromEnvAcknowledgesTraceEmptyEvent(t *testing.T) {
+	lc, err := yent.NewLimphaClientAt(filepath.Join(t.TempDir(), "limpha.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lc.Close()
+
+	path := filepath.Join(t.TempDir(), "sartre.jsonl")
+	line := `{"id":"reach-empty","root_id":"root-a","phase":"effect","util":"repo_monitor"}`
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("YENT_SARTRE_EVENTS", path)
+	t.Setenv("YENT_SARTRE_CURSOR", filepath.Join(t.TempDir(), "sartre.cursor.json"))
+
+	if got := ingestSartreFromEnv(lc, yent.LimphaState{}); got != 1 {
+		t.Fatalf("trace-empty stable event should be acknowledged once, got %d", got)
+	}
+	if got := ingestSartreFromEnv(lc, yent.LimphaState{}); got != 0 {
+		t.Fatalf("trace-empty stable event must not replay after ack, got %d", got)
+	}
+	stats, err := lc.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats["total_conversations"].(int64) != 0 || stats["total_seams"].(int64) != 0 {
+		t.Fatalf("trace-empty ingest should not create limpha rows, got %v / %v", stats["total_conversations"], stats["total_seams"])
+	}
+}
