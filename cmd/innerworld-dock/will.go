@@ -198,11 +198,14 @@ type willTicker struct {
 // returned without spending the tide: the hand did not become a durable event, so the cause stays
 // available for retry instead of disappearing from memory.
 func (w *willTicker) tick(ctx context.Context) (string, error) {
+	if w.pendingReach != nil {
+		return w.continueReach(ctx, *w.pendingReach)
+	}
 	w.breath++
 	if err := w.field.ExecFile(w.script); err != nil {
 		return "", fmt.Errorf("will physics: %w", err)
 	}
-	if w.pendingReach == nil && w.cooldown > 0 {
+	if w.cooldown > 0 {
 		nextCooldown := w.cooldown - 1 // refractory: the tide keeps evolving, but the will stays spent from the last reach
 		if err := w.saveCooldownState(nextCooldown); err != nil {
 			return "", fmt.Errorf("will cooldown state: %w", err)
@@ -211,25 +214,23 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	tide := readWillTide(w.field)
-	if w.pendingReach == nil && (tide.Threshold <= 0 || tide.Gaze < tide.Threshold) {
+	if tide.Threshold <= 0 || tide.Gaze < tide.Threshold {
 		return "", nil // the will has not gathered enough to reach
 	}
-	util := ""
-	if w.pendingReach != nil {
-		util = w.pendingReach.Utility
-	} else {
-		var ok bool
-		util, ok = tide.dominantUtil()
-		if !ok {
-			return "", nil // a future/dormant vector channel crested before an audited hand exists
-		}
+	util, ok := tide.dominantUtil()
+	if !ok {
+		return "", nil // a future/dormant vector channel crested before an audited hand exists
 	}
 	reach, err := w.beginReach(util, tide)
 	if err != nil {
 		return util, fmt.Errorf("will reach state %s: %w", util, err)
 	}
-	tide = reach.Tide
-	util = reach.Utility
+	return w.continueReach(ctx, reach)
+}
+
+func (w *willTicker) continueReach(ctx context.Context, reach willPendingReach) (string, error) {
+	tide := reach.Tide
+	util := reach.Utility
 	eventID := reach.ID
 	eventBreath := reach.Breath
 	if eventBreath > w.breath {
@@ -285,10 +286,11 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 		if effectCount > 0 {
 			outcome = willOutcomePerceptionCommitted
 		}
-		reach, err = w.markReachConsequenceCommitted(reach, outcome, effectCount)
+		committedReach, err := w.markReachConsequenceCommitted(reach, outcome, effectCount)
 		if err != nil {
 			return util, fmt.Errorf("will commit %s consequence: %w", util, err)
 		}
+		reach = committedReach
 	}
 	nextQuiet, nextCooldown := w.plannedLearningState(outcome)
 	if err := w.saveLearningState(reach, outcome, effectCount, nextQuiet, nextCooldown); err != nil {

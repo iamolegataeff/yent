@@ -564,3 +564,14 @@ refractory countdown, so cooldown cannot delay the receipt that proves why the c
 
 The regression seeds exactly that shape — committed pending reach plus restored cooldown — and verifies the
 retry emits the missing learning receipt immediately without respawning the utility.
+
+### fix 15 — pending reach retry does not start a new physics breath
+
+The previous repair let pending reach completion bypass restored refractory, but the tick loop still advanced
+`breath` and executed AML physics before it noticed the pending reach. That could let the new breath mutate the
+field and then let the old reach discharge the freshly reaccumulated tide.
+
+The will now routes a pending reach into its completion path before `breath++` and before `ExecFile`. A pending
+reach keeps its original breath and finishes its missing ledger tail as old cause; only ticks with no pending
+reach may advance field physics. The regression asserts that a committed pending retry emits the missing
+learning receipt without respawning and with zero `ExecFile` calls.
