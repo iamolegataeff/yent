@@ -633,3 +633,14 @@ This closes the crash-shaped gap left after cursor ack hardening: limpha dedupe 
 durable consumer for a live field event and then suppress the field reflex if the process dies before cursor
 ack. The regression verifies that identity events shape the live field before entering limpha, and only appear
 in SARTRE memory after the field ack.
+
+### fix 21 — failed AML exec restores the field transaction
+
+`am_exec` and `am_exec_compiled` now snapshot the live field plus its MetaJanus control globals before running a
+script and restore that snapshot if execution returns an AML error. Persistent globals were already not saved on
+failure; this closes the other half of the transaction, where a field directive before a later `SAVE` failure
+could leave `AM_State` mutated even though the caller received a failed exec.
+
+The regression extends the persistent failure case with a pre-error `DESTINY` mutation and verifies the field
+returns to its previous value after the failing script. The boundary stays intentionally local: irreversible host
+I/O remains outside this rollback contract.

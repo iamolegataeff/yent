@@ -251,6 +251,14 @@ func TestPersistentExecFailureDoesNotCommitOrContinue(t *testing.T) {
 	if got := b.Destiny(); got != 0.2 {
 		t.Fatalf("failed exec must stop before post-error field commands, destiny=%.3f want 0.2", got)
 	}
+	badPath = filepath.Join(t.TempDir(), "missing", "field.soma")
+	err = b.Exec(fmt.Sprintf("DESTINY 0.7\nSAVE %q", badPath))
+	if err == nil {
+		t.Fatal("SAVE after a field mutation into a missing parent should fail")
+	}
+	if got := b.Destiny(); got != 0.2 {
+		t.Fatalf("failed exec must roll back pre-error field commands, destiny=%.3f want 0.2", got)
+	}
 }
 
 // TestExecFileRunsScript proves the multi-line file path Go loads the will script through,
