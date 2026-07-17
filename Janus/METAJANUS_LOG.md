@@ -477,3 +477,32 @@ Doc-only change; no logic touched. `go build ./cmd/innerworld-dock` exit 0; whol
 green. This closes the Sol fix pass: all 3 HIGH + all 4 MEDIUM + LOW addressed. Remaining before the re-audit:
 the kernel canon-sync batch (`am_janus_key_armed`, `janus_temporal_alpha`, the MED-1 epoch, the MED-3 birth
 accessors, the MED-2 transactional load) into `ariannamethod.ai`, then Sol's re-audit.
+
+### fix 8 — #205: DoE joins the fixed clock; alpha-only flows cannot masquerade as a key
+
+Codex follow-up after merge #204/#205: the runtime DoE clock bug noted in fix 7 is closed in `DoE/doe.c`.
+`calendar_init()` now pins the same UTC epoch as AMK (`2024-10-03 12:00:00 UTC`, `1727956800`) instead of
+using host-local `mktime`; the new `TestDOECalendarEpochIsUTCFixed` compiles a DoE C harness and checks
+`UTC`, `Asia/Jerusalem`, and `America/New_York`. This keeps the duplicated coarse Metonic pressure from
+sliding by host timezone/DST.
+
+The D-2 consumer gate was also tightened for future hosts: `metajanusTemporalAlpha` now requires the flow to
+expose `JanusKeyArmed()` and return true before reading `JanusTemporalAlpha()`. A flow that only exposes an
+alpha value is treated as unarmed and returns neutral `0.5`, so a value cannot become a gate by interface
+accident. Tool-verified: DoE TZ harness, `TestMetaJanusEpochIsUTCFixed`, `go test ./innerworld ./innerworld/aml`,
+full `go test ./...`, and `git diff --check`. Current README wording updated to stop calling the layer inert
+and to record the fixed AMK/DoE clock contract.
+
+### fix 9 — will tide becomes a five-channel receipt surface, without new hidden hands
+
+Sol's will-design audit was right that will should not collapse into a scalar bucket. The current repair keeps
+the active behavior narrow but changes the contract: `Janus/the_will_design.aml` now declares a five-channel
+vector `[origin, pressure, curiosity, care, boundary]`. Origin and pressure are the only live channels with
+audited sensors/actions today; `curiosity`, `care`, and `boundary` are explicit zero pulls/tides until a later
+design gives each one its own sensor and hand.
+
+The Go dock now reads, persists, validates, hashes, discharges, and emits all five components in the will
+receipt. A dormant channel that somehow dominates before a mapped action exists fails closed instead of
+falling through to `repo_monitor` and impersonating pressure. This is not a wormhole and not a speech splice;
+it is durable shape for later plasticity. Tool-verified: `go test ./cmd/innerworld-dock -run Will -count=1`,
+`go test ./innerworld/aml -run Will -count=1`, and `git diff --check`.

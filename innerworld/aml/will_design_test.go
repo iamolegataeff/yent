@@ -32,6 +32,14 @@ func probeField(t *testing.T, b *Body, sym string) float32 {
 	return b.GetVarFloat("__probe")
 }
 
+func willVectorSum(b *Body) float32 {
+	return b.GetVarFloat("will_origin_tide") +
+		b.GetVarFloat("will_pressure_tide") +
+		b.GetVarFloat("will_curiosity_tide") +
+		b.GetVarFloat("will_care_tide") +
+		b.GetVarFloat("will_boundary_tide")
+}
+
 // bornAt resets the field, arms persistence, fixes Yent's origin (BIRTH 498 = 13 Feb 2026),
 // scrubs the self-clock to day d, and steps once so am_step computes the MetaJanus metrics.
 func bornAt(t *testing.T, b *Body, d int) {
@@ -73,8 +81,11 @@ func TestWillScriptRuns(t *testing.T) {
 	if seam := b.GetVarFloat("seam"); seam < 0.5 {
 		t.Errorf("seam must be computed with a 0.5 floor, got %.4f", seam)
 	}
-	if gaze, origin, pressure := b.GetVarFloat("will_gaze"), b.GetVarFloat("will_origin_tide"), b.GetVarFloat("will_pressure_tide"); abs32(gaze-(origin+pressure)) > 0.0001 {
-		t.Errorf("will_gaze must be derived from the vector tide, gaze=%.4f origin=%.4f pressure=%.4f", gaze, origin, pressure)
+	if curiosity, care, boundary := b.GetVarFloat("pull_curiosity"), b.GetVarFloat("pull_care"), b.GetVarFloat("pull_boundary"); curiosity != 0 || care != 0 || boundary != 0 {
+		t.Errorf("dormant will channels must stay explicit zero until audited sensors own them: curiosity=%.4f care=%.4f boundary=%.4f", curiosity, care, boundary)
+	}
+	if gaze, sum := b.GetVarFloat("will_gaze"), willVectorSum(b); abs32(gaze-sum) > 0.0001 {
+		t.Errorf("will_gaze must be derived from the five-channel vector tide, gaze=%.4f sum=%.4f", gaze, sum)
 	}
 }
 
@@ -98,8 +109,8 @@ func TestWillConfluenceCrestsOnYahrzeit(t *testing.T) {
 	if originTide <= pressureTide {
 		t.Errorf("on the anniversary the accumulated origin tide must dominate: origin_tide=%.4f pressure_tide=%.4f", originTide, pressureTide)
 	}
-	if abs32(gaze-(originTide+pressureTide)) > 0.0001 {
-		t.Errorf("will_gaze must stay the vector sum: gaze=%.4f origin_tide=%.4f pressure_tide=%.4f", gaze, originTide, pressureTide)
+	if sum := willVectorSum(b); abs32(gaze-sum) > 0.0001 {
+		t.Errorf("will_gaze must stay the five-channel vector sum: gaze=%.4f sum=%.4f", gaze, sum)
 	}
 }
 
@@ -111,13 +122,12 @@ func TestWillQuietDayStaysUnderCrest(t *testing.T) {
 	bornAt(t, b, 588) // 90 days past the anniversary, no strain
 	settle(t, b, 12)
 	gaze, thr := b.GetVarFloat("will_gaze"), b.GetVarFloat("will_threshold")
-	originTide, pressureTide := b.GetVarFloat("will_origin_tide"), b.GetVarFloat("will_pressure_tide")
 	t.Logf("quiet: will_gaze=%.4f threshold=%.4f", gaze, thr)
 	if gaze >= thr {
 		t.Errorf("a quiet day must not crest the will: will_gaze=%.4f >= threshold=%.4f", gaze, thr)
 	}
-	if abs32(gaze-(originTide+pressureTide)) > 0.0001 {
-		t.Errorf("quiet will_gaze must stay the vector sum: gaze=%.4f origin_tide=%.4f pressure_tide=%.4f", gaze, originTide, pressureTide)
+	if sum := willVectorSum(b); abs32(gaze-sum) > 0.0001 {
+		t.Errorf("quiet will_gaze must stay the five-channel vector sum: gaze=%.4f sum=%.4f", gaze, sum)
 	}
 }
 
@@ -145,8 +155,8 @@ func TestWillPressureCrestsOnStrain(t *testing.T) {
 	if pressureTide <= originTide {
 		t.Errorf("under strain the accumulated pressure tide must dominate: pressure_tide=%.4f origin_tide=%.4f", pressureTide, originTide)
 	}
-	if abs32(gaze-(originTide+pressureTide)) > 0.0001 {
-		t.Errorf("will_gaze must stay the vector sum: gaze=%.4f origin_tide=%.4f pressure_tide=%.4f", gaze, originTide, pressureTide)
+	if sum := willVectorSum(b); abs32(gaze-sum) > 0.0001 {
+		t.Errorf("will_gaze must stay the five-channel vector sum: gaze=%.4f sum=%.4f", gaze, sum)
 	}
 }
 

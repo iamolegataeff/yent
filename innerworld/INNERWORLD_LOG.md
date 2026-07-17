@@ -726,6 +726,32 @@ affect axis + sea→resurrect. Mini worktree cleaned. Next: Codex sews it to lim
 
 ---
 
+## 2026-07-17 — SARTRE sense contract after Sol hardening
+
+Historical note above says the dock's live SARTRE sense runs the C `sartre/perception.c` parser as the single
+source. That was true for the first wiring, but not for the hardened will/Sol pass. The live
+`cmd/innerworld-dock` path now parses typed SARTRE events in Go (`sartreFieldEffect`), so routine repo novelty
+can WALK, `whatdotheythinkiam` recognition/reduction can become identity prophecy, `no_novelty` remains ledger
+data, and `sensor_error`/`state_error`/`overflow` become still typed consequences instead of universal RUN.
+
+The C perception module still exists and is still used by `sartre_kernel.c`'s `-DHAS_PERCEPTION` pipe demo /
+standalone SARTRE surface. It is therefore a legacy/demo reflex, not the live dock contract. Future SARTRE
+work should either port that C surface to the typed semantics or keep it explicitly labeled as a demo, but
+must not assume the live Yent field still uses the old C substring parser.
+
+## 2026-07-17 — Will tide surface widened, hands unchanged
+
+The live will loop now receipts a five-channel tide: `origin`, `pressure`, `curiosity`, `care`, and `boundary`.
+Only origin/pressure currently have audited pulls and utilities (`whatdotheythinkiam`, `repo_monitor`). The
+other three are explicit zero channels in AML and Go, carried through pending reach state, event ids, JSONL
+receipts, validation, and discharge.
+
+The important safety point: if a future dormant channel gets nonzero state before a mapped action exists, the
+dock fails closed and does not call it pressure. This keeps Sol's vector-tide direction without smuggling in a
+new speech route or wormhole.
+
+---
+
 ## Deferred / parked
 
 - **Cloud** (pre-linguistic affect, 6-chamber MLP reflex) — it is **Python**, with a

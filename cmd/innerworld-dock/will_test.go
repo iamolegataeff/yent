@@ -41,6 +41,12 @@ func (f *fakeWillField) Exec(script string) error {
 			f.vars["will_origin_tide"] = 0
 		case "will_pressure_tide = 0":
 			f.vars["will_pressure_tide"] = 0
+		case "will_curiosity_tide = 0":
+			f.vars["will_curiosity_tide"] = 0
+		case "will_care_tide = 0":
+			f.vars["will_care_tide"] = 0
+		case "will_boundary_tide = 0":
+			f.vars["will_boundary_tide"] = 0
 		case "will_gaze = 0":
 			f.discharged = true
 			f.vars["will_gaze"] = 0
@@ -115,12 +121,16 @@ func TestWillTickReachesOnOriginCrest(t *testing.T) {
 	if !f.discharged {
 		t.Error("the reach must discharge the tide")
 	}
-	if len(f.execScripts) != 1 || !strings.Contains(f.execScripts[0], "will_origin_tide = 0\nwill_pressure_tide = 0\nwill_gaze = 0") {
+	if len(f.execScripts) != 1 ||
+		!strings.Contains(f.execScripts[0], "will_origin_tide = 0\nwill_pressure_tide = 0\nwill_curiosity_tide = 0\nwill_care_tide = 0\nwill_boundary_tide = 0\nwill_gaze = 0") {
 		t.Fatalf("the tide discharge must be one transactional AML block, got %#v", f.execScripts)
 	}
-	if f.vars["will_origin_tide"] != 0 || f.vars["will_pressure_tide"] != 0 {
-		t.Errorf("the reach must discharge the vector tide, origin=%.3f pressure=%.3f",
-			f.vars["will_origin_tide"], f.vars["will_pressure_tide"])
+	if f.vars["will_origin_tide"] != 0 || f.vars["will_pressure_tide"] != 0 ||
+		f.vars["will_curiosity_tide"] != 0 || f.vars["will_care_tide"] != 0 ||
+		f.vars["will_boundary_tide"] != 0 {
+		t.Errorf("the reach must discharge the vector tide, origin=%.3f pressure=%.3f curiosity=%.3f care=%.3f boundary=%.3f",
+			f.vars["will_origin_tide"], f.vars["will_pressure_tide"], f.vars["will_curiosity_tide"],
+			f.vars["will_care_tide"], f.vars["will_boundary_tide"])
 	}
 	if len(sk.lines) != 1 {
 		t.Errorf("the perception must be emitted once, got %d", len(sk.lines))
@@ -158,6 +168,24 @@ func TestWillTickUsesAccumulatedVectorOverCurrentPull(t *testing.T) {
 	}
 	if util != willUtilOrigin {
 		t.Fatalf("the accumulated origin tide must beat a one-tick pressure spike, got %s", util)
+	}
+}
+
+func TestWillTickDormantVectorChannelDoesNotImpersonatePressure(t *testing.T) {
+	sp, sk := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"added"}`)}, &fakeSink{}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5,
+		"will_curiosity_tide": 1.5,
+	}, sp, sk)
+	util, err := w.tick(context.Background())
+	if err != nil {
+		t.Fatalf("dormant channel should fail closed without an error: %v", err)
+	}
+	if util != "" || sp.util != "" || len(sk.lines) != 0 {
+		t.Fatalf("an unmapped dormant channel must not spawn or emit as pressure, util=%q spawner=%q lines=%d", util, sp.util, len(sk.lines))
+	}
+	if f.discharged {
+		t.Fatal("an unmapped dormant channel must not spend the tide")
 	}
 }
 
@@ -422,6 +450,9 @@ func TestWillTickTypedPhasesSurroundPerception(t *testing.T) {
 	}
 	if sk.events[0].PressureTide != 1.5 || sk.events[0].PullPressure != 0.3 {
 		t.Fatalf("intention must receipt both vector tide and current pull, got %#v", sk.events[0])
+	}
+	if sk.events[0].CuriosityTide != 0 || sk.events[0].CareTide != 0 || sk.events[0].BoundaryTide != 0 {
+		t.Fatalf("dormant vector channels must be explicit zero receipts, got %#v", sk.events[0])
 	}
 	for i, ev := range sk.events {
 		if ev.RootID != "rootabc" || ev.Breath != 1 || ev.CadenceMS != 750 || ev.RefractoryBreaths != 3 {
