@@ -16,6 +16,10 @@ type Sense interface {
 	Pressure() (aml string, ok bool)
 }
 
+type ackingSense interface {
+	AckPressure() error
+}
+
 // senseStep is how hard the environment settles the field after its reflex — a nudge,
 // not a lurch (the world tilts posture; it does not seize the organism).
 const senseStep = 0.15
@@ -51,6 +55,9 @@ func (iw *InnerWorld) applySenseLocked() {
 		return
 	}
 	iw.field.Step(senseStep)
+	if ack, ok := iw.sense.(ackingSense); ok {
+		_ = ack.AckPressure()
+	}
 }
 
 func compactSenseAML(aml string) string {

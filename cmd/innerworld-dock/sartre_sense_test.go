@@ -176,6 +176,29 @@ func TestSartreSensePersistentCursorSuppressesRestartReplay(t *testing.T) {
 	}
 }
 
+func TestSartreSensePressureAckFollowsConsumer(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	cursor := filepath.Join(dir, "cursor.json")
+	if err := os.WriteFile(path, []byte(`{"util":"repo_monitor","kind":"added","path":"field.md"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &sartreSense{eventsPath: path, cursorPath: cursor}
+	aml, ok := s.Pressure()
+	if !ok || !strings.Contains(aml, "PROPHECY") {
+		t.Fatalf("active field pressure expected, got ok=%v aml=%q", ok, aml)
+	}
+	if aml, ok := (&sartreSense{eventsPath: path, cursorPath: cursor}).Pressure(); !ok || !strings.Contains(aml, "PROPHECY") {
+		t.Fatalf("unacked pressure must remain visible after restart, got ok=%v aml=%q", ok, aml)
+	}
+	if err := s.AckPressure(); err != nil {
+		t.Fatal(err)
+	}
+	if aml, ok := (&sartreSense{eventsPath: path, cursorPath: cursor}).Pressure(); ok || aml != "" {
+		t.Fatalf("acked pressure must not replay after restart, got ok=%v aml=%q", ok, aml)
+	}
+}
+
 func TestSartreSensePersistentCursorDoesNotAckPartialAcrossRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	cursor := filepath.Join(t.TempDir(), "cursor.json")

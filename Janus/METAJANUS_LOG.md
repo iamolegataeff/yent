@@ -586,3 +586,14 @@ The ordering is now effect/state commit → consequence pending marker → tide 
 → success receipt → reach finish. If the learning-state write fails after discharge, the committed reach remains
 pending for retry instead of disappearing; if discharge fails, no learning state is published. The regression
 covers both edges.
+
+### fix 17 — SARTRE cursor ack follows field actuation
+
+The live SARTRE reflex no longer advances its cursor inside `Pressure()` for events that produce field AML.
+It stages the cursor batch and waits for the inner world consumer to call `AckPressure()` after the AML block
+has been accepted by the field and settled one step. Rejected AML now leaves the cursor unacknowledged, so the
+same pressure can be retried instead of being silently lost at the boundary between perception and field.
+
+Quiet, invalid, or duplicate/no-effect events still acknowledge immediately because there is no field actuation
+to wait for. This keeps the repair narrow: it closes the in-process consumer boundary without introducing
+wormholes, prompt text, or weight changes.

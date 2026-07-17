@@ -10,6 +10,19 @@ type fakeSense struct {
 
 func (s fakeSense) Pressure() (string, bool) { return s.aml, s.ok }
 
+type fakeAckSense struct {
+	aml  string
+	ok   bool
+	acks int
+}
+
+func (s *fakeAckSense) Pressure() (string, bool) { return s.aml, s.ok }
+
+func (s *fakeAckSense) AckPressure() error {
+	s.acks++
+	return nil
+}
+
 func TestApplySenseDrivesField(t *testing.T) {
 	f := &fakeField{}
 	iw := NewInnerWorld(nil, f, nil)
@@ -25,6 +38,21 @@ func TestApplySenseDrivesField(t *testing.T) {
 	}
 	if f.steps == 0 {
 		t.Error("sense should settle the field one step after the reflex")
+	}
+}
+
+func TestApplySenseAcksAfterFieldStep(t *testing.T) {
+	f := &fakeField{}
+	sense := &fakeAckSense{aml: "VELOCITY RUN\nPROPHECY 7", ok: true}
+	iw := NewInnerWorld(nil, f, nil)
+	iw.SetSense(sense)
+
+	iw.genMu.Lock()
+	iw.applySenseLocked()
+	iw.genMu.Unlock()
+
+	if sense.acks != 1 {
+		t.Fatalf("sense pressure should be acked once after field execution, got %d", sense.acks)
 	}
 }
 
@@ -73,8 +101,9 @@ func TestApplySenseSkipsBlankLines(t *testing.T) {
 
 func TestApplySenseRejectedBlockDoesNotStep(t *testing.T) {
 	f := &fakeField{failOn: "PROPHECY"}
+	sense := &fakeAckSense{aml: "VELOCITY RUN\nPROPHECY 7", ok: true}
 	iw := NewInnerWorld(nil, f, nil)
-	iw.SetSense(fakeSense{aml: "VELOCITY RUN\nPROPHECY 7", ok: true})
+	iw.SetSense(sense)
 
 	iw.genMu.Lock()
 	iw.applySenseLocked()
@@ -82,5 +111,8 @@ func TestApplySenseRejectedBlockDoesNotStep(t *testing.T) {
 
 	if len(f.scriptList()) != 0 || f.steps != 0 {
 		t.Errorf("a rejected sense block must not partially apply or step, got scripts=%v steps=%d", f.scriptList(), f.steps)
+	}
+	if sense.acks != 0 {
+		t.Fatalf("rejected sense block must not be acknowledged, got %d acks", sense.acks)
 	}
 }

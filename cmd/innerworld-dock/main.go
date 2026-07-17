@@ -210,6 +210,7 @@ type sartreSense struct {
 	offset     int64 // cursor: byte offset of the last acknowledged complete record
 	fileID     sartreFileID
 	loaded     bool
+	pendingAck sartreReadBatch
 	limpha     *yent.LimphaClient
 	state      func() yent.LimphaState
 }
@@ -405,6 +406,7 @@ func (s *sartreSense) Pressure() (string, bool) {
 	if s.eventsPath == "" {
 		return "", false
 	}
+	s.pendingAck = sartreReadBatch{}
 	batch := s.readNewBatch() // only NEW events since the last ack — no latched replay of history
 	if !batch.ok {
 		return "", false
@@ -435,10 +437,23 @@ func (s *sartreSense) Pressure() (string, bool) {
 		events = accepted
 	}
 	aml, ok := sartreFieldAML(events)
-	if err := s.ackSartreBatch(batch); err != nil {
-		fmt.Fprintf(os.Stderr, "[dock] SARTRE cursor ack: %v\n", err)
+	if !ok {
+		if err := s.ackSartreBatch(batch); err != nil {
+			fmt.Fprintf(os.Stderr, "[dock] SARTRE cursor ack: %v\n", err)
+		}
+		return "", false
 	}
-	return aml, ok
+	s.pendingAck = batch
+	return aml, true
+}
+
+func (s *sartreSense) AckPressure() error {
+	if !s.pendingAck.ok {
+		return nil
+	}
+	batch := s.pendingAck
+	s.pendingAck = sartreReadBatch{}
+	return s.ackSartreBatch(batch)
 }
 
 func sartreEOFOffset(path string) int64 {
