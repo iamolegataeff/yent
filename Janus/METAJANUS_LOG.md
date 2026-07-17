@@ -575,3 +575,14 @@ The will now routes a pending reach into its completion path before `breath++` a
 reach keeps its original breath and finishes its missing ledger tail as old cause; only ticks with no pending
 reach may advance field physics. The regression asserts that a committed pending retry emits the missing
 learning receipt without respawning and with zero `ExecFile` calls.
+
+### fix 16 — learning state follows spent tide
+
+The will's success-learning receipt says it proves committed host state plus spent tide, but the host-side
+learning state was saved before `dischargeWillTide`. If the AML discharge transaction failed, durable learning
+could already claim the consequence while the field still held the crest.
+
+The ordering is now effect/state commit → consequence pending marker → tide discharge → durable learning state
+→ success receipt → reach finish. If the learning-state write fails after discharge, the committed reach remains
+pending for retry instead of disappearing; if discharge fails, no learning state is published. The regression
+covers both edges.

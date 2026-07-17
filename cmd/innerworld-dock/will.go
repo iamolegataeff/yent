@@ -293,11 +293,11 @@ func (w *willTicker) continueReach(ctx context.Context, reach willPendingReach) 
 		reach = committedReach
 	}
 	nextQuiet, nextCooldown := w.plannedLearningState(outcome)
-	if err := w.saveLearningState(reach, outcome, effectCount, nextQuiet, nextCooldown); err != nil {
-		return util, fmt.Errorf("will learn %s state: %w", util, err)
-	}
 	if err := dischargeWillTide(w.field); err != nil {
 		return util, fmt.Errorf("will discharge %s: %w", util, err)
+	}
+	if err := w.saveLearningState(reach, outcome, effectCount, nextQuiet, nextCooldown); err != nil {
+		return util, fmt.Errorf("will learn %s state: %w", util, err)
 	}
 	// Success learning is a receipt of committed host state plus spent tide, not a promise.
 	if es, ok := w.sink.(willEventSink); ok {

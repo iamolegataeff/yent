@@ -645,15 +645,17 @@ func TestInitialWillBreathRestoresDurableCursor(t *testing.T) {
 	}
 }
 
-func TestWillTickLearningStateErrorDoesNotDischarge(t *testing.T) {
+func TestWillTickLearningStateErrorKeepsCommittedReachPending(t *testing.T) {
 	sp := &fakeSpawner{}
 	sk := &typedFakeSink{}
+	reachPath := willReachStatePath(t.TempDir())
 	w, f := newWill(map[string]float32{
 		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
 		"will_pressure_tide": 1.5,
 	}, sp, &sk.fakeSink)
 	w.sink = sk
 	w.refractory = 2
+	w.reachStatePath = reachPath
 	w.learningStatePath = t.TempDir() // rename(file.pending, existing directory) must fail
 
 	util, err := w.tick(context.Background())
@@ -663,8 +665,8 @@ func TestWillTickLearningStateErrorDoesNotDischarge(t *testing.T) {
 	if util != willUtilPressure {
 		t.Fatalf("got util %q", util)
 	}
-	if f.discharged {
-		t.Fatal("the tide must not be spent when host-side learning was not durable")
+	if !f.discharged {
+		t.Fatal("the tide is spent before durable learning state, so learning can receipt spent cause")
 	}
 	if w.quietRuns != 0 || w.cooldown != 0 {
 		t.Fatalf("in-memory learning must not advance on a failed durable write, quiet=%d cooldown=%d", w.quietRuns, w.cooldown)
@@ -672,11 +674,19 @@ func TestWillTickLearningStateErrorDoesNotDischarge(t *testing.T) {
 	if len(sk.events) != 2 || sk.events[0].Phase != "intention" || sk.events[1].Phase != "act" {
 		t.Fatalf("failed learning-state commit must not emit success learning, got %#v", sk.events)
 	}
+	st, err := loadWillReachState(reachPath)
+	if err != nil {
+		t.Fatalf("load reach state: %v", err)
+	}
+	if st.Pending == nil || st.Pending.ID != sk.events[0].ID || !st.Pending.ConsequenceCommitted {
+		t.Fatalf("failed learning-state write must keep committed reach pending for retry, got %#v", st)
+	}
 }
 
 func TestWillTickDischargeErrorDoesNotEmitSuccessLearning(t *testing.T) {
 	sp := &fakeSpawner{}
 	sk := &typedFakeSink{}
+	learningPath := willLearningStatePath(t.TempDir())
 	w, f := newWill(map[string]float32{
 		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
 		"will_pressure_tide": 1.5,
@@ -684,6 +694,7 @@ func TestWillTickDischargeErrorDoesNotEmitSuccessLearning(t *testing.T) {
 	w.sink = sk
 	w.rootID = "rootabc"
 	w.reachStatePath = willReachStatePath(t.TempDir())
+	w.learningStatePath = learningPath
 	f.execErr = errors.New("aml transaction failed")
 
 	util, err := w.tick(context.Background())
@@ -708,6 +719,13 @@ func TestWillTickDischargeErrorDoesNotEmitSuccessLearning(t *testing.T) {
 	}
 	if st.Pending == nil || st.Pending.ID != sk.events[0].ID || st.NextSeq != 1 {
 		t.Fatalf("failed discharge must keep the reach pending for retry, got %#v", st)
+	}
+	learning, err := loadWillLearningState(learningPath)
+	if err != nil {
+		t.Fatalf("load learning state: %v", err)
+	}
+	if learning.LastOutcome != "" || learning.LastReachID != "" || learning.CooldownBreaths != 0 {
+		t.Fatalf("failed discharge must not publish durable learning state, got %#v", learning)
 	}
 }
 
