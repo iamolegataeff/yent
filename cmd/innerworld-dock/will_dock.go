@@ -571,6 +571,10 @@ func completeSartreJSONLines(raw []byte) [][]byte {
 	return out
 }
 
+func hasNonEmptySartreOutput(raw []byte) bool {
+	return len(bytes.TrimSpace(raw)) > 0
+}
+
 func tagSartreEffectLines(raw []byte, eventID, rootID string) []byte {
 	var out bytes.Buffer
 	for _, line := range completeSartreJSONLines(raw) {

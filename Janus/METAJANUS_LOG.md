@@ -597,3 +597,14 @@ same pressure can be retried instead of being silently lost at the boundary betw
 Quiet, invalid, or duplicate/no-effect events still acknowledge immediately because there is no field actuation
 to wait for. This keeps the repair narrow: it closes the in-process consumer boundary without introducing
 wormholes, prompt text, or weight changes.
+
+### fix 18 — malformed utility output is not no-novelty
+
+The will host now treats non-empty utility stdout with zero complete valid SARTRE JSONL records as a sensor
+protocol failure, not as `no_novelty`. That keeps the state transition record-aligned: a partial/truncated or
+malformed utility line cannot commit the utility baseline, discharge the tide, and lengthen/reduce refractory
+as if the sensor had honestly found nothing.
+
+The error path emits a typed `learning/sensor_error` receipt with captured bytes, leaves the reach pending, and
+does not publish effect records, commit utility state, or spend the AML tide. Empty stdout remains the honest
+`no_novelty` case.

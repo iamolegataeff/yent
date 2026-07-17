@@ -269,6 +269,16 @@ func (w *willTicker) continueReach(ctx context.Context, reach willPendingReach) 
 		}
 		effectLine := tagSartreEffectLines(result.Line, eventID, w.rootID)
 		effectCount = len(completeSartreJSONLines(effectLine))
+		if effectCount == 0 && hasNonEmptySartreOutput(result.Line) {
+			if es, ok := w.sink.(willEventSink); ok {
+				ev := w.eventAtBreath(tide, eventID, "learning", util, willOutcomeSensorError, eventBreath)
+				ev.BytesCaptured = len(result.Line)
+				if err := es.EmitEvent(ev); err != nil {
+					return util, fmt.Errorf("will malformed output %s: %w", util, err)
+				}
+			}
+			return util, fmt.Errorf("will reach %s produced no valid SARTRE JSONL records", util)
+		}
 		if len(effectLine) > 0 {
 			if err := w.sink.Emit(effectLine); err != nil {
 				return util, fmt.Errorf("will emit %s: %w", util, err)
