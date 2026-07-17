@@ -819,6 +819,15 @@ after discharge, the committed pending reach remains available for retry.
 This tightens the ledger order without changing will selection, vector tide math, prompts, model weights, or
 wormholes.
 
+## 2026-07-17 — SARTRE pressure is acknowledged after field application
+
+The live SARTRE sense path now treats cursor advancement as a consumer acknowledgement, not as a side effect
+of reading. `sartreSense.Pressure()` stages active field-producing batches, and `applySenseLocked()` calls
+`AckPressure()` only after the compact AML block has been accepted by the field and the reflex step has settled.
+
+If field execution rejects the block, the cursor remains unadvanced and the pressure can be retried. Quiet,
+invalid, duplicate, or no-effect batches still ack immediately because no field application is pending.
+
 ---
 
 ## Deferred / parked
