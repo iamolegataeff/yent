@@ -42,4 +42,14 @@ func TestMetaJanusTemporalAlphaDefaultsNeutral(t *testing.T) {
 	if biasN, scarN := metajanusHarvestLean(metajanusTemporalAlpha(&goFlow{})); biasN != 3 || scarN != 2 {
 		t.Fatalf("stub flow harvest = (%d,%d), want (3,2) bit-for-bit", biasN, scarN)
 	}
+	if a := metajanusTemporalAlpha(fakeJanusAlphaOnlyFlow{alpha: 0.0}); a != 0.5 {
+		t.Fatalf("alpha-only flow without a JANUS_KEY signal read as %.4f, want neutral 0.5", a)
+	}
 }
+
+type fakeJanusAlphaOnlyFlow struct {
+	*goFlow
+	alpha float32
+}
+
+func (f fakeJanusAlphaOnlyFlow) JanusTemporalAlpha() float32 { return f.alpha }

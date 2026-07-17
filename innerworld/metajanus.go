@@ -41,7 +41,8 @@ func metajanusTemporalAlpha(flow Flow) float32 {
 	// HIGH-1 (Sol audit): the harvest reads a MetaJanus value ONLY while the key is armed. Unarmed —
 	// after JANUS_KEY 0, or a legacy TEMPORAL_*/REMEMBER_FUTURE directive, or a flow with no key signal —
 	// reads neutral 0.5, so a frozen or externally-driven temporal_alpha can never wake D-2 without Janus.
-	if ka, ok := flow.(interface{ JanusKeyArmed() bool }); ok && !ka.JanusKeyArmed() {
+	ka, ok := flow.(interface{ JanusKeyArmed() bool })
+	if !ok || !ka.JanusKeyArmed() {
 		return 0.5
 	}
 	if ja, ok := flow.(interface{ JanusTemporalAlpha() float32 }); ok {
