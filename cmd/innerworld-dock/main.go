@@ -211,6 +211,7 @@ type sartreSense struct {
 	fileID     sartreFileID
 	loaded     bool
 	pendingAck sartreReadBatch
+	pendingAML string
 	limpha     *yent.LimphaClient
 	state      func() yent.LimphaState
 }
@@ -403,10 +404,15 @@ func sameSartreFile(a, b sartreFileID) bool {
 }
 
 func (s *sartreSense) Pressure() (string, bool) {
+	if s.pendingAck.ok {
+		if s.pendingAML != "" {
+			return s.pendingAML, true
+		}
+		s.pendingAck = sartreReadBatch{}
+	}
 	if s.eventsPath == "" {
 		return "", false
 	}
-	s.pendingAck = sartreReadBatch{}
 	batch := s.readNewBatch() // only NEW events since the last ack — no latched replay of history
 	if !batch.ok {
 		return "", false
@@ -444,15 +450,18 @@ func (s *sartreSense) Pressure() (string, bool) {
 		return "", false
 	}
 	s.pendingAck = batch
+	s.pendingAML = aml
 	return aml, true
 }
 
 func (s *sartreSense) AckPressure() error {
 	if !s.pendingAck.ok {
+		s.pendingAML = ""
 		return nil
 	}
 	batch := s.pendingAck
 	s.pendingAck = sartreReadBatch{}
+	s.pendingAML = ""
 	return s.ackSartreBatch(batch)
 }
 

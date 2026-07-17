@@ -828,6 +828,17 @@ of reading. `sartreSense.Pressure()` stages active field-producing batches, and 
 If field execution rejects the block, the cursor remains unadvanced and the pressure can be retried. Quiet,
 invalid, duplicate, or no-effect batches still ack immediately because no field application is pending.
 
+## 2026-07-17 — Pending SARTRE pressure survives limpha dedupe until ack
+
+The staged SARTRE pressure now keeps its compact AML alongside the staged cursor batch. If the field consumer
+asks for pressure again before `AckPressure()`, the dock returns the same staged AML instead of re-reading the
+same JSONL through limpha. That closes a quiet loss mode where limpha had already recorded the stable event id,
+the cursor was still unadvanced, and a retry could look like a duplicate/no-op before the field accepted the
+pressure.
+
+This is still a host-side delivery boundary only: memory and field remain separate systems, but memory
+deduplication no longer erases an in-flight field consequence.
+
 ---
 
 ## Deferred / parked
