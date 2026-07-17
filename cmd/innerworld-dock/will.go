@@ -60,6 +60,14 @@ const (
 	willUtilPressure = "repo_monitor"       // reach under the field's strain (a dark-gravity/debt crest)
 )
 
+const (
+	willOutcomeNoNovelty           = "no_novelty"
+	willOutcomePerceptionCommitted = "perception_committed"
+	willOutcomeSensorError         = "sensor_error"
+	willOutcomeStateError          = "state_error"
+	willOutcomeOverflow            = "overflow"
+)
+
 type willTideSnapshot struct {
 	Threshold    float32 `json:"threshold"`
 	Gaze         float32 `json:"gaze"`
@@ -167,52 +175,60 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 	tide = reach.Tide
 	util = reach.Utility
 	eventID := reach.ID
-	if es, ok := w.sink.(willEventSink); ok {
-		if err := es.EmitEvent(w.event(tide, eventID, "intention", util, "crest")); err != nil {
-			return util, fmt.Errorf("will intent %s: %w", util, err)
-		}
-	}
-	result, err := w.spawner.Spawn(ctx, util)
-	if err != nil {
+	outcome := reach.Outcome
+	effectCount := reach.EffectCount
+	if !reach.ConsequenceCommitted {
 		if es, ok := w.sink.(willEventSink); ok {
-			_ = es.EmitEvent(w.event(tide, eventID, "learning", util, "sensor_error"))
-		}
-		return util, fmt.Errorf("will reach %s: %w", util, err)
-	}
-	if es, ok := w.sink.(willEventSink); ok {
-		if err := es.EmitEvent(w.event(tide, eventID, "act", util, "spawned")); err != nil {
-			return util, fmt.Errorf("will act %s: %w", util, err)
-		}
-	}
-	if result.Overflow {
-		if es, ok := w.sink.(willEventSink); ok {
-			ev := w.event(tide, eventID, "learning", util, "overflow")
-			ev.BytesCaptured = len(result.Line)
-			ev.BytesLimit = willMaxStdout
-			if err := es.EmitEvent(ev); err != nil {
-				return util, fmt.Errorf("will overflow %s: %w", util, err)
+			if err := es.EmitEvent(w.event(tide, eventID, "intention", util, "crest")); err != nil {
+				return util, fmt.Errorf("will intent %s: %w", util, err)
 			}
 		}
-		return util, fmt.Errorf("will reach %s overflowed stdout cap (%d bytes)", util, willMaxStdout)
-	}
-	effectLine := tagSartreEffectLines(result.Line, eventID, w.rootID)
-	effectCount := len(completeSartreJSONLines(effectLine))
-	if len(effectLine) > 0 {
-		if err := w.sink.Emit(effectLine); err != nil {
-			return util, fmt.Errorf("will emit %s: %w", util, err)
-		}
-	}
-	if result.Commit != nil {
-		if err := result.Commit(); err != nil {
+		result, err := w.spawner.Spawn(ctx, util)
+		if err != nil {
 			if es, ok := w.sink.(willEventSink); ok {
-				_ = es.EmitEvent(w.event(tide, eventID, "learning", util, "state_error"))
+				_ = es.EmitEvent(w.event(tide, eventID, "learning", util, willOutcomeSensorError))
 			}
-			return util, fmt.Errorf("will commit %s state: %w", util, err)
+			return util, fmt.Errorf("will reach %s: %w", util, err)
 		}
-	}
-	outcome := "no_novelty"
-	if effectCount > 0 {
-		outcome = "perception_committed"
+		if es, ok := w.sink.(willEventSink); ok {
+			if err := es.EmitEvent(w.event(tide, eventID, "act", util, "spawned")); err != nil {
+				return util, fmt.Errorf("will act %s: %w", util, err)
+			}
+		}
+		if result.Overflow {
+			if es, ok := w.sink.(willEventSink); ok {
+				ev := w.event(tide, eventID, "learning", util, willOutcomeOverflow)
+				ev.BytesCaptured = len(result.Line)
+				ev.BytesLimit = willMaxStdout
+				if err := es.EmitEvent(ev); err != nil {
+					return util, fmt.Errorf("will overflow %s: %w", util, err)
+				}
+			}
+			return util, fmt.Errorf("will reach %s overflowed stdout cap (%d bytes)", util, willMaxStdout)
+		}
+		effectLine := tagSartreEffectLines(result.Line, eventID, w.rootID)
+		effectCount = len(completeSartreJSONLines(effectLine))
+		if len(effectLine) > 0 {
+			if err := w.sink.Emit(effectLine); err != nil {
+				return util, fmt.Errorf("will emit %s: %w", util, err)
+			}
+		}
+		if result.Commit != nil {
+			if err := result.Commit(); err != nil {
+				if es, ok := w.sink.(willEventSink); ok {
+					_ = es.EmitEvent(w.event(tide, eventID, "learning", util, willOutcomeStateError))
+				}
+				return util, fmt.Errorf("will commit %s state: %w", util, err)
+			}
+		}
+		outcome = willOutcomeNoNovelty
+		if effectCount > 0 {
+			outcome = willOutcomePerceptionCommitted
+		}
+		reach, err = w.markReachConsequenceCommitted(reach, outcome, effectCount)
+		if err != nil {
+			return util, fmt.Errorf("will commit %s consequence: %w", util, err)
+		}
 	}
 	nextQuiet, nextCooldown := w.plannedLearningState(outcome)
 	if err := w.saveLearningState(nextQuiet); err != nil {
@@ -274,6 +290,21 @@ func (w *willTicker) finishReach(seq int64) error {
 	return nil
 }
 
+func (w *willTicker) markReachConsequenceCommitted(reach willPendingReach, outcome string, effectCount int) (willPendingReach, error) {
+	if !validWillCommittedOutcome(outcome, effectCount) {
+		return willPendingReach{}, fmt.Errorf("invalid committed outcome %q with %d effects", outcome, effectCount)
+	}
+	reach.ConsequenceCommitted = true
+	reach.Outcome = outcome
+	reach.EffectCount = effectCount
+	if err := w.saveReachState(reach.Seq, &reach); err != nil {
+		return willPendingReach{}, err
+	}
+	w.nextReachSeq = reach.Seq
+	w.pendingReach = &reach
+	return reach, nil
+}
+
 func (w *willTicker) saveReachState(nextSeq int64, pending *willPendingReach) error {
 	if w.reachStatePath == "" {
 		return nil
@@ -293,7 +324,7 @@ func (w *willTicker) plannedLearningState(outcome string) (quietRuns, cooldown i
 		base = 0
 	}
 	switch outcome {
-	case "no_novelty":
+	case willOutcomeNoNovelty:
 		quietRuns = w.quietRuns + 1
 		if quietRuns < 0 || quietRuns > willQuietRunMax {
 			quietRuns = willQuietRunMax
@@ -303,7 +334,7 @@ func (w *willTicker) plannedLearningState(outcome string) (quietRuns, cooldown i
 			extra = willQuietRefractoryMaxExtra
 		}
 		return quietRuns, base + extra
-	case "perception_committed":
+	case willOutcomePerceptionCommitted:
 		return 0, base
 	default:
 		return w.quietRuns, base

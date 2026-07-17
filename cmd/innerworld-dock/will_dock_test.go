@@ -223,11 +223,14 @@ func TestWillReachStateRoundTrip(t *testing.T) {
 		t.Fatalf("missing reach state should load as first sequence, st=%#v err=%v", st, err)
 	}
 	pending := &willPendingReach{
-		Seq:     3,
-		ID:      "reach3",
-		Utility: willUtilPressure,
-		Tide:    willTideSnapshot{Threshold: 1, Gaze: 1.5, PressureTide: 1.5},
-		Breath:  12,
+		Seq:                  3,
+		ID:                   "reach3",
+		Utility:              willUtilPressure,
+		Tide:                 willTideSnapshot{Threshold: 1, Gaze: 1.5, PressureTide: 1.5},
+		Breath:               12,
+		ConsequenceCommitted: true,
+		Outcome:              willOutcomePerceptionCommitted,
+		EffectCount:          2,
 	}
 	if err := saveWillReachState(path, willReachState{NextSeq: 3, Pending: pending}); err != nil {
 		t.Fatalf("save pending reach: %v", err)
@@ -236,7 +239,8 @@ func TestWillReachStateRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load pending reach: %v", err)
 	}
-	if st.NextSeq != 3 || st.Pending == nil || st.Pending.ID != "reach3" || st.Pending.Utility != willUtilPressure {
+	if st.NextSeq != 3 || st.Pending == nil || st.Pending.ID != "reach3" || st.Pending.Utility != willUtilPressure ||
+		!st.Pending.ConsequenceCommitted || st.Pending.Outcome != willOutcomePerceptionCommitted || st.Pending.EffectCount != 2 {
 		t.Fatalf("wrong pending reach after round-trip: %#v", st)
 	}
 	if err := saveWillReachState(path, willReachState{NextSeq: 4}); err != nil {
@@ -258,6 +262,23 @@ func TestWillReachStateRejectsCorruptPending(t *testing.T) {
 	}
 	if _, err := loadWillReachState(path); err == nil {
 		t.Fatal("pending reach with mismatched sequence must fail loud")
+	}
+}
+
+func TestWillReachStateRejectsCorruptCommittedConsequence(t *testing.T) {
+	cases := []string{
+		`{"version":1,"next_seq":2,"pending":{"seq":2,"id":"x","util":"repo_monitor","tide":{"threshold":1},"consequence_committed":true,"outcome":"perception_committed","effect_count":0}}`,
+		`{"version":1,"next_seq":2,"pending":{"seq":2,"id":"x","util":"repo_monitor","tide":{"threshold":1},"consequence_committed":true,"outcome":"no_novelty","effect_count":1}}`,
+		`{"version":1,"next_seq":2,"pending":{"seq":2,"id":"x","util":"repo_monitor","tide":{"threshold":1},"outcome":"perception_committed","effect_count":1}}`,
+	}
+	for i, body := range cases {
+		path := willReachStatePath(t.TempDir())
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadWillReachState(path); err == nil {
+			t.Fatalf("case %d should reject corrupt committed consequence", i)
+		}
 	}
 }
 

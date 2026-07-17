@@ -203,11 +203,14 @@ func saveWillLearningState(path string, st willLearningState) error {
 const willReachStateVersion = 1
 
 type willPendingReach struct {
-	Seq     int64            `json:"seq"`
-	ID      string           `json:"id"`
-	Utility string           `json:"util"`
-	Tide    willTideSnapshot `json:"tide"`
-	Breath  int              `json:"breath"`
+	Seq                  int64            `json:"seq"`
+	ID                   string           `json:"id"`
+	Utility              string           `json:"util"`
+	Tide                 willTideSnapshot `json:"tide"`
+	Breath               int              `json:"breath"`
+	ConsequenceCommitted bool             `json:"consequence_committed,omitempty"`
+	Outcome              string           `json:"outcome,omitempty"`
+	EffectCount          int              `json:"effect_count,omitempty"`
 }
 
 type willReachState struct {
@@ -306,7 +309,30 @@ func validateWillReachState(st willReachState) error {
 	if !finiteWillTide(p.Tide) {
 		return fmt.Errorf("pending reach has non-finite tide")
 	}
+	if p.EffectCount < 0 {
+		return fmt.Errorf("pending reach has negative effect count %d", p.EffectCount)
+	}
+	if p.ConsequenceCommitted {
+		if !validWillCommittedOutcome(p.Outcome, p.EffectCount) {
+			return fmt.Errorf("pending reach has invalid committed outcome %q with %d effects", p.Outcome, p.EffectCount)
+		}
+		return nil
+	}
+	if p.Outcome != "" || p.EffectCount != 0 {
+		return fmt.Errorf("pending reach has uncommitted outcome %q with %d effects", p.Outcome, p.EffectCount)
+	}
 	return nil
+}
+
+func validWillCommittedOutcome(outcome string, effectCount int) bool {
+	switch outcome {
+	case willOutcomeNoNovelty:
+		return effectCount == 0
+	case willOutcomePerceptionCommitted:
+		return effectCount > 0
+	default:
+		return false
+	}
 }
 
 func finiteWillTide(t willTideSnapshot) bool {
