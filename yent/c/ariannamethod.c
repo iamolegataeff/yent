@@ -242,6 +242,39 @@ static int g_self_now_manual = 0;  // MetaJanus test-door: 1 = pd's "now" is scr
 static int g_self_now_days = 0;     // scrubbed self-now (days since epoch) when g_self_now_manual
 static int g_temporal_key_on = 0;   // MetaJanus: 1 = JANUS_KEY armed → D-2 acts on janus_temporal_alpha (HIGH-1 consumer gate); 0 = disarmed → D-2 reads neutral 0.5 (default)
 
+typedef struct {
+    AM_State field;
+    int calendar_manual;
+    int birth_set;
+    long birth_days;
+    int self_now_manual;
+    int self_now_days;
+    int temporal_key_on;
+} AML_FieldTxn;
+
+static AML_FieldTxn aml_field_txn_capture(void) {
+    AML_FieldTxn tx;
+    tx.field = G;
+    tx.calendar_manual = g_calendar_manual;
+    tx.birth_set = g_birth_set;
+    tx.birth_days = g_birth_days;
+    tx.self_now_manual = g_self_now_manual;
+    tx.self_now_days = g_self_now_days;
+    tx.temporal_key_on = g_temporal_key_on;
+    return tx;
+}
+
+static void aml_field_txn_restore(const AML_FieldTxn* tx) {
+    if (!tx) return;
+    G = tx->field;
+    g_calendar_manual = tx->calendar_manual;
+    g_birth_set = tx->birth_set;
+    g_birth_days = tx->birth_days;
+    g_self_now_manual = tx->self_now_manual;
+    g_self_now_days = tx->self_now_days;
+    g_temporal_key_on = tx->temporal_key_on;
+}
+
 static void calendar_init(void) {
     // MED-1 (Sol fix): the calendar epoch is a FIXED UTC instant — 2024-10-03 12:00:00 UTC = 1727956800
     // seconds since the Unix epoch — set as a constant, without local mktime/timegm, so it is independent
@@ -6341,6 +6374,7 @@ int am_exec(const char* script) {
      * AM_State (base_temperature=0, etc.) instead of the spec §2 defaults. */
     if (!g_am_initialized) am_init();
     g_error[0] = 0;
+    AML_FieldTxn field_txn = aml_field_txn_capture();
 
     // preprocess into lines
     AML_Line* lines = (AML_Line*)malloc(AML_MAX_LINES * sizeof(AML_Line));
@@ -6373,6 +6407,8 @@ int am_exec(const char* script) {
     // belong to the failed transaction, not future ticks.
     if (!ctx.error[0]) {
         persistent_save(&ctx.globals);
+    } else {
+        aml_field_txn_restore(&field_txn);
     }
     symtab_clear_arrays(&ctx.globals);
 
@@ -6599,6 +6635,7 @@ int am_exec_compiled(void* handle) {
     if (!handle) return 0;
     AM_Compiled* c = (AM_Compiled*)handle;
     g_error[0] = 0;
+    AML_FieldTxn field_txn = aml_field_txn_capture();
 
     AML_ExecCtx ctx;
     memset(&ctx, 0, sizeof(ctx));
@@ -6782,6 +6819,8 @@ int am_exec_compiled(void* handle) {
 
     if (!ctx.error[0]) {
         persistent_save(&ctx.globals);
+    } else {
+        aml_field_txn_restore(&field_txn);
     }
     symtab_clear_arrays(&ctx.globals);
 
