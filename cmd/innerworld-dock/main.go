@@ -363,11 +363,7 @@ func (s *sartreSense) ackSartreBatch(batch sartreReadBatch) error {
 		_ = os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
+	return publishDurableFile(tmp, path)
 }
 
 func (s *sartreSense) sartreCursorPath() string {

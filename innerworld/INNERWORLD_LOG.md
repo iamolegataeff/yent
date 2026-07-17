@@ -760,6 +760,17 @@ the saved consequence receipt.
 This is still host-side and model-external. It does not modify generation, weights, prompts, or wormholes; it
 only makes the existing refractory learning accountable.
 
+## 2026-07-17 — Will state publishes are fsync-bounded
+
+The dock now treats will/SARTRE host files as part of the causal ledger, not casual cache files. Learning
+state, pending reach state, SARTRE cursor state, event-file creation, and utility-state promotion all pass
+through file fsync plus parent-directory fsync where the platform supports it. Before a utility's pending
+state becomes the canonical baseline, the host fsyncs that pending file.
+
+The intent is narrow: if an effect was appended and the will records a committed consequence, a restart should
+not lose the state publication because only the directory entry was still volatile. No generation path changes;
+this is durability for the existing typed consequence loop.
+
 ---
 
 ## Deferred / parked

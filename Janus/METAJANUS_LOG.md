@@ -518,3 +518,17 @@ Invalid consequence combinations fail loud on load/save (`perception_committed` 
 utility, missing reach id, non-finite tide). This keeps the next plasticity layer replayable without touching
 weights, prompts, or wormholes. Tool-verified: `go test ./cmd/innerworld-dock -run Will -count=1` and
 `git diff --check`.
+
+### fix 11 — will receipts publish through durable file boundaries
+
+The will/SARTRE file boundary now uses one durable publish path for host state: write+fsync the file, rename,
+then fsync the parent directory. `will-learning.state.json`, `will-reach.state.json`, the SARTRE cursor, and
+the final utility state publish all go through that boundary; the utility's pending state is explicitly
+fsynced before the host promotes it into the canonical baseline. The event sink also fsyncs the parent after
+creating/appending the JSONL file, so the "effect was durably perceived before state commit" contract is not
+only an in-memory ordering claim.
+
+This does not alter will selection, vector tide math, plasticity policy, prompts, weights, or wormholes. It
+closes a crash/power-loss edge in the delivery ledger Sol was pointing at: a committed consequence should not
+depend on an unflushed directory entry. Tool-verified: `sh tools/build_libamk.sh`, `go test
+./cmd/innerworld-dock -run 'Will|Sartre' -count=1`, and `git diff --check`.

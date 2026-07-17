@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -13,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -100,7 +102,10 @@ func (s osSpawner) Spawn(ctx context.Context, util string) (willSpawnResult, err
 		Line:     cw.buf.Bytes(),
 		Overflow: cw.overflow,
 		Commit: func() error {
-			return os.Rename(pendingPath, statePath)
+			if err := syncFilePath(pendingPath); err != nil {
+				return err
+			}
+			return publishDurableFile(pendingPath, statePath)
 		},
 	}, nil
 }
@@ -203,11 +208,7 @@ func saveWillLearningState(path string, st willLearningState) error {
 		_ = os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
+	return publishDurableFile(tmp, path)
 }
 
 func validateWillLearningState(st willLearningState) error {
@@ -323,11 +324,7 @@ func saveWillReachState(path string, st willReachState) error {
 		_ = os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
+	return publishDurableFile(tmp, path)
 }
 
 func validateWillReachState(st willReachState) error {
@@ -482,7 +479,7 @@ func (s fileSink) Emit(line []byte) error {
 		return err
 	}
 	closed = true
-	return nil
+	return syncParentDir(s.path)
 }
 
 func writeAll(w io.Writer, p []byte) error {
@@ -497,6 +494,41 @@ func writeAll(w io.Writer, p []byte) error {
 		p = p[n:]
 	}
 	return nil
+}
+
+func syncFilePath(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return f.Sync()
+}
+
+func syncParentDir(path string) error {
+	f, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := f.Sync(); err != nil {
+		// Some filesystems reject directory fsync. The file itself has already
+		// been fsynced; keep those platforms usable instead of turning a
+		// durability hardening pass into an unrelated portability failure.
+		if errors.Is(err, syscall.EINVAL) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func publishDurableFile(tmp, path string) error {
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return syncParentDir(path)
 }
 
 func (s fileSink) EmitEvent(ev willEvent) error {
