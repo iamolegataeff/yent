@@ -543,3 +543,14 @@ This keeps the time-domain decision honest: will time remains breath-counted, bu
 erases the refractory just because the counter lived only in Go memory. A no-novelty reach still lengthens the
 cooldown, a committed perception still resets quiet plasticity, and no wall-clock decay or wormhole route is
 introduced. Tool-verified: `go test ./cmd/innerworld-dock -run 'Will|Sartre' -count=1`.
+
+### fix 13 — one reach keeps one breath across retry
+
+The pending-reach ledger already kept a stable reach id and sequence, but the retry path could stamp the final
+learning receipt with the restarted process's RAM breath instead of the breath that created the reach. That made
+one causal act look like it happened in two different will breaths.
+
+The dock now seeds startup from the maximum durable breath it knows (`current_breath`, `last_breath`, pending
+reach breath), stores `current_breath` in the learning state, and emits all receipts for a pending reach with
+the original reach breath. Refractory cooldown breaths also advance that durable cursor. This is still
+breath-counted physics, not wall-clock decay; it only makes the ledger's time domain replayable.

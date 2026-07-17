@@ -156,9 +156,13 @@ func (t willTideSnapshot) event(id, phase, util, outcome string) willEvent {
 }
 
 func (w *willTicker) event(t willTideSnapshot, id, phase, util, outcome string) willEvent {
+	return w.eventAtBreath(t, id, phase, util, outcome, w.breath)
+}
+
+func (w *willTicker) eventAtBreath(t willTideSnapshot, id, phase, util, outcome string, breath int) willEvent {
 	ev := t.event(id, phase, util, outcome)
 	ev.RootID = w.rootID
-	ev.Breath = w.breath
+	ev.Breath = breath
 	if w.cadence > 0 {
 		ev.CadenceMS = int64(w.cadence / time.Millisecond)
 	}
@@ -227,29 +231,33 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 	tide = reach.Tide
 	util = reach.Utility
 	eventID := reach.ID
+	eventBreath := reach.Breath
+	if eventBreath > w.breath {
+		w.breath = eventBreath
+	}
 	outcome := reach.Outcome
 	effectCount := reach.EffectCount
 	if !reach.ConsequenceCommitted {
 		if es, ok := w.sink.(willEventSink); ok {
-			if err := es.EmitEvent(w.event(tide, eventID, "intention", util, "crest")); err != nil {
+			if err := es.EmitEvent(w.eventAtBreath(tide, eventID, "intention", util, "crest", eventBreath)); err != nil {
 				return util, fmt.Errorf("will intent %s: %w", util, err)
 			}
 		}
 		result, err := w.spawner.Spawn(ctx, util)
 		if err != nil {
 			if es, ok := w.sink.(willEventSink); ok {
-				_ = es.EmitEvent(w.event(tide, eventID, "learning", util, willOutcomeSensorError))
+				_ = es.EmitEvent(w.eventAtBreath(tide, eventID, "learning", util, willOutcomeSensorError, eventBreath))
 			}
 			return util, fmt.Errorf("will reach %s: %w", util, err)
 		}
 		if es, ok := w.sink.(willEventSink); ok {
-			if err := es.EmitEvent(w.event(tide, eventID, "act", util, "spawned")); err != nil {
+			if err := es.EmitEvent(w.eventAtBreath(tide, eventID, "act", util, "spawned", eventBreath)); err != nil {
 				return util, fmt.Errorf("will act %s: %w", util, err)
 			}
 		}
 		if result.Overflow {
 			if es, ok := w.sink.(willEventSink); ok {
-				ev := w.event(tide, eventID, "learning", util, willOutcomeOverflow)
+				ev := w.eventAtBreath(tide, eventID, "learning", util, willOutcomeOverflow, eventBreath)
 				ev.BytesCaptured = len(result.Line)
 				ev.BytesLimit = willMaxStdout
 				if err := es.EmitEvent(ev); err != nil {
@@ -268,7 +276,7 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 		if result.Commit != nil {
 			if err := result.Commit(); err != nil {
 				if es, ok := w.sink.(willEventSink); ok {
-					_ = es.EmitEvent(w.event(tide, eventID, "learning", util, willOutcomeStateError))
+					_ = es.EmitEvent(w.eventAtBreath(tide, eventID, "learning", util, willOutcomeStateError, eventBreath))
 				}
 				return util, fmt.Errorf("will commit %s state: %w", util, err)
 			}
@@ -291,7 +299,7 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 	}
 	// Success learning is a receipt of committed host state plus spent tide, not a promise.
 	if es, ok := w.sink.(willEventSink); ok {
-		ev := w.event(tide, eventID, "learning", util, outcome)
+		ev := w.eventAtBreath(tide, eventID, "learning", util, outcome, eventBreath)
 		ev.EffectCount = effectCount
 		ev.CooldownBreaths = nextCooldown
 		if err := es.EmitEvent(ev); err != nil {
@@ -406,6 +414,7 @@ func (w *willTicker) saveLearningState(reach willPendingReach, outcome string, e
 		LastEffectCount: effectCount,
 		LastCooldown:    cooldown,
 		CooldownBreaths: cooldown,
+		CurrentBreath:   maxWillBreath(w.breath, reach.Breath),
 		LastBreath:      reach.Breath,
 		LastTide:        &tide,
 	})
@@ -420,7 +429,26 @@ func (w *willTicker) saveCooldownState(cooldown int) error {
 		return err
 	}
 	st.CooldownBreaths = cooldown
+	st.CurrentBreath = maxWillBreath(st.CurrentBreath, w.breath)
 	return saveWillLearningState(w.learningStatePath, st)
+}
+
+func maxWillBreath(values ...int) int {
+	max := 0
+	for _, v := range values {
+		if v > max {
+			max = v
+		}
+	}
+	return max
+}
+
+func initialWillBreath(learning willLearningState, reach willReachState) int {
+	breath := maxWillBreath(learning.CurrentBreath, learning.LastBreath)
+	if reach.Pending != nil {
+		breath = maxWillBreath(breath, reach.Pending.Breath)
+	}
+	return breath
 }
 
 func dischargeWillTide(field willField) error {

@@ -780,6 +780,16 @@ that startup restores and each cooldown breath durably decrements.
 The will is still breath-counted, not wall-clock counted. This change only prevents a process restart from
 silently clearing the refractory and letting a just-spent hand immediately reach again under the same crest.
 
+## 2026-07-17 — Will reach receipts keep their original breath
+
+A pending reach now carries its original breath all the way through retry. If a restart happens after intention
+or act but before the final learning receipt, the retry emits the missing receipt with the same reach id and the
+same breath, not the restarted process's fresh RAM counter. Startup also seeds the will cursor from durable
+learning/reach state, and cooldown ticks advance `current_breath` while they decrement `cooldown_breaths`.
+
+This keeps the will ledger's time domain internally replayable without changing the field physics, prompts,
+weights, or future wormhole boundary.
+
 ---
 
 ## Deferred / parked
