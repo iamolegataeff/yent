@@ -143,7 +143,12 @@ func (c *LimphaClient) StoreNewSartreEvents(events []SartreEvent, st LimphaState
 	}
 	receipt := BuildSartreReceipt(accepted)
 	if len(receipt.Trace) == 0 {
-		return 0, nil, nil
+		if err := tx.Commit(); err != nil {
+			c.recordMemoryFailure("sartre_event_ids", err)
+			return 0, nil, err
+		}
+		committed = true
+		return 0, accepted, nil
 	}
 	response := strings.Join(receipt.Trace, "\n")
 	prompt := "[sartre/perception] utility receipts"

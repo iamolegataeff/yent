@@ -31,11 +31,10 @@ func (iw *InnerWorld) SetSense(s Sense) {
 
 // applySenseLocked lets the environment shift the field's posture before the circles
 // rise — the fast sensory reflex, the present-time twin of applyMemoryPressureLocked's
-// slow recall pressure. The perception is already AML (one VELOCITY/PROPHECY command
-// per line), so each line is exec'd straight into the field and then the field settles
-// one small step. Caller holds genMu; the Field owns its own locking. Fail-soft: a nil
-// sense/field, nothing to feel, or a broken command never stops thought. NO-SEED holds
-// — this is a field command, never seed text.
+// slow recall pressure. The perception is already AML, so the reflex is applied as
+// one script and then the field settles one small step. Caller holds genMu; the Field
+// owns its own locking. Fail-soft: a nil sense/field, nothing to feel, or a rejected
+// script never stops thought. NO-SEED holds — this is a field command, never seed text.
 func (iw *InnerWorld) applySenseLocked() {
 	if iw.sense == nil || iw.field == nil {
 		return
@@ -44,18 +43,24 @@ func (iw *InnerWorld) applySenseLocked() {
 	if !ok {
 		return
 	}
-	applied := false
+	script := compactSenseAML(aml)
+	if script == "" {
+		return
+	}
+	if err := iw.field.Exec(script); err != nil {
+		return
+	}
+	iw.field.Step(senseStep)
+}
+
+func compactSenseAML(aml string) string {
+	lines := make([]string, 0, 2)
 	for _, line := range strings.Split(aml, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		if err := iw.field.Exec(line); err != nil {
-			break // fail-soft: stop at the first command the field rejects
-		}
-		applied = true
+		lines = append(lines, line)
 	}
-	if applied {
-		iw.field.Step(senseStep)
-	}
+	return strings.Join(lines, "\n")
 }

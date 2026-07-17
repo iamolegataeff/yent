@@ -20,8 +20,8 @@ func TestApplySenseDrivesField(t *testing.T) {
 	iw.genMu.Unlock()
 
 	got := f.scriptList()
-	if len(got) != 2 || got[0] != "VELOCITY RUN" || got[1] != "PROPHECY 7" {
-		t.Errorf("sense should exec each AML line into the field, got %v", got)
+	if len(got) != 1 || got[0] != "VELOCITY RUN\nPROPHECY 7" {
+		t.Errorf("sense should exec one atomic AML block into the field, got %v", got)
 	}
 	if f.steps == 0 {
 		t.Error("sense should settle the field one step after the reflex")
@@ -55,8 +55,7 @@ func TestApplySenseNilSafe(t *testing.T) {
 	}
 }
 
-// the present reflex skips blank lines and stops fail-soft, but a well-formed
-// perception lands fully.
+// the present reflex skips blank lines and lands a well-formed perception as one block.
 func TestApplySenseSkipsBlankLines(t *testing.T) {
 	f := &fakeField{}
 	iw := NewInnerWorld(nil, f, nil)
@@ -67,7 +66,21 @@ func TestApplySenseSkipsBlankLines(t *testing.T) {
 	iw.genMu.Unlock()
 
 	got := f.scriptList()
-	if len(got) != 2 || got[0] != "VELOCITY NOMOVE" || got[1] != "PROPHECY 1" {
+	if len(got) != 1 || got[0] != "VELOCITY NOMOVE\nPROPHECY 1" {
 		t.Errorf("blank lines should be skipped, got %v", got)
+	}
+}
+
+func TestApplySenseRejectedBlockDoesNotStep(t *testing.T) {
+	f := &fakeField{failOn: "PROPHECY"}
+	iw := NewInnerWorld(nil, f, nil)
+	iw.SetSense(fakeSense{aml: "VELOCITY RUN\nPROPHECY 7", ok: true})
+
+	iw.genMu.Lock()
+	iw.applySenseLocked()
+	iw.genMu.Unlock()
+
+	if len(f.scriptList()) != 0 || f.steps != 0 {
+		t.Errorf("a rejected sense block must not partially apply or step, got scripts=%v steps=%d", f.scriptList(), f.steps)
 	}
 }
