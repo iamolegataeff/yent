@@ -69,50 +69,89 @@ const (
 )
 
 type willTideSnapshot struct {
-	Threshold    float32 `json:"threshold"`
-	Gaze         float32 `json:"gaze"`
-	PullOrigin   float32 `json:"pull_origin"`
-	PullPressure float32 `json:"pull_pressure"`
-	OriginTide   float32 `json:"origin_tide"`
-	PressureTide float32 `json:"pressure_tide"`
+	Threshold     float32 `json:"threshold"`
+	Gaze          float32 `json:"gaze"`
+	PullOrigin    float32 `json:"pull_origin"`
+	PullPressure  float32 `json:"pull_pressure"`
+	PullCuriosity float32 `json:"pull_curiosity"`
+	PullCare      float32 `json:"pull_care"`
+	PullBoundary  float32 `json:"pull_boundary"`
+	OriginTide    float32 `json:"origin_tide"`
+	PressureTide  float32 `json:"pressure_tide"`
+	CuriosityTide float32 `json:"curiosity_tide"`
+	CareTide      float32 `json:"care_tide"`
+	BoundaryTide  float32 `json:"boundary_tide"`
 }
 
 func readWillTide(field willField) willTideSnapshot {
 	return willTideSnapshot{
-		Threshold:    field.GetVarFloat("will_threshold"),
-		Gaze:         field.GetVarFloat("will_gaze"),
-		PullOrigin:   field.GetVarFloat("pull_origin"),
-		PullPressure: field.GetVarFloat("pull_pressure"),
-		OriginTide:   field.GetVarFloat("will_origin_tide"),
-		PressureTide: field.GetVarFloat("will_pressure_tide"),
+		Threshold:     field.GetVarFloat("will_threshold"),
+		Gaze:          field.GetVarFloat("will_gaze"),
+		PullOrigin:    field.GetVarFloat("pull_origin"),
+		PullPressure:  field.GetVarFloat("pull_pressure"),
+		PullCuriosity: field.GetVarFloat("pull_curiosity"),
+		PullCare:      field.GetVarFloat("pull_care"),
+		PullBoundary:  field.GetVarFloat("pull_boundary"),
+		OriginTide:    field.GetVarFloat("will_origin_tide"),
+		PressureTide:  field.GetVarFloat("will_pressure_tide"),
+		CuriosityTide: field.GetVarFloat("will_curiosity_tide"),
+		CareTide:      field.GetVarFloat("will_care_tide"),
+		BoundaryTide:  field.GetVarFloat("will_boundary_tide"),
 	}
 }
 
-func (t willTideSnapshot) dominantUtil() string {
-	if t.OriginTide != 0 || t.PressureTide != 0 {
-		if t.OriginTide > t.PressureTide {
-			return willUtilOrigin
+func (t willTideSnapshot) dominantUtil() (string, bool) {
+	if t.OriginTide != 0 || t.PressureTide != 0 || t.CuriosityTide != 0 || t.CareTide != 0 || t.BoundaryTide != 0 {
+		name, value := "origin", t.OriginTide
+		for _, c := range []struct {
+			name  string
+			value float32
+		}{
+			{"pressure", t.PressureTide},
+			{"curiosity", t.CuriosityTide},
+			{"care", t.CareTide},
+			{"boundary", t.BoundaryTide},
+		} {
+			if c.value > value {
+				name, value = c.name, c.value
+			}
 		}
-		return willUtilPressure
+		if value <= 0 {
+			return "", false
+		}
+		switch name {
+		case "origin":
+			return willUtilOrigin, true
+		case "pressure":
+			return willUtilPressure, true
+		default:
+			return "", false
+		}
 	}
 	if t.PullOrigin > t.PullPressure {
-		return willUtilOrigin
+		return willUtilOrigin, true
 	}
-	return willUtilPressure
+	return willUtilPressure, true
 }
 
 func (t willTideSnapshot) event(id, phase, util, outcome string) willEvent {
 	return willEvent{
-		ID:           id,
-		Phase:        phase,
-		Outcome:      outcome,
-		Utility:      util,
-		Gaze:         t.Gaze,
-		Threshold:    t.Threshold,
-		PullOrigin:   t.PullOrigin,
-		PullPressure: t.PullPressure,
-		OriginTide:   t.OriginTide,
-		PressureTide: t.PressureTide,
+		ID:            id,
+		Phase:         phase,
+		Outcome:       outcome,
+		Utility:       util,
+		Gaze:          t.Gaze,
+		Threshold:     t.Threshold,
+		PullOrigin:    t.PullOrigin,
+		PullPressure:  t.PullPressure,
+		PullCuriosity: t.PullCuriosity,
+		PullCare:      t.PullCare,
+		PullBoundary:  t.PullBoundary,
+		OriginTide:    t.OriginTide,
+		PressureTide:  t.PressureTide,
+		CuriosityTide: t.CuriosityTide,
+		CareTide:      t.CareTide,
+		BoundaryTide:  t.BoundaryTide,
 	}
 }
 
@@ -167,7 +206,16 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 	if w.pendingReach == nil && (tide.Threshold <= 0 || tide.Gaze < tide.Threshold) {
 		return "", nil // the will has not gathered enough to reach
 	}
-	util := tide.dominantUtil()
+	util := ""
+	if w.pendingReach != nil {
+		util = w.pendingReach.Utility
+	} else {
+		var ok bool
+		util, ok = tide.dominantUtil()
+		if !ok {
+			return "", nil // a future/dormant vector channel crested before an audited hand exists
+		}
+	}
 	reach, err := w.beginReach(util, tide)
 	if err != nil {
 		return util, fmt.Errorf("will reach state %s: %w", util, err)
@@ -349,7 +397,7 @@ func (w *willTicker) saveLearningState(quietRuns int) error {
 }
 
 func dischargeWillTide(field willField) error {
-	return field.Exec("will_origin_tide = 0\nwill_pressure_tide = 0\nwill_gaze = 0")
+	return field.Exec("will_origin_tide = 0\nwill_pressure_tide = 0\nwill_curiosity_tide = 0\nwill_care_tide = 0\nwill_boundary_tide = 0\nwill_gaze = 0")
 }
 
 // run is the will's own breath: its own goroutine, paced by tickEvery, alongside iw.Breathe. A

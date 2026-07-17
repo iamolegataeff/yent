@@ -34,19 +34,29 @@ sh tools/build_libamk.sh                          # ONLY this way (manual ar pro
 go test -count=1 ./tests -run 'AMK|MetaJanus'     # -> ok
 ```
 
-## State (tool-verified 2026-07-14)
+## State (tool-verified 2026-07-17)
 
-Branch `claude/metajanus`, tree clean: the measurement layer (Phase 0.5→2a) + 3 F-fixes + stage A
-of the Fable audit (A-1…A-6), **build 0 warnings, 26/26 tests green**. The layer is MEASUREMENT-ONLY
-and INERT — inference reads none of these 4 fields anywhere, generation is untouched.
+MetaJanus is no longer described as inert. The direct sampler/weight path remains untouched, but D-2 is
+now an honest first indirect speech wire: when `JANUS_KEY` is armed, inner harvest composition may change,
+that reflection is persisted to limpha with a Janus receipt, and later router recall can carry it into a
+user-facing response. Default OFF remains neutral: without an explicit `JanusKeyArmed()` signal, D-2 reads
+`0.5` and keeps the old 3 cooc / 2 scar harvest.
 
-Full-context Fable audit (2026-07-14): inertness
-against the whole machine confirmed, the keying revert is clean. Stage A (one atomic commit each): A-1 soma gate
-→ prefix-load · A-2 Dershowitz-Reingold yahrzeit rules from the primary source (checked against ICU) · A-3
-silent failure mode + Feb-29 · A-4 canonization of the two-engine gap (see below) · A-5 header doc+LOG under
-code · A-6 field-map (dark_gravity dedup + valence/arousal). Next up — A-7 (acceptance: Fable → Codex →
-merge + canon sync into `ariannamethod.ai`) and stages B–E (birth in prod, observation, first key,
-route/wormhole) — Fable's/Oleg's hands, each by word.
+Current repaired surface:
+
+- `BIRTH 498` declares the origin and is attested by `am_birth_set()` + `am_birth_epoch_days()`.
+- `janus_temporal_alpha` is pure calendar-derived state; generic `temporal_alpha` remains legacy
+  `TEMPORAL_*` state and is not a Janus carrier.
+- D-2 consumes `janus_temporal_alpha` only while `JanusKeyArmed()` is present and true.
+- Innerworld limpha persistence records `janus_armed`, `janus_temporal_alpha`, and `janus_gap`, so the
+  indirect speech path is receipted rather than hidden.
+- AMK and DoE now share the fixed UTC epoch `2024-10-03 12:00:00 UTC` (`1727956800`), not local `mktime`.
+- The will tide is a five-channel receipt surface (`origin`, `pressure`, `curiosity`, `care`, `boundary`);
+  only origin/pressure currently own audited sensors and hands. The other channels are explicit zero slots
+  and fail closed if they ever dominate before a mapped action exists.
+
+Wormholes and any direct generation splice remain out of scope until the key/time/receipt surface has passed
+re-audit.
 
 ## Model time vs. celestial time (canonized gap — Fable audit 2026-07-14)
 
@@ -69,15 +79,14 @@ subtracts the 19-year / 7-leap / 30-day corrections (the same `g_metonic_leaps` 
 a DUPLICATE of the model at a different cadence — DoE per token, AMK per inner-field step. Do not create an
 `engine_gap` for two copies of one formula; the DoE↔AMK bridge is a separate stage that distributes one
 canonical clock fact rather than treating duplicated pressure as independent evidence (Sol audit, MED-4).
-Note: `doe.c` still builds its epoch with local `mktime` (the same host-timezone bug MED-1 fixed in AMK) —
-a DoE runtime fix pending a Mac-Mini smoke.
+AMK and DoE now share the same fixed UTC epoch, so duplicated coarse calendar pressure no longer drifts by
+host timezone/DST.
 
 ## Next (SEPARATE plan, NOT now)
 
-**Keying** — making the fields load-bearing: MetaJanus keys the two-body route (reference: Janus's
-`dual_blend`, reinterpreted — nemo12 front / small24 inner body; "a dynamically adapting mixture, not a
-final constant") and a real wormhole (a tunnel ONLY between sentences). A separate, deliberate plan AFTER
-the Janus merge, tests on mini, one atomic tool-verified step at a time — NOT batched with the foundation.
+**Keying and wormholes** — the key already gates D-2's indirect limpha path. Anything stronger (route policy,
+sentence-level wormhole proposals, or a hot splice) stays separate and shadow-first: one atomic
+tool-verified step at a time, never batched with the foundation.
 
 ## Folder files
 

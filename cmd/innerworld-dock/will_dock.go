@@ -336,7 +336,11 @@ func validWillCommittedOutcome(outcome string, effectCount int) bool {
 }
 
 func finiteWillTide(t willTideSnapshot) bool {
-	for _, v := range []float32{t.Threshold, t.Gaze, t.PullOrigin, t.PullPressure, t.OriginTide, t.PressureTide} {
+	for _, v := range []float32{
+		t.Threshold, t.Gaze,
+		t.PullOrigin, t.PullPressure, t.PullCuriosity, t.PullCare, t.PullBoundary,
+		t.OriginTide, t.PressureTide, t.CuriosityTide, t.CareTide, t.BoundaryTide,
+	} {
 		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
 			return false
 		}
@@ -510,8 +514,14 @@ type willEvent struct {
 	Threshold         float32 `json:"will_threshold,omitempty"`
 	PullOrigin        float32 `json:"pull_origin,omitempty"`
 	PullPressure      float32 `json:"pull_pressure,omitempty"`
+	PullCuriosity     float32 `json:"pull_curiosity,omitempty"`
+	PullCare          float32 `json:"pull_care,omitempty"`
+	PullBoundary      float32 `json:"pull_boundary,omitempty"`
 	OriginTide        float32 `json:"will_origin_tide,omitempty"`
 	PressureTide      float32 `json:"will_pressure_tide,omitempty"`
+	CuriosityTide     float32 `json:"will_curiosity_tide,omitempty"`
+	CareTide          float32 `json:"will_care_tide,omitempty"`
+	BoundaryTide      float32 `json:"will_boundary_tide,omitempty"`
 	RootID            string  `json:"root_id,omitempty"`
 	Breath            int     `json:"breath,omitempty"`
 	CadenceMS         int64   `json:"cadence_ms,omitempty"`
@@ -523,9 +533,10 @@ type willEvent struct {
 }
 
 func newWillEventID(rootID string, seq int64, util string, tide willTideSnapshot) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%s|%.6f|%.6f|%.6f|%.6f|%.6f",
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%s|%.6f|%.6f|%.6f|%.6f|%.6f|%.6f|%.6f|%.6f|%.6f|%.6f|%.6f",
 		rootID, seq, util, tide.Gaze, tide.PullOrigin, tide.PullPressure,
-		tide.OriginTide, tide.PressureTide)))
+		tide.PullCuriosity, tide.PullCare, tide.PullBoundary, tide.OriginTide,
+		tide.PressureTide, tide.CuriosityTide, tide.CareTide, tide.BoundaryTide)))
 	return hex.EncodeToString(sum[:8])
 }
 
