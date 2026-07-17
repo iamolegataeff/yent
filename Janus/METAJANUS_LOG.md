@@ -532,3 +532,14 @@ This does not alter will selection, vector tide math, plasticity policy, prompts
 closes a crash/power-loss edge in the delivery ledger Sol was pointing at: a committed consequence should not
 depend on an unflushed directory entry. Tool-verified: `sh tools/build_libamk.sh`, `go test
 ./cmd/innerworld-dock -run 'Will|Sartre' -count=1`, and `git diff --check`.
+
+### fix 12 — refractory is a breath-state, not only RAM
+
+The will's cooldown is now a current durable field (`cooldown_breaths`) in `will-learning.state.json`, separate
+from the receipt field `last_cooldown_breaths`. Startup restores that current countdown, and each refractory
+breath decrements it through the same durable learning-state publish path before the hand can reach again.
+
+This keeps the time-domain decision honest: will time remains breath-counted, but process restart no longer
+erases the refractory just because the counter lived only in Go memory. A no-novelty reach still lengthens the
+cooldown, a committed perception still resets quiet plasticity, and no wall-clock decay or wormhole route is
+introduced. Tool-verified: `go test ./cmd/innerworld-dock -run 'Will|Sartre' -count=1`.

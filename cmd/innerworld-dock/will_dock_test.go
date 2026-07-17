@@ -202,6 +202,7 @@ func TestWillLearningStateRoundTrip(t *testing.T) {
 		LastOutcome:     willOutcomeNoNovelty,
 		LastEffectCount: 0,
 		LastCooldown:    5,
+		CooldownBreaths: 4,
 		LastBreath:      12,
 		LastTide:        &willTideSnapshot{Threshold: 1, Gaze: 1.5, PressureTide: 1.5},
 	}); err != nil {
@@ -213,7 +214,7 @@ func TestWillLearningStateRoundTrip(t *testing.T) {
 	}
 	if st.Version != willLearningStateVersion || st.QuietRuns != 3 ||
 		st.LastReachID != "reach3" || st.LastOutcome != willOutcomeNoNovelty ||
-		st.LastCooldown != 5 || st.LastBreath != 12 || st.LastTide == nil ||
+		st.LastCooldown != 5 || st.CooldownBreaths != 4 || st.LastBreath != 12 || st.LastTide == nil ||
 		st.LastTide.PressureTide != 1.5 {
 		t.Fatalf("wrong learning state after round-trip: %#v", st)
 	}
@@ -226,6 +227,16 @@ func TestWillLearningStateRejectsCorruptQuietRuns(t *testing.T) {
 	}
 	if _, err := loadWillLearningState(path); err == nil {
 		t.Fatal("negative quiet_runs must fail loud instead of resetting the will silently")
+	}
+}
+
+func TestWillLearningStateRejectsCorruptCooldown(t *testing.T) {
+	path := willLearningStatePath(t.TempDir())
+	if err := os.WriteFile(path, []byte(`{"version":1,"quiet_runs":0,"cooldown_breaths":-1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadWillLearningState(path); err == nil {
+		t.Fatal("negative current cooldown must fail loud instead of resetting refractory silently")
 	}
 }
 

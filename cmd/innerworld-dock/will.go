@@ -199,7 +199,11 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("will physics: %w", err)
 	}
 	if w.cooldown > 0 {
-		w.cooldown-- // refractory: the tide keeps evolving, but the will stays spent from the last reach
+		nextCooldown := w.cooldown - 1 // refractory: the tide keeps evolving, but the will stays spent from the last reach
+		if err := w.saveCooldownState(nextCooldown); err != nil {
+			return "", fmt.Errorf("will cooldown state: %w", err)
+		}
+		w.cooldown = nextCooldown
 		return "", nil
 	}
 	tide := readWillTide(w.field)
@@ -401,9 +405,22 @@ func (w *willTicker) saveLearningState(reach willPendingReach, outcome string, e
 		LastOutcome:     outcome,
 		LastEffectCount: effectCount,
 		LastCooldown:    cooldown,
+		CooldownBreaths: cooldown,
 		LastBreath:      reach.Breath,
 		LastTide:        &tide,
 	})
+}
+
+func (w *willTicker) saveCooldownState(cooldown int) error {
+	if w.learningStatePath == "" {
+		return nil
+	}
+	st, err := loadWillLearningState(w.learningStatePath)
+	if err != nil {
+		return err
+	}
+	st.CooldownBreaths = cooldown
+	return saveWillLearningState(w.learningStatePath, st)
 }
 
 func dischargeWillTide(field willField) error {
