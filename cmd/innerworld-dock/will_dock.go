@@ -123,8 +123,15 @@ func preparePendingWillState(statePath, pendingPath string) error {
 const willLearningStateVersion = 1
 
 type willLearningState struct {
-	Version   int `json:"version"`
-	QuietRuns int `json:"quiet_runs"`
+	Version         int               `json:"version"`
+	QuietRuns       int               `json:"quiet_runs"`
+	LastReachID     string            `json:"last_reach_id,omitempty"`
+	LastUtility     string            `json:"last_util,omitempty"`
+	LastOutcome     string            `json:"last_outcome,omitempty"`
+	LastEffectCount int               `json:"last_effect_count,omitempty"`
+	LastCooldown    int               `json:"last_cooldown_breaths,omitempty"`
+	LastBreath      int               `json:"last_breath,omitempty"`
+	LastTide        *willTideSnapshot `json:"last_tide,omitempty"`
 }
 
 func willLearningStatePath(stateDir string) string {
@@ -149,8 +156,8 @@ func loadWillLearningState(path string) (willLearningState, error) {
 	if st.Version != willLearningStateVersion {
 		return st, fmt.Errorf("unsupported learning state version %d", st.Version)
 	}
-	if st.QuietRuns < 0 || st.QuietRuns > willQuietRunMax {
-		return st, fmt.Errorf("invalid quiet_runs %d", st.QuietRuns)
+	if err := validateWillLearningState(st); err != nil {
+		return st, err
 	}
 	return st, nil
 }
@@ -166,6 +173,9 @@ func saveWillLearningState(path string, st willLearningState) error {
 		st.QuietRuns = willQuietRunMax
 	}
 	st.Version = willLearningStateVersion
+	if err := validateWillLearningState(st); err != nil {
+		return err
+	}
 	data, err := json.Marshal(st)
 	if err != nil {
 		return err
@@ -196,6 +206,40 @@ func saveWillLearningState(path string, st willLearningState) error {
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return err
+	}
+	return nil
+}
+
+func validateWillLearningState(st willLearningState) error {
+	if st.QuietRuns < 0 || st.QuietRuns > willQuietRunMax {
+		return fmt.Errorf("invalid quiet_runs %d", st.QuietRuns)
+	}
+	if st.LastOutcome == "" {
+		if st.LastEffectCount != 0 {
+			return fmt.Errorf("learning state has effect_count %d without outcome", st.LastEffectCount)
+		}
+		if st.LastCooldown < 0 {
+			return fmt.Errorf("invalid last cooldown %d", st.LastCooldown)
+		}
+		return nil
+	}
+	if strings.TrimSpace(st.LastReachID) == "" {
+		return fmt.Errorf("learning state has outcome %q without reach id", st.LastOutcome)
+	}
+	if st.LastUtility != willUtilOrigin && st.LastUtility != willUtilPressure {
+		return fmt.Errorf("learning state has unknown utility %q", st.LastUtility)
+	}
+	if !validWillCommittedOutcome(st.LastOutcome, st.LastEffectCount) {
+		return fmt.Errorf("learning state has invalid outcome %q with %d effects", st.LastOutcome, st.LastEffectCount)
+	}
+	if st.LastCooldown < 0 {
+		return fmt.Errorf("invalid last cooldown %d", st.LastCooldown)
+	}
+	if st.LastBreath < 0 {
+		return fmt.Errorf("invalid last breath %d", st.LastBreath)
+	}
+	if st.LastTide != nil && !finiteWillTide(*st.LastTide) {
+		return fmt.Errorf("learning state has non-finite last tide")
 	}
 	return nil
 }

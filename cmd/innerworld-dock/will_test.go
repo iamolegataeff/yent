@@ -544,6 +544,11 @@ func TestWillTickPersistsQuietLearningState(t *testing.T) {
 	if st.QuietRuns != 1 {
 		t.Fatalf("no-novelty must persist the quiet streak, got %#v", st)
 	}
+	if st.LastReachID == "" || st.LastUtility != willUtilPressure || st.LastOutcome != willOutcomeNoNovelty ||
+		st.LastEffectCount != 0 || st.LastCooldown != 3 || st.LastTide == nil ||
+		st.LastTide.PressureTide != 1.5 {
+		t.Fatalf("no-novelty must persist a typed consequence receipt, got %#v", st)
+	}
 
 	sp2 := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"modified","path":"README.md"}`)}
 	sk2 := &typedFakeSink{}
@@ -565,6 +570,11 @@ func TestWillTickPersistsQuietLearningState(t *testing.T) {
 	}
 	if st.QuietRuns != 0 {
 		t.Fatalf("committed perception must persist quiet reset, got %#v", st)
+	}
+	if st.LastOutcome != willOutcomePerceptionCommitted || st.LastEffectCount != 1 ||
+		st.LastCooldown != 2 || st.LastUtility != willUtilPressure || st.LastTide == nil ||
+		st.LastTide.PressureTide != 1.5 {
+		t.Fatalf("committed perception must persist the typed consequence receipt, got %#v", st)
 	}
 }
 

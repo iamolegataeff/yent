@@ -750,6 +750,16 @@ The important safety point: if a future dormant channel gets nonzero state befor
 dock fails closed and does not call it pressure. This keeps Sol's vector-tide direction without smuggling in a
 new speech route or wormhole.
 
+## 2026-07-17 — Will learning state records consequence, not only count
+
+`will-learning.state.json` now keeps the typed cause of the last plasticity update: reach id, utility, outcome,
+effect count, cooldown, breath, and the vector tide. `quiet_runs` remains the operational knob, but it is no
+longer an unexplained scalar. A no-novelty cooldown and a perception-committed reset are both replayable from
+the saved consequence receipt.
+
+This is still host-side and model-external. It does not modify generation, weights, prompts, or wormholes; it
+only makes the existing refractory learning accountable.
+
 ---
 
 ## Deferred / parked
