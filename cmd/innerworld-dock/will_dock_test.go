@@ -195,14 +195,26 @@ func TestWillLearningStateRoundTrip(t *testing.T) {
 	if st, err := loadWillLearningState(path); err != nil || st.QuietRuns != 0 {
 		t.Fatalf("missing learning state should load as zero state, st=%#v err=%v", st, err)
 	}
-	if err := saveWillLearningState(path, willLearningState{QuietRuns: 3}); err != nil {
+	if err := saveWillLearningState(path, willLearningState{
+		QuietRuns:       3,
+		LastReachID:     "reach3",
+		LastUtility:     willUtilPressure,
+		LastOutcome:     willOutcomeNoNovelty,
+		LastEffectCount: 0,
+		LastCooldown:    5,
+		LastBreath:      12,
+		LastTide:        &willTideSnapshot{Threshold: 1, Gaze: 1.5, PressureTide: 1.5},
+	}); err != nil {
 		t.Fatalf("save learning state: %v", err)
 	}
 	st, err := loadWillLearningState(path)
 	if err != nil {
 		t.Fatalf("load learning state: %v", err)
 	}
-	if st.Version != willLearningStateVersion || st.QuietRuns != 3 {
+	if st.Version != willLearningStateVersion || st.QuietRuns != 3 ||
+		st.LastReachID != "reach3" || st.LastOutcome != willOutcomeNoNovelty ||
+		st.LastCooldown != 5 || st.LastBreath != 12 || st.LastTide == nil ||
+		st.LastTide.PressureTide != 1.5 {
 		t.Fatalf("wrong learning state after round-trip: %#v", st)
 	}
 }
@@ -214,6 +226,16 @@ func TestWillLearningStateRejectsCorruptQuietRuns(t *testing.T) {
 	}
 	if _, err := loadWillLearningState(path); err == nil {
 		t.Fatal("negative quiet_runs must fail loud instead of resetting the will silently")
+	}
+}
+
+func TestWillLearningStateRejectsInvalidConsequence(t *testing.T) {
+	path := willLearningStatePath(t.TempDir())
+	if err := os.WriteFile(path, []byte(`{"version":1,"quiet_runs":0,"last_reach_id":"x","last_util":"repo_monitor","last_outcome":"perception_committed","last_effect_count":0}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadWillLearningState(path); err == nil {
+		t.Fatal("learning state must reject impossible typed consequences")
 	}
 }
 

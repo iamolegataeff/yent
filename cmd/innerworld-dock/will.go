@@ -279,7 +279,7 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 		}
 	}
 	nextQuiet, nextCooldown := w.plannedLearningState(outcome)
-	if err := w.saveLearningState(nextQuiet); err != nil {
+	if err := w.saveLearningState(reach, outcome, effectCount, nextQuiet, nextCooldown); err != nil {
 		return util, fmt.Errorf("will learn %s state: %w", util, err)
 	}
 	if err := dischargeWillTide(w.field); err != nil {
@@ -389,11 +389,21 @@ func (w *willTicker) plannedLearningState(outcome string) (quietRuns, cooldown i
 	}
 }
 
-func (w *willTicker) saveLearningState(quietRuns int) error {
+func (w *willTicker) saveLearningState(reach willPendingReach, outcome string, effectCount, quietRuns, cooldown int) error {
 	if w.learningStatePath == "" {
 		return nil
 	}
-	return saveWillLearningState(w.learningStatePath, willLearningState{QuietRuns: quietRuns})
+	tide := reach.Tide
+	return saveWillLearningState(w.learningStatePath, willLearningState{
+		QuietRuns:       quietRuns,
+		LastReachID:     reach.ID,
+		LastUtility:     reach.Utility,
+		LastOutcome:     outcome,
+		LastEffectCount: effectCount,
+		LastCooldown:    cooldown,
+		LastBreath:      reach.Breath,
+		LastTide:        &tide,
+	})
 }
 
 func dischargeWillTide(field willField) error {

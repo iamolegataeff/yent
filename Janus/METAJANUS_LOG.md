@@ -506,3 +506,15 @@ receipt. A dormant channel that somehow dominates before a mapped action exists 
 falling through to `repo_monitor` and impersonating pressure. This is not a wormhole and not a speech splice;
 it is durable shape for later plasticity. Tool-verified: `go test ./cmd/innerworld-dock -run Will -count=1`,
 `go test ./innerworld/aml -run Will -count=1`, and `git diff --check`.
+
+### fix 10 — learning state remembers typed consequence, not only quiet count
+
+The will's host-side plasticity file no longer stores a bare `quiet_runs` integer by itself. It now also
+receipts the last committed consequence: reach id, utility, outcome, effect count, cooldown, breath, and the
+vector tide that caused the action. Existing behavior is unchanged — no-novelty still lengthens refractory and
+committed perception still resets the quiet streak — but the durable state now says why that plasticity changed.
+
+Invalid consequence combinations fail loud on load/save (`perception_committed` with zero effects, unknown
+utility, missing reach id, non-finite tide). This keeps the next plasticity layer replayable without touching
+weights, prompts, or wormholes. Tool-verified: `go test ./cmd/innerworld-dock -run Will -count=1` and
+`git diff --check`.
