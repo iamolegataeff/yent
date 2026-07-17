@@ -56,9 +56,11 @@ type fakeSpawner struct {
 	err       error
 	commitErr error
 	committed bool
+	calls     int
 }
 
 func (s *fakeSpawner) Spawn(_ context.Context, util string) (willSpawnResult, error) {
+	s.calls++
 	s.util = util
 	if s.err != nil {
 		return willSpawnResult{}, s.err
@@ -634,6 +636,87 @@ func TestWillTickLearningReceiptErrorKeepsPendingReach(t *testing.T) {
 	}
 	if st.Pending == nil || st.Pending.ID != sk.events[0].ID || st.NextSeq != 1 {
 		t.Fatalf("failed learning receipt must keep the reach pending for retry, got %#v", st)
+	}
+}
+
+func TestWillTickRetryKeepsCommittedConsequenceAfterReceiptFailure(t *testing.T) {
+	stateDir := t.TempDir()
+	reachPath := willReachStatePath(stateDir)
+	learningPath := willLearningStatePath(stateDir)
+	sp := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"modified","path":"README.md"}`)}
+	sk := &typedFakeSink{failPhase: "learning", phaseErr: errors.New("sink down")}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp, &sk.fakeSink)
+	w.sink = sk
+	w.rootID = "rootabc"
+	w.reachStatePath = reachPath
+	w.learningStatePath = learningPath
+
+	util, err := w.tick(context.Background())
+	if err == nil {
+		t.Fatal("the first tick should fail at the final learning receipt")
+	}
+	if util != willUtilPressure {
+		t.Fatalf("got util %q", util)
+	}
+	if sp.calls != 1 || !sp.committed || !f.discharged {
+		t.Fatalf("first reach must emit, commit, and spend once before receipt failure, calls=%d committed=%v discharged=%v",
+			sp.calls, sp.committed, f.discharged)
+	}
+	if len(sk.events) != 2 || sk.events[0].Phase != "intention" || sk.events[1].Phase != "act" {
+		t.Fatalf("failed final receipt should leave only intention/act delivered, got %#v", sk.events)
+	}
+	reachID := sk.events[0].ID
+	st, err := loadWillReachState(reachPath)
+	if err != nil {
+		t.Fatalf("load pending reach: %v", err)
+	}
+	if st.Pending == nil || !st.Pending.ConsequenceCommitted || st.Pending.Outcome != willOutcomePerceptionCommitted ||
+		st.Pending.EffectCount != 1 || st.Pending.ID != reachID {
+		t.Fatalf("pending reach must remember the committed consequence for restart retry, got %#v", st.Pending)
+	}
+
+	sp2 := &fakeSpawner{}
+	sk2 := &typedFakeSink{}
+	w2, f2 := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 0, "pull_origin": 0.0, "pull_pressure": 0.0,
+	}, sp2, &sk2.fakeSink)
+	w2.sink = sk2
+	w2.rootID = "rootabc"
+	w2.reachStatePath = reachPath
+	w2.learningStatePath = learningPath
+	w2.pendingReach = st.Pending
+	w2.nextReachSeq = st.NextSeq
+
+	util, err = w2.tick(context.Background())
+	if err != nil {
+		t.Fatalf("retry should finalize the committed consequence without respawning: %v", err)
+	}
+	if util != willUtilPressure {
+		t.Fatalf("retry util changed, got %q", util)
+	}
+	if sp2.calls != 0 {
+		t.Fatalf("retry after committed consequence must not respawn the utility, calls=%d", sp2.calls)
+	}
+	if !f2.discharged {
+		t.Fatal("retry must still leave the tide spent before the success receipt")
+	}
+	if len(sk2.events) != 1 {
+		t.Fatalf("retry should emit only the missing learning receipt, got %#v", sk2.events)
+	}
+	learn := sk2.events[0]
+	if learn.ID != reachID || learn.Phase != "learning" || learn.Outcome != willOutcomePerceptionCommitted ||
+		learn.EffectCount != 1 {
+		t.Fatalf("retry must preserve the original consequence, got %#v", learn)
+	}
+	st, err = loadWillReachState(reachPath)
+	if err != nil {
+		t.Fatalf("reload reach state: %v", err)
+	}
+	if st.Pending != nil || st.NextSeq != 2 {
+		t.Fatalf("finalized retry must clear pending reach and advance sequence, got %#v", st)
 	}
 }
 
