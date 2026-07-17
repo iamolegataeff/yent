@@ -136,6 +136,7 @@ type willLearningState struct {
 	LastEffectCount int               `json:"last_effect_count,omitempty"`
 	LastCooldown    int               `json:"last_cooldown_breaths,omitempty"`
 	CooldownBreaths int               `json:"cooldown_breaths,omitempty"`
+	CurrentBreath   int               `json:"current_breath,omitempty"`
 	LastBreath      int               `json:"last_breath,omitempty"`
 	LastTide        *willTideSnapshot `json:"last_tide,omitempty"`
 }
@@ -181,6 +182,9 @@ func saveWillLearningState(path string, st willLearningState) error {
 	if st.CooldownBreaths < 0 {
 		st.CooldownBreaths = 0
 	}
+	if st.CurrentBreath < 0 {
+		st.CurrentBreath = 0
+	}
 	st.Version = willLearningStateVersion
 	if err := validateWillLearningState(st); err != nil {
 		return err
@@ -221,6 +225,9 @@ func validateWillLearningState(st willLearningState) error {
 	}
 	if st.CooldownBreaths < 0 {
 		return fmt.Errorf("invalid current cooldown %d", st.CooldownBreaths)
+	}
+	if st.CurrentBreath < 0 {
+		return fmt.Errorf("invalid current breath %d", st.CurrentBreath)
 	}
 	if st.LastOutcome == "" {
 		if st.LastEffectCount != 0 {
@@ -359,6 +366,9 @@ func validateWillReachState(st willReachState) error {
 	}
 	if p.EffectCount < 0 {
 		return fmt.Errorf("pending reach has negative effect count %d", p.EffectCount)
+	}
+	if p.Breath < 0 {
+		return fmt.Errorf("pending reach has negative breath %d", p.Breath)
 	}
 	if p.ConsequenceCommitted {
 		if !validWillCommittedOutcome(p.Outcome, p.EffectCount) {

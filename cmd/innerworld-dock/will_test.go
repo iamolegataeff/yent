@@ -618,6 +618,31 @@ func TestWillTickPersistsCooldownCountdown(t *testing.T) {
 	if st.CooldownBreaths != 2 || st.LastCooldown != 3 || st.LastReachID != "reach-cooldown" || st.LastOutcome != willOutcomeNoNovelty {
 		t.Fatalf("cooldown tick must persist only current refractory countdown, got %#v", st)
 	}
+	if st.CurrentBreath != 1 {
+		t.Fatalf("cooldown tick must persist the current breath cursor, got %#v", st)
+	}
+}
+
+func TestInitialWillBreathRestoresDurableCursor(t *testing.T) {
+	reach := willReachState{
+		Version: willReachStateVersion,
+		NextSeq: 9,
+		Pending: &willPendingReach{
+			Seq:     9,
+			ID:      "reach9",
+			Utility: willUtilPressure,
+			Tide:    willTideSnapshot{Threshold: 1, Gaze: 1.2, PressureTide: 1.2},
+			Breath:  44,
+		},
+	}
+	got := initialWillBreath(willLearningState{CurrentBreath: 40, LastBreath: 41}, reach)
+	if got != 44 {
+		t.Fatalf("pending reach breath must seed restart cursor, got %d", got)
+	}
+	got = initialWillBreath(willLearningState{CurrentBreath: 45, LastBreath: 41}, reach)
+	if got != 45 {
+		t.Fatalf("current breath must seed restart cursor when newer than pending, got %d", got)
+	}
 }
 
 func TestWillTickLearningStateErrorDoesNotDischarge(t *testing.T) {
@@ -736,6 +761,7 @@ func TestWillTickRetryKeepsCommittedConsequenceAfterReceiptFailure(t *testing.T)
 	w.rootID = "rootabc"
 	w.reachStatePath = reachPath
 	w.learningStatePath = learningPath
+	w.breath = 41
 
 	util, err := w.tick(context.Background())
 	if err == nil {
@@ -752,6 +778,10 @@ func TestWillTickRetryKeepsCommittedConsequenceAfterReceiptFailure(t *testing.T)
 		t.Fatalf("failed final receipt should leave only intention/act delivered, got %#v", sk.events)
 	}
 	reachID := sk.events[0].ID
+	reachBreath := sk.events[0].Breath
+	if reachBreath != 42 || sk.events[1].Breath != reachBreath {
+		t.Fatalf("first reach must receipt one durable breath, got intention=%d act=%d", reachBreath, sk.events[1].Breath)
+	}
 	st, err := loadWillReachState(reachPath)
 	if err != nil {
 		t.Fatalf("load pending reach: %v", err)
@@ -793,6 +823,9 @@ func TestWillTickRetryKeepsCommittedConsequenceAfterReceiptFailure(t *testing.T)
 	if learn.ID != reachID || learn.Phase != "learning" || learn.Outcome != willOutcomePerceptionCommitted ||
 		learn.EffectCount != 1 {
 		t.Fatalf("retry must preserve the original consequence, got %#v", learn)
+	}
+	if learn.Breath != reachBreath {
+		t.Fatalf("retry must preserve the original reach breath, got %d want %d", learn.Breath, reachBreath)
 	}
 	st, err = loadWillReachState(reachPath)
 	if err != nil {
