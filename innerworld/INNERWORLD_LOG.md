@@ -809,6 +809,16 @@ tide without letting a fresh field breath reaccumulate state under it.
 This is still outside generation and outside wormholes. It only preserves event ordering in the host-side
 will ledger.
 
+## 2026-07-17 — Will learning state follows successful tide discharge
+
+The dock now publishes `will-learning.state.json` only after the AML discharge transaction succeeds. A learning
+receipt is therefore tied to both the committed utility consequence and the spent vector tide. If discharge
+fails, the reach stays pending and no durable learning state is advanced; if learning-state publication fails
+after discharge, the committed pending reach remains available for retry.
+
+This tightens the ledger order without changing will selection, vector tide math, prompts, model weights, or
+wormholes.
+
 ---
 
 ## Deferred / parked
