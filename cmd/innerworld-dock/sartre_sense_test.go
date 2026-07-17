@@ -199,6 +199,39 @@ func TestSartreSensePressureAckFollowsConsumer(t *testing.T) {
 	}
 }
 
+func TestSartreSenseRetriesPendingPressureBeforeAck(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	cursor := filepath.Join(dir, "cursor.json")
+	line := `{"id":"reach-retry","root_id":"root-retry","phase":"effect","util":"repo_monitor","kind":"modified","path":"README.md"}`
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lc, err := yent.NewLimphaClientAt(filepath.Join(dir, "limpha.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lc.Close()
+	s := &sartreSense{eventsPath: path, cursorPath: cursor, limpha: lc}
+	aml, ok := s.Pressure()
+	if !ok || !strings.Contains(aml, "PROPHECY") {
+		t.Fatalf("active field pressure expected, got ok=%v aml=%q", ok, aml)
+	}
+	retry, ok := s.Pressure()
+	if !ok || retry != aml {
+		t.Fatalf("unacked pressure must retry the staged AML before limpha dedupe, got ok=%v aml=%q want %q", ok, retry, aml)
+	}
+	if _, err := os.Stat(cursor); !os.IsNotExist(err) {
+		t.Fatalf("cursor must stay unacknowledged until field consumer ack, stat err=%v", err)
+	}
+	if err := s.AckPressure(); err != nil {
+		t.Fatal(err)
+	}
+	if aml, ok := (&sartreSense{eventsPath: path, cursorPath: cursor, limpha: lc}).Pressure(); ok || aml != "" {
+		t.Fatalf("acked pressure must not replay after restart, got ok=%v aml=%q", ok, aml)
+	}
+}
+
 func TestSartreSensePersistentCursorDoesNotAckPartialAcrossRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	cursor := filepath.Join(t.TempDir(), "cursor.json")
