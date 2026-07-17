@@ -605,9 +605,12 @@ static const int g_metonic_leaps[7] = {3, 6, 8, 11, 14, 17, 19};
 static time_t g_epoch_t = 0;
 
 static void calendar_init(void) {
-    struct tm ep = {0};
-    ep.tm_year = 2024 - 1900; ep.tm_mon = 9; ep.tm_mday = 3; ep.tm_hour = 12;
-    g_epoch_t = mktime(&ep);
+    /*
+     * Match AMK's clock domain: 2024-10-03 12:00:00 UTC.
+     * mktime() interpreted this as local civil time, so DST/timezone differences
+     * could make DoE disagree with the innerworld kernel near a day boundary.
+     */
+    g_epoch_t = (time_t)1727956800L;
 }
 
 static float calendar_dissonance(void) {

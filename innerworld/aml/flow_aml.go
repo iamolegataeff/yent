@@ -235,9 +235,8 @@ func (b *Body) AutumnEnergy() float32 {
 	return float32(C.am_get_state().autumn_energy)
 }
 
-// TemporalAlpha reports the MetaJanus temporal_alpha in [0,1] — the past<->future focus the
-// janus_gap sign EMA-pulls when JANUS_KEY is armed (0.5 when unarmed). D-2 reads it to lean the
-// seed harvest between resurfacing scars (past) and new cooc associations (future). Read-only.
+// TemporalAlpha reports the generic temporal_alpha in [0,1] for legacy TEMPORAL_* directives.
+// D-2 no longer reads this value; it reads JanusTemporalAlpha below only while JANUS_KEY is armed.
 func (b *Body) TemporalAlpha() float32 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
