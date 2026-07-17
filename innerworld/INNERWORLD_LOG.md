@@ -800,6 +800,15 @@ published.
 
 This closes a replay edge where the will could wait out its refractory before proving the action that caused it.
 
+## 2026-07-17 — Pending reach retry does not advance AML physics first
+
+A pending reach is now handled before the dock increments the will breath or executes the AML script. That
+keeps an unfinished reach as old cause: retry can publish the missing learning receipt and discharge the stored
+tide without letting a fresh field breath reaccumulate state under it.
+
+This is still outside generation and outside wormholes. It only preserves event ordering in the host-side
+will ledger.
+
 ---
 
 ## Deferred / parked

@@ -900,6 +900,9 @@ func TestWillTickPendingReachBypassesRestoredCooldown(t *testing.T) {
 	if util != willUtilPressure {
 		t.Fatalf("retry util changed, got %q", util)
 	}
+	if f.execFileN != 0 {
+		t.Fatalf("committed pending retry must finish before a new physics breath, execFileN=%d", f.execFileN)
+	}
 	if sp.calls != 0 {
 		t.Fatalf("committed pending consequence must not respawn the utility, calls=%d", sp.calls)
 	}
