@@ -377,6 +377,16 @@ func TestTagSartreEffectLines(t *testing.T) {
 	}
 }
 
+func TestTagSartreEffectLinesRejectsIncompleteEvents(t *testing.T) {
+	raw := []byte(`{"util":"repo_monitor"}` + "\n" +
+		`{"kind":"modified","path":"a.md"}` + "\n" +
+		`{"util":"unknown","kind":"modified","path":"a.md"}`)
+	got := string(tagSartreEffectLines(raw, "reach1", "rootabc"))
+	if got != "" {
+		t.Fatalf("incomplete utility records must not become SARTRE effects: %q", got)
+	}
+}
+
 func TestFileSinkEmitEvent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	if err := (fileSink{path: path}).EmitEvent(willEvent{

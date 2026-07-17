@@ -608,3 +608,15 @@ as if the sensor had honestly found nothing.
 The error path emits a typed `learning/sensor_error` receipt with captured bytes, leaves the reach pending, and
 does not publish effect records, commit utility state, or spend the AML tide. Empty stdout remains the honest
 `no_novelty` case.
+
+### fix 19 — utility JSON must be an actionable SARTRE effect
+
+The will host no longer treats every syntactically valid JSON object from a utility as a field effect. A
+`repo_monitor` effect must carry a real change kind plus path, and a `whatdotheythinkiam` effect must carry
+recognized/reduced identity evidence or a real change record. Empty stdout still means honest `no_novelty`;
+non-empty stdout that only contains JSON shells now becomes `learning/sensor_error`.
+
+This closes the semantic mirror of fix 18: a utility can no longer advance its baseline, discharge the vector
+tide, and publish `perception_committed` by emitting `{"util":"repo_monitor"}` or another complete but
+non-actionable object. The regression verifies that incomplete SARTRE objects emit no effect records, commit no
+utility state, and spend no tide.
