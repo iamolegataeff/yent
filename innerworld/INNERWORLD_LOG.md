@@ -790,6 +790,16 @@ learning/reach state, and cooldown ticks advance `current_breath` while they dec
 This keeps the will ledger's time domain internally replayable without changing the field physics, prompts,
 weights, or future wormhole boundary.
 
+## 2026-07-17 — Pending reach completion is not blocked by restored cooldown
+
+When a process restarts after the consequence is durable but before the final learning receipt is emitted, the
+state can contain both a pending reach and a nonzero `cooldown_breaths`. The pending reach is older than the
+cooldown; it is the unfinished proof of the action that created that cooldown. The tick loop now lets pending
+reach completion bypass refractory countdown, then restores the planned cooldown after the missing receipt is
+published.
+
+This closes a replay edge where the will could wait out its refractory before proving the action that caused it.
+
 ---
 
 ## Deferred / parked

@@ -836,6 +836,94 @@ func TestWillTickRetryKeepsCommittedConsequenceAfterReceiptFailure(t *testing.T)
 	}
 }
 
+func TestWillTickPendingReachBypassesRestoredCooldown(t *testing.T) {
+	stateDir := t.TempDir()
+	reachPath := willReachStatePath(stateDir)
+	learningPath := willLearningStatePath(stateDir)
+	pending := &willPendingReach{
+		Seq:                  7,
+		ID:                   "reach7",
+		Utility:              willUtilPressure,
+		Tide:                 willTideSnapshot{Threshold: 1, Gaze: 1.6, PressureTide: 1.6},
+		Breath:               33,
+		ConsequenceCommitted: true,
+		Outcome:              willOutcomePerceptionCommitted,
+		EffectCount:          1,
+	}
+	if err := saveWillReachState(reachPath, willReachState{
+		NextSeq: 7,
+		Pending: pending,
+	}); err != nil {
+		t.Fatalf("seed pending reach: %v", err)
+	}
+	if err := saveWillLearningState(learningPath, willLearningState{
+		QuietRuns:       0,
+		LastReachID:     pending.ID,
+		LastUtility:     pending.Utility,
+		LastOutcome:     pending.Outcome,
+		LastEffectCount: pending.EffectCount,
+		LastCooldown:    4,
+		CooldownBreaths: 4,
+		CurrentBreath:   33,
+		LastBreath:      33,
+		LastTide:        &pending.Tide,
+	}); err != nil {
+		t.Fatalf("seed learning state: %v", err)
+	}
+	learning, err := loadWillLearningState(learningPath)
+	if err != nil {
+		t.Fatalf("load learning state: %v", err)
+	}
+	reach, err := loadWillReachState(reachPath)
+	if err != nil {
+		t.Fatalf("load reach state: %v", err)
+	}
+	sp := &fakeSpawner{}
+	sk := &typedFakeSink{}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 0,
+	}, sp, &sk.fakeSink)
+	w.sink = sk
+	w.rootID = "rootabc"
+	w.reachStatePath = reachPath
+	w.learningStatePath = learningPath
+	w.refractory = 4
+	w.pendingReach = reach.Pending
+	w.nextReachSeq = reach.NextSeq
+	w.cooldown = learning.CooldownBreaths
+	w.breath = initialWillBreath(learning, reach)
+
+	util, err := w.tick(context.Background())
+	if err != nil {
+		t.Fatalf("pending retry should finalize before restored cooldown: %v", err)
+	}
+	if util != willUtilPressure {
+		t.Fatalf("retry util changed, got %q", util)
+	}
+	if sp.calls != 0 {
+		t.Fatalf("committed pending consequence must not respawn the utility, calls=%d", sp.calls)
+	}
+	if !f.discharged {
+		t.Fatal("pending retry must still discharge the stored tide")
+	}
+	if w.cooldown != 4 {
+		t.Fatalf("finalized retry must restore the planned cooldown, got %d", w.cooldown)
+	}
+	if len(sk.events) != 1 {
+		t.Fatalf("retry should emit the missing learning receipt immediately, got %#v", sk.events)
+	}
+	if sk.events[0].Phase != "learning" || sk.events[0].ID != pending.ID || sk.events[0].Breath != pending.Breath {
+		t.Fatalf("wrong pending learning receipt: %#v", sk.events[0])
+	}
+	st, err := loadWillReachState(reachPath)
+	if err != nil {
+		t.Fatalf("reload reach state: %v", err)
+	}
+	if st.Pending != nil || st.NextSeq != 8 {
+		t.Fatalf("finalized pending retry must clear reach state, got %#v", st)
+	}
+}
+
 func TestWillTickOverflowDoesNotCommitOrDischarge(t *testing.T) {
 	sp := &fakeSpawner{
 		line:     []byte(`{"util":"repo_monitor","kind":"added","path":"a.md"}`),
