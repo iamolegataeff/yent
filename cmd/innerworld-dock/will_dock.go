@@ -135,6 +135,7 @@ type willLearningState struct {
 	LastOutcome     string            `json:"last_outcome,omitempty"`
 	LastEffectCount int               `json:"last_effect_count,omitempty"`
 	LastCooldown    int               `json:"last_cooldown_breaths,omitempty"`
+	CooldownBreaths int               `json:"cooldown_breaths,omitempty"`
 	LastBreath      int               `json:"last_breath,omitempty"`
 	LastTide        *willTideSnapshot `json:"last_tide,omitempty"`
 }
@@ -177,6 +178,9 @@ func saveWillLearningState(path string, st willLearningState) error {
 	if st.QuietRuns > willQuietRunMax {
 		st.QuietRuns = willQuietRunMax
 	}
+	if st.CooldownBreaths < 0 {
+		st.CooldownBreaths = 0
+	}
 	st.Version = willLearningStateVersion
 	if err := validateWillLearningState(st); err != nil {
 		return err
@@ -214,6 +218,9 @@ func saveWillLearningState(path string, st willLearningState) error {
 func validateWillLearningState(st willLearningState) error {
 	if st.QuietRuns < 0 || st.QuietRuns > willQuietRunMax {
 		return fmt.Errorf("invalid quiet_runs %d", st.QuietRuns)
+	}
+	if st.CooldownBreaths < 0 {
+		return fmt.Errorf("invalid current cooldown %d", st.CooldownBreaths)
 	}
 	if st.LastOutcome == "" {
 		if st.LastEffectCount != 0 {

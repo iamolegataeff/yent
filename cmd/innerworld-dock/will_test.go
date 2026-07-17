@@ -545,7 +545,7 @@ func TestWillTickPersistsQuietLearningState(t *testing.T) {
 		t.Fatalf("no-novelty must persist the quiet streak, got %#v", st)
 	}
 	if st.LastReachID == "" || st.LastUtility != willUtilPressure || st.LastOutcome != willOutcomeNoNovelty ||
-		st.LastEffectCount != 0 || st.LastCooldown != 3 || st.LastTide == nil ||
+		st.LastEffectCount != 0 || st.LastCooldown != 3 || st.CooldownBreaths != 3 || st.LastTide == nil ||
 		st.LastTide.PressureTide != 1.5 {
 		t.Fatalf("no-novelty must persist a typed consequence receipt, got %#v", st)
 	}
@@ -572,9 +572,51 @@ func TestWillTickPersistsQuietLearningState(t *testing.T) {
 		t.Fatalf("committed perception must persist quiet reset, got %#v", st)
 	}
 	if st.LastOutcome != willOutcomePerceptionCommitted || st.LastEffectCount != 1 ||
-		st.LastCooldown != 2 || st.LastUtility != willUtilPressure || st.LastTide == nil ||
+		st.LastCooldown != 2 || st.CooldownBreaths != 2 || st.LastUtility != willUtilPressure || st.LastTide == nil ||
 		st.LastTide.PressureTide != 1.5 {
 		t.Fatalf("committed perception must persist the typed consequence receipt, got %#v", st)
+	}
+}
+
+func TestWillTickPersistsCooldownCountdown(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state", "will-learning.state.json")
+	if err := saveWillLearningState(path, willLearningState{
+		QuietRuns:       2,
+		LastReachID:     "reach-cooldown",
+		LastUtility:     willUtilPressure,
+		LastOutcome:     willOutcomeNoNovelty,
+		LastEffectCount: 0,
+		LastCooldown:    3,
+		CooldownBreaths: 3,
+		LastBreath:      7,
+		LastTide:        &willTideSnapshot{Threshold: 1, Gaze: 1.3, PressureTide: 1.3},
+	}); err != nil {
+		t.Fatalf("seed learning state: %v", err)
+	}
+	sp, sk := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"modified","path":"README.md"}`)}, &fakeSink{}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 5.0, "pull_origin": 0.0, "pull_pressure": 1.0,
+		"will_pressure_tide": 5.0,
+	}, sp, sk)
+	w.learningStatePath = path
+	w.cooldown = 3
+
+	util, err := w.tick(context.Background())
+	if err != nil {
+		t.Fatalf("cooldown tick: %v", err)
+	}
+	if util != "" || sp.calls != 0 || f.discharged {
+		t.Fatalf("cooldown breath must not reach or discharge, util=%q calls=%d discharged=%v", util, sp.calls, f.discharged)
+	}
+	if w.cooldown != 2 {
+		t.Fatalf("in-memory cooldown should decrement to 2, got %d", w.cooldown)
+	}
+	st, err := loadWillLearningState(path)
+	if err != nil {
+		t.Fatalf("load learning state: %v", err)
+	}
+	if st.CooldownBreaths != 2 || st.LastCooldown != 3 || st.LastReachID != "reach-cooldown" || st.LastOutcome != willOutcomeNoNovelty {
+		t.Fatalf("cooldown tick must persist only current refractory countdown, got %#v", st)
 	}
 }
 

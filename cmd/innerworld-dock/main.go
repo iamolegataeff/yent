@@ -1153,6 +1153,7 @@ func main() {
 							learningStatePath: learningPath,
 							reachStatePath:    reachPath,
 							refractory:        willRefractoryTicks(),
+							cooldown:          learningState.CooldownBreaths,
 							quietRuns:         learningState.QuietRuns,
 							nextReachSeq:      reachState.NextSeq,
 							pendingReach:      reachState.Pending,
@@ -1162,8 +1163,8 @@ func main() {
 						if reachState.Pending != nil {
 							pending = fmt.Sprintf(", pending_reach=%s", reachState.Pending.ID)
 						}
-						fmt.Printf("=== will wired: confluence tide -> reach for a self-reading utility (utils=%s, root=%s, root_id=%s, state=%s, quiet_runs=%d, reach_seq=%d%s, every %s) ===\n",
-							utilsDir, root, rootID, stateDir, learningState.QuietRuns, reachState.NextSeq, pending, willTickEvery())
+						fmt.Printf("=== will wired: confluence tide -> reach for a self-reading utility (utils=%s, root=%s, root_id=%s, state=%s, quiet_runs=%d, cooldown=%d, reach_seq=%d%s, every %s) ===\n",
+							utilsDir, root, rootID, stateDir, learningState.QuietRuns, learningState.CooldownBreaths, reachState.NextSeq, pending, willTickEvery())
 						if sinkPath == "" {
 							fmt.Println("    (YENT_SARTRE_EVENTS unset: the will reaches and reads, but the spiral cannot close)")
 						}

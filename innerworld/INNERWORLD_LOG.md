@@ -771,6 +771,15 @@ The intent is narrow: if an effect was appended and the will records a committed
 not lose the state publication because only the directory entry was still volatile. No generation path changes;
 this is durability for the existing typed consequence loop.
 
+## 2026-07-17 — Will refractory survives restart as breath-state
+
+`will-learning.state.json` now carries `cooldown_breaths` as the current refractory countdown. The older
+`last_cooldown_breaths` remains a receipt of the last learning decision; the new field is the live countdown
+that startup restores and each cooldown breath durably decrements.
+
+The will is still breath-counted, not wall-clock counted. This change only prevents a process restart from
+silently clearing the refractory and letting a just-spent hand immediately reach again under the same crest.
+
 ---
 
 ## Deferred / parked
