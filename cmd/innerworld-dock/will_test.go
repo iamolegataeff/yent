@@ -103,7 +103,7 @@ func newWill(vars map[string]float32, sp *fakeSpawner, sk *fakeSink) (*willTicke
 }
 
 func TestWillTickReachesOnOriginCrest(t *testing.T) {
-	sp, sk := &fakeSpawner{line: []byte(`{"util":"whatdotheythinkiam"}`)}, &fakeSink{}
+	sp, sk := &fakeSpawner{line: []byte(`{"util":"whatdotheythinkiam","recognized":1}`)}, &fakeSink{}
 	w, f := newWill(map[string]float32{
 		"will_threshold": 1.0, "will_gaze": 1.5,
 		"pull_origin": 0.25, "pull_pressure": 0.0, "will_origin_tide": 1.5,
@@ -141,7 +141,7 @@ func TestWillTickReachesOnOriginCrest(t *testing.T) {
 }
 
 func TestWillTickReachesOnPressureCrest(t *testing.T) {
-	sp, sk := &fakeSpawner{line: []byte(`{"util":"repo_monitor"}`)}, &fakeSink{}
+	sp, sk := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"modified","path":"README.md"}`)}, &fakeSink{}
 	w, _ := newWill(map[string]float32{
 		"will_threshold": 1.0, "will_gaze": 1.6,
 		"pull_origin": 0.0, "pull_pressure": 0.27, "will_pressure_tide": 1.6,
@@ -156,7 +156,7 @@ func TestWillTickReachesOnPressureCrest(t *testing.T) {
 }
 
 func TestWillTickUsesAccumulatedVectorOverCurrentPull(t *testing.T) {
-	sp, sk := &fakeSpawner{line: []byte(`{"util":"whatdotheythinkiam"}`)}, &fakeSink{}
+	sp, sk := &fakeSpawner{line: []byte(`{"util":"whatdotheythinkiam","recognized":1}`)}, &fakeSink{}
 	w, _ := newWill(map[string]float32{
 		"will_threshold": 1.0, "will_gaze": 1.4,
 		"pull_origin": 0.01, "pull_pressure": 0.50,
@@ -216,7 +216,7 @@ func TestWillTickQuietNoReach(t *testing.T) {
 // where the confluence alone re-crosses threshold every tick (so discharge-to-zero is NOT enough
 // on its own). The fake re-floods the tide each ExecFile; only the cooldown spaces the reaches.
 func TestWillTickRefractoryCooldown(t *testing.T) {
-	sp, sk := &fakeSpawner{line: []byte(`{"util":"x"}`)}, &fakeSink{}
+	sp, sk := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"modified","path":"README.md"}`)}, &fakeSink{}
 	f := &fakeWillField{
 		vars:           map[string]float32{"will_threshold": 1.0, "will_gaze": 2.0, "pull_pressure": 0.5, "pull_origin": 0.0},
 		reaccumulateTo: 2.0, // every tick the field re-floods past threshold
@@ -341,7 +341,7 @@ func TestWillTickReusesPendingReachIDAfterRetry(t *testing.T) {
 }
 
 func TestWillTickEmitErrorDoesNotDischarge(t *testing.T) {
-	sp, sk := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"added"}`)}, &fakeSink{err: errors.New("disk full")}
+	sp, sk := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"added","path":"README.md"}`)}, &fakeSink{err: errors.New("disk full")}
 	w, f := newWill(map[string]float32{
 		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
 	}, sp, sk)
@@ -361,7 +361,7 @@ func TestWillTickEmitErrorDoesNotDischarge(t *testing.T) {
 }
 
 func TestWillTickEmptyFileSinkDoesNotReachOrCommit(t *testing.T) {
-	sp := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"added"}`)}
+	sp := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"added","path":"README.md"}`)}
 	f := &fakeWillField{vars: map[string]float32{
 		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
 	}}
@@ -385,7 +385,7 @@ func TestWillTickEmptyFileSinkDoesNotReachOrCommit(t *testing.T) {
 }
 
 func TestWillTickStateCommitErrorDoesNotDischarge(t *testing.T) {
-	sp, sk := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"added"}`), commitErr: errors.New("rename")}, &fakeSink{}
+	sp, sk := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"added","path":"README.md"}`), commitErr: errors.New("rename")}, &fakeSink{}
 	w, f := newWill(map[string]float32{
 		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
 	}, sp, sk)
@@ -1014,5 +1014,39 @@ func TestWillTickMalformedUtilityOutputDoesNotCommitOrDischarge(t *testing.T) {
 	learn := sk.events[2]
 	if learn.Phase != "learning" || learn.Outcome != willOutcomeSensorError || learn.BytesCaptured != len(sp.line) {
 		t.Fatalf("malformed output must become a typed sensor_error receipt, got %#v", learn)
+	}
+}
+
+func TestWillTickIncompleteSartreEventDoesNotCommitOrDischarge(t *testing.T) {
+	sp := &fakeSpawner{line: []byte(`{"util":"repo_monitor"}`)}
+	sk := &typedFakeSink{}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp, &sk.fakeSink)
+	w.sink = sk
+
+	util, err := w.tick(context.Background())
+	if err == nil {
+		t.Fatal("incomplete SARTRE utility output must fail closed")
+	}
+	if util != willUtilPressure {
+		t.Fatalf("got util %q", util)
+	}
+	if f.discharged {
+		t.Error("incomplete SARTRE output must not spend the tide")
+	}
+	if sp.committed {
+		t.Error("incomplete SARTRE output must not commit utility state")
+	}
+	if len(sk.lines) != 0 {
+		t.Fatalf("incomplete output must not emit effect records, got %q", sk.lines)
+	}
+	if len(sk.events) != 3 {
+		t.Fatalf("want intention/act/learning sensor_error events, got %#v", sk.events)
+	}
+	learn := sk.events[2]
+	if learn.Phase != "learning" || learn.Outcome != willOutcomeSensorError || learn.BytesCaptured != len(sp.line) {
+		t.Fatalf("incomplete output must become a typed sensor_error receipt, got %#v", learn)
 	}
 }

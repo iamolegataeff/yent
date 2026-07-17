@@ -589,6 +589,9 @@ func tagSartreEffectLines(raw []byte, eventID, rootID string) []byte {
 			obj["root_id"] = rootID
 		}
 		obj["phase"] = "effect"
+		if !validWillEffectObject(obj) {
+			continue
+		}
 		b, err := json.Marshal(obj)
 		if err != nil {
 			continue
@@ -597,6 +600,43 @@ func tagSartreEffectLines(raw []byte, eventID, rootID string) []byte {
 		out.WriteByte('\n')
 	}
 	return out.Bytes()
+}
+
+func validWillEffectObject(obj map[string]any) bool {
+	util, _ := obj["util"].(string)
+	switch strings.TrimSpace(util) {
+	case willUtilPressure:
+		kind, _ := obj["kind"].(string)
+		path, _ := obj["path"].(string)
+		return sartreRepoChangeKind(kind) && strings.TrimSpace(path) != ""
+	case willUtilOrigin:
+		if willPositiveJSONNumber(obj["reduced"]) || willPositiveJSONNumber(obj["recognized"]) {
+			return true
+		}
+		kind, _ := obj["kind"].(string)
+		path, _ := obj["path"].(string)
+		return sartreRepoChangeKind(kind) && strings.TrimSpace(path) != ""
+	default:
+		return false
+	}
+}
+
+func willPositiveJSONNumber(v any) bool {
+	switch n := v.(type) {
+	case float64:
+		return n > 0
+	case float32:
+		return n > 0
+	case int:
+		return n > 0
+	case int64:
+		return n > 0
+	case json.Number:
+		f, err := n.Float64()
+		return err == nil && f > 0
+	default:
+		return false
+	}
 }
 
 type willEvent struct {
