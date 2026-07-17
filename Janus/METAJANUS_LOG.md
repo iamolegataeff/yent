@@ -620,3 +620,16 @@ This closes the semantic mirror of fix 18: a utility can no longer advance its b
 tide, and publish `perception_committed` by emitting `{"util":"repo_monitor"}` or another complete but
 non-actionable object. The regression verifies that incomplete SARTRE objects emit no effect records, commit no
 utility state, and spend no tide.
+
+### fix 20 — live limpha store follows field acknowledgement
+
+The live SARTRE reader now uses limpha only as a read-only duplicate filter before field actuation. It no
+longer inserts stable event ids or seams before the AML field has accepted and settled the pressure. Field-moving
+events are staged with the cursor batch and are written to limpha from `AckPressure()` after the consumer has
+run `Exec` and `Step`; quiet/no-field events still store immediately because there is no field boundary to wait
+for.
+
+This closes the crash-shaped gap left after cursor ack hardening: limpha dedupe can no longer become the first
+durable consumer for a live field event and then suppress the field reflex if the process dies before cursor
+ack. The regression verifies that identity events shape the live field before entering limpha, and only appear
+in SARTRE memory after the field ack.

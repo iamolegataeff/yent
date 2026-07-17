@@ -205,15 +205,17 @@ func newBody(name, bin, model, workdir string, args []string) *yent.DOEBody {
 // This is the fast present-time twin of slow limpha recall pressure, but not a universal RUN
 // ratchet.
 type sartreSense struct {
-	eventsPath string
-	cursorPath string
-	offset     int64 // cursor: byte offset of the last acknowledged complete record
-	fileID     sartreFileID
-	loaded     bool
-	pendingAck sartreReadBatch
-	pendingAML string
-	limpha     *yent.LimphaClient
-	state      func() yent.LimphaState
+	eventsPath    string
+	cursorPath    string
+	offset        int64 // cursor: byte offset of the last acknowledged complete record
+	fileID        sartreFileID
+	loaded        bool
+	pendingAck    sartreReadBatch
+	pendingAML    string
+	pendingEvents []yent.SartreEvent
+	pendingState  yent.LimphaState
+	limpha        *yent.LimphaClient
+	state         func() yent.LimphaState
 }
 
 type sartreFileID struct {
@@ -409,6 +411,7 @@ func (s *sartreSense) Pressure() (string, bool) {
 			return s.pendingAML, true
 		}
 		s.pendingAck = sartreReadBatch{}
+		s.pendingEvents = nil
 	}
 	if s.eventsPath == "" {
 		return "", false
@@ -424,14 +427,14 @@ func (s *sartreSense) Pressure() (string, bool) {
 		}
 		return "", false
 	}
+	st := yent.LimphaState{}
+	if s.state != nil {
+		st = s.state()
+	}
 	if s.limpha != nil {
-		st := yent.LimphaState{}
-		if s.state != nil {
-			st = s.state()
-		}
-		_, accepted, err := s.limpha.StoreNewSartreEvents(events, st)
+		accepted, err := s.limpha.FilterNewSartreEvents(events)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[dock] SARTRE live limpha store: %v\n", err)
+			fmt.Fprintf(os.Stderr, "[dock] SARTRE live limpha filter: %v\n", err)
 			return "", false
 		}
 		if len(accepted) == 0 {
@@ -444,6 +447,12 @@ func (s *sartreSense) Pressure() (string, bool) {
 	}
 	aml, ok := sartreFieldAML(events)
 	if !ok {
+		if s.limpha != nil {
+			if _, _, err := s.limpha.StoreNewSartreEvents(events, st); err != nil {
+				fmt.Fprintf(os.Stderr, "[dock] SARTRE live limpha store: %v\n", err)
+				return "", false
+			}
+		}
 		if err := s.ackSartreBatch(batch); err != nil {
 			fmt.Fprintf(os.Stderr, "[dock] SARTRE cursor ack: %v\n", err)
 		}
@@ -451,17 +460,29 @@ func (s *sartreSense) Pressure() (string, bool) {
 	}
 	s.pendingAck = batch
 	s.pendingAML = aml
+	s.pendingEvents = append([]yent.SartreEvent(nil), events...)
+	s.pendingState = st
 	return aml, true
 }
 
 func (s *sartreSense) AckPressure() error {
 	if !s.pendingAck.ok {
 		s.pendingAML = ""
+		s.pendingEvents = nil
 		return nil
 	}
 	batch := s.pendingAck
+	events := append([]yent.SartreEvent(nil), s.pendingEvents...)
+	st := s.pendingState
 	s.pendingAck = sartreReadBatch{}
 	s.pendingAML = ""
+	s.pendingEvents = nil
+	s.pendingState = yent.LimphaState{}
+	if s.limpha != nil && len(events) > 0 {
+		if _, _, err := s.limpha.StoreNewSartreEvents(events, st); err != nil {
+			return err
+		}
+	}
 	return s.ackSartreBatch(batch)
 }
 

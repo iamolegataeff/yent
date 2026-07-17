@@ -354,6 +354,7 @@ func TestSartreSenseIgnoresForgedKindNoise(t *testing.T) {
 func TestSartreSenseStoresIdentityEventWithoutForcingRun(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "events.jsonl")
+	cursor := filepath.Join(dir, "cursor.json")
 	event := `{"util":"whatdotheythinkiam","kind":"modified","path":"README.md","reduced":3,"recognized":7}`
 	if err := os.WriteFile(path, []byte(event+"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -363,12 +364,49 @@ func TestSartreSenseStoresIdentityEventWithoutForcingRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lc.Close()
-	aml, ok := (&sartreSense{eventsPath: path, limpha: lc}).Pressure()
+	s := &sartreSense{eventsPath: path, cursorPath: cursor, limpha: lc}
+	aml, ok := s.Pressure()
 	if !ok {
 		t.Fatal("identity framing should have a typed live-field consequence")
 	}
 	if strings.Contains(aml, "VELOCITY RUN") || strings.Contains(aml, "VELOCITY WALK") || !strings.Contains(aml, "PROPHECY 8") {
 		t.Fatalf("identity recognition should affect prophecy without coarse motion, got %q", aml)
+	}
+	if traces := yent.NewSartreMemory(lc).Recall(1); len(traces) != 0 {
+		t.Fatalf("identity event must not enter limpha before field ack, got %#v", traces)
+	}
+	if err := s.AckPressure(); err != nil {
+		t.Fatal(err)
+	}
+	traces := yent.NewSartreMemory(lc).Recall(1)
+	if len(traces) != 1 || !strings.Contains(traces[0], "whatdotheythinkiam README.md modified reduced=3 recognized=7") {
+		t.Fatalf("identity event should be stored in limpha after ack, got %#v", traces)
+	}
+}
+
+func TestSartreSenseStoresLimphaAfterFieldAck(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	cursor := filepath.Join(dir, "cursor.json")
+	event := `{"id":"reach-identity","root_id":"root-a","phase":"effect","util":"whatdotheythinkiam","kind":"modified","path":"README.md","reduced":3,"recognized":7}`
+	if err := os.WriteFile(path, []byte(event+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lc, err := yent.NewLimphaClientAt(filepath.Join(dir, "limpha.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lc.Close()
+	s := &sartreSense{eventsPath: path, cursorPath: cursor, limpha: lc}
+	aml, ok := s.Pressure()
+	if !ok || !strings.Contains(aml, "PROPHECY 8") {
+		t.Fatalf("identity recognition should affect prophecy before ack, got ok=%v aml=%q", ok, aml)
+	}
+	if traces := yent.NewSartreMemory(lc).Recall(1); len(traces) != 0 {
+		t.Fatalf("limpha store must wait for field ack, got %#v", traces)
+	}
+	if err := s.AckPressure(); err != nil {
+		t.Fatal(err)
 	}
 	traces := yent.NewSartreMemory(lc).Recall(1)
 	if len(traces) != 1 || !strings.Contains(traces[0], "whatdotheythinkiam README.md modified reduced=3 recognized=7") {

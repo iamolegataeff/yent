@@ -181,6 +181,39 @@ func (c *LimphaClient) StoreNewSartreEvents(events []SartreEvent, st LimphaState
 	return seamID, accepted, nil
 }
 
+// FilterNewSartreEvents returns the events that do not already have a stable
+// SARTRE key in limpha, without reserving or storing that key. The live field
+// consumer uses this as a preflight so limpha dedupe cannot be published before
+// the field has actually accepted the pressure.
+func (c *LimphaClient) FilterNewSartreEvents(events []SartreEvent) ([]SartreEvent, error) {
+	if c == nil || !c.connected || len(events) == 0 {
+		return nil, nil
+	}
+	out := make([]SartreEvent, 0, len(events))
+	for _, ev := range events {
+		ev = normalizeSartreEvent(ev)
+		if ev.Utility == "" {
+			continue
+		}
+		key, ok := sartreEventKey(ev)
+		if !ok {
+			out = append(out, ev)
+			continue
+		}
+		var exists int
+		err := c.db.QueryRow(`SELECT 1 FROM sartre_event_ids WHERE event_key = ? LIMIT 1`, key).Scan(&exists)
+		if err == nil {
+			continue
+		}
+		if err != sql.ErrNoRows {
+			c.recordMemoryFailure("sartre_event_ids", err)
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	return out, nil
+}
+
 func (c *LimphaClient) storeSartreConversationTx(tx *sql.Tx, prompt, response string, st LimphaState, now float64) (int64, error) {
 	quality := computeQuality(prompt, response)
 	res, err := tx.Exec(
