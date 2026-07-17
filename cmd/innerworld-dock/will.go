@@ -202,7 +202,7 @@ func (w *willTicker) tick(ctx context.Context) (string, error) {
 	if err := w.field.ExecFile(w.script); err != nil {
 		return "", fmt.Errorf("will physics: %w", err)
 	}
-	if w.cooldown > 0 {
+	if w.pendingReach == nil && w.cooldown > 0 {
 		nextCooldown := w.cooldown - 1 // refractory: the tide keeps evolving, but the will stays spent from the last reach
 		if err := w.saveCooldownState(nextCooldown); err != nil {
 			return "", fmt.Errorf("will cooldown state: %w", err)

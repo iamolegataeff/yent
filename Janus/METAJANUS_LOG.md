@@ -554,3 +554,13 @@ The dock now seeds startup from the maximum durable breath it knows (`current_br
 reach breath), stores `current_breath` in the learning state, and emits all receipts for a pending reach with
 the original reach breath. Refractory cooldown breaths also advance that durable cursor. This is still
 breath-counted physics, not wall-clock decay; it only makes the ledger's time domain replayable.
+
+### fix 14 — pending reach completion outranks restored refractory
+
+A restart can legitimately restore both a pending reach and a nonzero `cooldown_breaths`: the effect and
+learning state were durable, but the final learning receipt had not been delivered. That pending reach is not
+a new act; it is the missing tail of the old act. The will now completes a pending reach before applying
+refractory countdown, so cooldown cannot delay the receipt that proves why the cooldown exists.
+
+The regression seeds exactly that shape — committed pending reach plus restored cooldown — and verifies the
+retry emits the missing learning receipt immediately without respawning the utility.
