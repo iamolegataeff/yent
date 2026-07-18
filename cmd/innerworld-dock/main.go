@@ -410,8 +410,10 @@ func (s *sartreSense) Pressure() (string, bool) {
 		if s.pendingAML != "" {
 			return s.pendingAML, true
 		}
-		s.pendingAck = sartreReadBatch{}
-		s.pendingEvents = nil
+		if err := s.finishPendingPressureAck(); err != nil {
+			fmt.Fprintf(os.Stderr, "[dock] SARTRE pending ack: %v\n", err)
+		}
+		return "", false
 	}
 	if s.eventsPath == "" {
 		return "", false
@@ -471,19 +473,33 @@ func (s *sartreSense) AckPressure() error {
 		s.pendingEvents = nil
 		return nil
 	}
+	s.pendingAML = ""
+	return s.finishPendingPressureAck()
+}
+
+func (s *sartreSense) finishPendingPressureAck() error {
+	if !s.pendingAck.ok {
+		s.pendingAML = ""
+		s.pendingEvents = nil
+		s.pendingState = yent.LimphaState{}
+		return nil
+	}
 	batch := s.pendingAck
 	events := append([]yent.SartreEvent(nil), s.pendingEvents...)
 	st := s.pendingState
-	s.pendingAck = sartreReadBatch{}
-	s.pendingAML = ""
-	s.pendingEvents = nil
-	s.pendingState = yent.LimphaState{}
 	if s.limpha != nil && len(events) > 0 {
 		if _, _, err := s.limpha.StoreNewSartreEvents(events, st); err != nil {
 			return err
 		}
 	}
-	return s.ackSartreBatch(batch)
+	if err := s.ackSartreBatch(batch); err != nil {
+		return err
+	}
+	s.pendingAck = sartreReadBatch{}
+	s.pendingAML = ""
+	s.pendingEvents = nil
+	s.pendingState = yent.LimphaState{}
+	return nil
 }
 
 func sartreEOFOffset(path string) int64 {

@@ -850,6 +850,17 @@ The final dead-letter is still pressure, not motion: SARTRE treats it as a still
 emit `VELOCITY`. Bridge traces and stable-event keys include `attempts` and `failure_outcome`, so repeated
 retries remain auditable instead of being silently deduped away.
 
+## 2026-07-18 — SARTRE post-field ack failures do not replay pressure
+
+The staged live SARTRE pressure now has two phases: replayable AML before the field accepts it, and ack-only
+tail after the field has accepted it. `AckPressure()` no longer clears the staged cursor/events before limpha
+storage and cursor publication both succeed; on failure it drops the replayable AML, keeps the batch pending,
+and lets the next `Pressure()` retry only the missing ack tail.
+
+That means a cursor publish failure after a successful limpha store cannot apply the same field pressure twice.
+The regression pins this exact edge: one seam stored, no duplicate seam on retry, no second AML returned, and
+the pending batch clears only after the cursor can be published.
+
 ---
 
 ## Deferred / parked

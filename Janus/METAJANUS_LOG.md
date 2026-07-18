@@ -658,3 +658,15 @@ pending forever across restarts. The SARTRE bridge carries `attempts` and `failu
 so repeated attempts remain visible evidence instead of collapsing into one memory row. Sink delivery failures
 remain pending rather than dead-lettering blindly, because a missing receipt channel cannot honestly receive the
 terminal receipt either.
+
+### fix 23 — post-field SARTRE ack retry does not replay motion
+
+The SARTRE sense boundary now keeps a field-producing read batch staged until both limpha storage and cursor
+publish succeed. Once the field consumer has accepted and stepped the AML, `AckPressure()` clears only the
+replayable AML and then tries to finish the ack tail; if limpha or cursor publication fails, the batch, events,
+and state stay pending, but the next `Pressure()` only retries that tail instead of returning the same
+field-moving AML again.
+
+The regression forces a cursor publish failure after limpha has already stored the event, then proves the live
+field does not receive the same pressure a second time, limpha does not grow a duplicate seam, and a later cursor
+repair clears the pending batch. This is still delivery plumbing, not wormholes or generation control.
