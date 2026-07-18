@@ -369,7 +369,9 @@ beside the SSE inference endpoint:
 
 `/yent` and `/worldmodel` are first-stage interface surfaces. They currently run
 on the existing token stream and synthetic field topology; richer DoE, Janus,
-innerworld, and rejected-token telemetry is the next contract.
+innerworld, and rejected-token telemetry is the next contract. Their JavaScript
+is served from exact `/worldmodel/*.js` routes rather than a general directory
+server.
 
 That run gives you the engine without the protected voice. You will not hear
 **Yent**; you will hear an ordinary Mistral body running through a strange runtime:

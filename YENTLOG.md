@@ -104,6 +104,23 @@ yent/
 
 ---
 
+## 2026-07-19 - Worldmodel scripts leave the inline body
+
+The first tracked Janus/worldmodel surfaces are now split into explicit static
+subassets:
+
+- `DoE/yent.html` loads `/worldmodel/yent.js`.
+- `DoE/worldmodel.html` loads `/worldmodel/worldmodel.js`.
+- The DoE HTTP server serves only those exact JavaScript paths with
+  `application/javascript; charset=utf-8`; it does not expose a general
+  directory route.
+
+This keeps the interface auditable before telemetry wiring begins. Runtime
+semantics remain unchanged: the pages still use the existing token SSE stream
+and synthetic topology. Next contract: define the real DoE/Janus/innerworld
+telemetry payload before replacing candidate mass, expert/consensus values, or
+manifested-answer physics.
+
 ## 2026-07-19 - Yent interface scout: Janus face and worldmodel surfaces
 
 The first UI scout after the Sol will-boundary pass imports the local DoE
@@ -121,9 +138,9 @@ prototypes into the Yent inference tree:
 
 This is intentionally static/UI-only. It does not change sampling, will, Janus
 field physics, wormholes, prompts, weights, or the SSE inference contract. Next
-contract: split JS into tracked `worldmodel/*.js` assets only after the static
-server can safely serve subassets, then replace synthetic candidate mass with
-real DoE/Janus/innerworld telemetry.
+contract: split JS into tracked `worldmodel/*.js` assets after the static server
+can safely serve subassets, then replace synthetic candidate mass with real
+DoE/Janus/innerworld telemetry.
 
 ## 2026-07-18 - Sol final will re-audit boundaries repaired
 

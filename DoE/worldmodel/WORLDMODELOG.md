@@ -14,10 +14,19 @@ Yent worldmodel interface log.
 - Next contract: split JS into `worldmodel/*.js` once the DoE static route serves subassets safely.
 - Next telemetry: replace synthetic candidate mass with real top-k/logprobs, expert votes, Dario/Janus/innerworld metrics, and rejected-token traces.
 
-## 2026-07-19
+## 2026-07-19 - import into Yent
 
 - Imported into Yent's inference tree as the first tracked `/worldmodel` surface.
 - Paired with `/yent`, the dark Janus parliament face, while both still use the
   existing `/chat/completions` SSE token stream.
 - This stage is static/UI-only: no sampling, prompt, Janus, will, wormhole, or
   runtime telemetry semantics changed.
+
+## 2026-07-19 - script split
+
+- Split inline page scripts into explicit tracked subassets:
+  `worldmodel/yent.js` and `worldmodel/worldmodel.js`.
+- The DoE server exposes only those exact JavaScript paths, not a broad static
+  directory.
+- Next boundary is telemetry honesty: define real token/logit/expert/Janus/
+  innerworld fields before replacing synthetic topology.
