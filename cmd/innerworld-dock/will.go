@@ -247,8 +247,9 @@ func (w *willTicker) continueReach(ctx context.Context, reach willPendingReach) 
 	if !reach.ConsequenceCommitted {
 		terminalFailure := false
 		var result willSpawnResult
-		if !reach.EffectRecorded {
+		if !reach.EffectPrepared && !reach.EffectRecorded {
 			attempt := reach.Attempts + 1
+			var effectLine []byte
 			if es, ok := w.sink.(willEventSink); ok {
 				ev := w.eventAtBreath(tide, eventID, "intention", util, "crest", eventBreath)
 				ev.Attempts = attempt
@@ -294,7 +295,7 @@ func (w *willTicker) continueReach(ctx context.Context, reach willPendingReach) 
 				}
 			}
 			if !terminalFailure {
-				effectLine := tagSartreEffectLines(result.Line, eventID, w.rootID)
+				effectLine = tagSartreEffectLines(result.Line, eventID, w.rootID)
 				effectCount = len(completeSartreJSONLines(effectLine))
 				if effectCount == 0 && hasNonEmptySartreOutput(result.Line) {
 					if es, ok := w.sink.(willEventSink); ok {
@@ -310,21 +311,28 @@ func (w *willTicker) continueReach(ctx context.Context, reach willPendingReach) 
 						return util, err
 					}
 				}
-				if !terminalFailure && len(effectLine) > 0 {
-					if err := w.sink.Emit(effectLine); err != nil {
-						return util, fmt.Errorf("will emit %s: %w", util, err)
-					}
-				}
 			}
 			if !terminalFailure {
 				outcome = willOutcomeNoNovelty
 				if effectCount > 0 {
 					outcome = willOutcomePerceptionCommitted
 				}
-				reach, err = w.markReachEffectRecorded(reach, outcome, effectCount, attempt, result)
+				reach, err = w.markReachEffectPrepared(reach, outcome, effectCount, attempt, result, effectLine)
 				if err != nil {
-					return util, fmt.Errorf("will record %s effect stage: %w", util, err)
+					return util, fmt.Errorf("will prepare %s effect stage: %w", util, err)
 				}
+			}
+		}
+		if !terminalFailure && !reach.EffectRecorded {
+			if len(reach.EffectLine) > 0 {
+				if err := w.sink.Emit([]byte(reach.EffectLine)); err != nil {
+					return util, fmt.Errorf("will emit %s: %w", util, err)
+				}
+			}
+			var err error
+			reach, err = w.markReachEffectRecorded(reach)
+			if err != nil {
+				return util, fmt.Errorf("will record %s effect delivery: %w", util, err)
 			}
 		}
 		if terminalFailure {
@@ -411,15 +419,20 @@ func (w *willTicker) finishReach(seq int64) error {
 	return nil
 }
 
-func (w *willTicker) markReachEffectRecorded(reach willPendingReach, outcome string, effectCount, attempts int, result willSpawnResult) (willPendingReach, error) {
+func (w *willTicker) markReachEffectPrepared(reach willPendingReach, outcome string, effectCount, attempts int, result willSpawnResult, effectLine []byte) (willPendingReach, error) {
 	if !validWillCommittedOutcome(outcome, effectCount) || outcome == willOutcomeDeadLetter {
 		return willPendingReach{}, fmt.Errorf("invalid recoverable outcome %q with %d effects", outcome, effectCount)
+	}
+	if got := len(completeSartreJSONLines(effectLine)); got != effectCount {
+		return willPendingReach{}, fmt.Errorf("prepared effect payload has %d records, want %d", got, effectCount)
 	}
 	if attempts > 0 {
 		reach.Attempts = attempts
 	}
 	reach.LastFailureOutcome = ""
-	reach.EffectRecorded = true
+	reach.EffectPrepared = true
+	reach.EffectRecorded = false
+	reach.EffectLine = string(effectLine)
 	reach.BaselineCommitted = false
 	reach.Outcome = outcome
 	reach.EffectCount = effectCount
@@ -438,6 +451,28 @@ func (w *willTicker) markReachEffectRecorded(reach willPendingReach, outcome str
 		}
 		reach.BaselineSHA256 = digest
 	}
+	if err := w.saveReachState(reach.Seq, &reach); err != nil {
+		return willPendingReach{}, err
+	}
+	w.nextReachSeq = reach.Seq
+	w.pendingReach = &reach
+	return reach, nil
+}
+
+func (w *willTicker) markReachEffectRecorded(reach willPendingReach) (willPendingReach, error) {
+	if reach.EffectRecorded {
+		return reach, nil
+	}
+	if !reach.EffectPrepared {
+		return willPendingReach{}, fmt.Errorf("cannot record unprepared effect stage")
+	}
+	if !validWillCommittedOutcome(reach.Outcome, reach.EffectCount) || reach.Outcome == willOutcomeDeadLetter {
+		return willPendingReach{}, fmt.Errorf("invalid prepared outcome %q with %d effects", reach.Outcome, reach.EffectCount)
+	}
+	if got := len(completeSartreJSONLines([]byte(reach.EffectLine))); got != reach.EffectCount {
+		return willPendingReach{}, fmt.Errorf("prepared effect payload has %d records, want %d", got, reach.EffectCount)
+	}
+	reach.EffectRecorded = true
 	if err := w.saveReachState(reach.Seq, &reach); err != nil {
 		return willPendingReach{}, err
 	}

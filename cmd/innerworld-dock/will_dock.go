@@ -282,6 +282,8 @@ type willPendingReach struct {
 	Breath               int              `json:"breath"`
 	Attempts             int              `json:"attempts,omitempty"`
 	LastFailureOutcome   string           `json:"last_failure_outcome,omitempty"`
+	EffectPrepared       bool             `json:"effect_prepared,omitempty"`
+	EffectLine           string           `json:"effect_line,omitempty"`
 	EffectRecorded       bool             `json:"effect_recorded,omitempty"`
 	BaselineCommitted    bool             `json:"baseline_committed,omitempty"`
 	BaselinePendingPath  string           `json:"baseline_pending_path,omitempty"`
@@ -393,7 +395,7 @@ func validateWillReachState(st willReachState) error {
 	if p.Attempts < 0 {
 		return fmt.Errorf("pending reach has negative attempts %d", p.Attempts)
 	}
-	if p.Attempts > 0 && !willFailureOutcome(p.LastFailureOutcome) && !p.ConsequenceCommitted && !p.EffectRecorded {
+	if p.Attempts > 0 && !willFailureOutcome(p.LastFailureOutcome) && !p.ConsequenceCommitted && !p.EffectPrepared && !p.EffectRecorded {
 		return fmt.Errorf("pending reach has attempts without a typed failure outcome %q", p.LastFailureOutcome)
 	}
 	if p.LastFailureOutcome != "" && !willFailureOutcome(p.LastFailureOutcome) {
@@ -416,9 +418,16 @@ func validateWillReachState(st willReachState) error {
 		}
 		return nil
 	}
-	if p.EffectRecorded {
+	if p.EffectPrepared || p.EffectRecorded {
 		if !validWillCommittedOutcome(p.Outcome, p.EffectCount) || p.Outcome == willOutcomeDeadLetter {
 			return fmt.Errorf("pending reach has invalid recorded outcome %q with %d effects", p.Outcome, p.EffectCount)
+		}
+		if strings.TrimSpace(p.EffectLine) != "" {
+			if got := len(completeSartreJSONLines([]byte(p.EffectLine))); got != p.EffectCount {
+				return fmt.Errorf("pending reach has %d prepared effect records, want %d", got, p.EffectCount)
+			}
+		} else if p.EffectPrepared && !p.EffectRecorded && p.EffectCount > 0 {
+			return fmt.Errorf("pending reach has prepared effects without a payload")
 		}
 		if strings.TrimSpace(p.BaselineStatePath) == "" {
 			if p.BaselineCommitted {
@@ -436,7 +445,7 @@ func validateWillReachState(st willReachState) error {
 		}
 		return nil
 	}
-	if p.Outcome != "" || p.EffectCount != 0 {
+	if p.Outcome != "" || p.EffectCount != 0 || p.EffectPrepared || strings.TrimSpace(p.EffectLine) != "" {
 		return fmt.Errorf("pending reach has uncommitted outcome %q with %d effects", p.Outcome, p.EffectCount)
 	}
 	return nil
@@ -558,6 +567,14 @@ func (s fileSink) Emit(line []byte) error {
 	if s.path == "" {
 		return fmt.Errorf("SARTRE event sink path is empty")
 	}
+	var err error
+	lines, err = filterAlreadyDeliveredSinkLines(s.path, lines)
+	if err != nil {
+		return err
+	}
+	if len(lines) == 0 {
+		return nil
+	}
 	f, err := os.OpenFile(s.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
@@ -581,6 +598,33 @@ func (s fileSink) Emit(line []byte) error {
 	}
 	closed = true
 	return syncParentDir(s.path)
+}
+
+func filterAlreadyDeliveredSinkLines(path string, lines [][]byte) ([][]byte, error) {
+	if len(lines) == 0 {
+		return nil, nil
+	}
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return lines, nil
+		}
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	for _, line := range completeSartreJSONLines(existing) {
+		seen[string(line)] = struct{}{}
+	}
+	out := lines[:0]
+	for _, line := range lines {
+		key := string(line)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, line)
+	}
+	return out, nil
 }
 
 func writeAll(w io.Writer, p []byte) error {

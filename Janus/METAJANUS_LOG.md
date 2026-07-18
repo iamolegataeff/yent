@@ -764,3 +764,21 @@ The current baseline for another independent read-only re-audit is
 Known validation shape: focused will tests, repeated full Go suites including
 race, `go vet`, `sh tools/build_libamk.sh`, and `git diff --check` are green.
 This is a handoff boundary, not a claim that the auditor has already reclosed it.
+
+### fix 28 - will effect delivery is prepared before append
+
+The will reach ledger now records the exact prepared effect payload before it is
+delivered to `YENT_SARTRE_EVENTS`. A restart after the JSONL append but before
+the reach-state delivery flag is saved reuses that prepared payload, does not
+respawn the utility, and preserves the original `perception_committed` outcome.
+
+`fileSink` now skips already-delivered complete JSONL records by exact line, so
+the recovery path can retry delivery idempotently: if the append failed, the
+prepared effect is written; if the append succeeded and only the state save
+failed, the duplicate is ignored. The utility baseline artifact remains the next
+stage and is still published from the recorded pending path and SHA.
+
+Regressions cover the new crash window with a real file-backed sink, prove the
+retry does not spawn the utility again, and assert the effect JSONL file still
+contains one record after recovery. A separate sink test covers exact duplicate
+suppression directly.
