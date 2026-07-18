@@ -5097,7 +5097,7 @@ skip_logitdump:
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * HTTP SERVE MODE — minimal HTTP server for doe_ui.html, doe.html,
- * yent.html, and worldmodel.html
+ * yent.html, worldmodel.html, and explicit worldmodel subassets.
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
 static int g_serve_port = 0; /* 0 = disabled */
@@ -5248,8 +5248,9 @@ static void http_send_text(int fd, int status, const char *msg) {
     if (len > 0) http_send(fd, msg, len);
 }
 
-/* Serve a static file (doe_ui.html, doe.html, yent.html, worldmodel.html) */
-static int http_serve_file(int fd, const char *filepath) {
+/* Serve a static file with a caller-selected content type. */
+static int http_serve_static_file(int fd, const char *filepath, const char *content_type) {
+    if (!content_type) content_type = "application/octet-stream";
     FILE *f = fopen(filepath, "rb");
     if (!f) return 0;
     if (fseek(f, 0, SEEK_END) != 0) {
@@ -5283,13 +5284,17 @@ static int http_serve_file(int fd, const char *filepath) {
         }
     }
     fclose(f);
-    if (!http_send_header(fd, 200, "text/html; charset=utf-8", (int)sz)) {
+    if (!http_send_header(fd, 200, content_type, (int)sz)) {
         free(data);
         return 1;
     }
     if (sz > 0) http_send(fd, data, (int)sz);
     free(data);
     return 1;
+}
+
+static int http_serve_file(int fd, const char *filepath) {
+    return http_serve_static_file(fd, filepath, "text/html; charset=utf-8");
 }
 
 /* Extract JSON string value for a key from body. Simple parser. */
@@ -5536,14 +5541,19 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
 
     /* Resolve HTML file paths relative to executable */
     char ui_path[512], vis_path[512], yent_path[512], worldmodel_path[512];
+    char yent_js_path[512], worldmodel_js_path[512];
     int ui_len = snprintf(ui_path, sizeof(ui_path), "%sdoe_ui.html", exe_dir);
     int vis_len = snprintf(vis_path, sizeof(vis_path), "%sdoe.html", exe_dir);
     int yent_len = snprintf(yent_path, sizeof(yent_path), "%syent.html", exe_dir);
     int worldmodel_len = snprintf(worldmodel_path, sizeof(worldmodel_path), "%sworldmodel.html", exe_dir);
+    int yent_js_len = snprintf(yent_js_path, sizeof(yent_js_path), "%sworldmodel/yent.js", exe_dir);
+    int worldmodel_js_len = snprintf(worldmodel_js_path, sizeof(worldmodel_js_path), "%sworldmodel/worldmodel.js", exe_dir);
     if (ui_len < 0 || ui_len >= (int)sizeof(ui_path) ||
         vis_len < 0 || vis_len >= (int)sizeof(vis_path) ||
         yent_len < 0 || yent_len >= (int)sizeof(yent_path) ||
-        worldmodel_len < 0 || worldmodel_len >= (int)sizeof(worldmodel_path)) {
+        worldmodel_len < 0 || worldmodel_len >= (int)sizeof(worldmodel_path) ||
+        yent_js_len < 0 || yent_js_len >= (int)sizeof(yent_js_path) ||
+        worldmodel_js_len < 0 || worldmodel_js_len >= (int)sizeof(worldmodel_js_path)) {
         fprintf(stderr, "[serve] static file path too long\n");
         close(server_fd);
         return;
@@ -5612,6 +5622,16 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
             } else if (strcmp(path, "/worldmodel") == 0 || strcmp(path, "/worldmodel.html") == 0) {
                 if (!http_serve_file(client, worldmodel_path)) {
                     const char *msg = "worldmodel.html not found";
+                    http_send_text(client, 404, msg);
+                }
+            } else if (strcmp(path, "/worldmodel/yent.js") == 0) {
+                if (!http_serve_static_file(client, yent_js_path, "application/javascript; charset=utf-8")) {
+                    const char *msg = "worldmodel/yent.js not found";
+                    http_send_text(client, 404, msg);
+                }
+            } else if (strcmp(path, "/worldmodel/worldmodel.js") == 0) {
+                if (!http_serve_static_file(client, worldmodel_js_path, "application/javascript; charset=utf-8")) {
+                    const char *msg = "worldmodel/worldmodel.js not found";
                     http_send_text(client, 404, msg);
                 }
             } else if (strcmp(path, "/health") == 0) {
