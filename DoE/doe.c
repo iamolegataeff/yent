@@ -5096,7 +5096,8 @@ skip_logitdump:
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
- * HTTP SERVE MODE — minimal HTTP server for doe_ui.html and doe.html
+ * HTTP SERVE MODE — minimal HTTP server for doe_ui.html, doe.html,
+ * yent.html, and worldmodel.html
  * ═══════════════════════════════════════════════════════════════════════════════ */
 
 static int g_serve_port = 0; /* 0 = disabled */
@@ -5247,7 +5248,7 @@ static void http_send_text(int fd, int status, const char *msg) {
     if (len > 0) http_send(fd, msg, len);
 }
 
-/* Serve a static file (doe_ui.html, doe.html) */
+/* Serve a static file (doe_ui.html, doe.html, yent.html, worldmodel.html) */
 static int http_serve_file(int fd, const char *filepath) {
     FILE *f = fopen(filepath, "rb");
     if (!f) return 0;
@@ -5534,11 +5535,15 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
     }
 
     /* Resolve HTML file paths relative to executable */
-    char ui_path[512], vis_path[512];
+    char ui_path[512], vis_path[512], yent_path[512], worldmodel_path[512];
     int ui_len = snprintf(ui_path, sizeof(ui_path), "%sdoe_ui.html", exe_dir);
     int vis_len = snprintf(vis_path, sizeof(vis_path), "%sdoe.html", exe_dir);
+    int yent_len = snprintf(yent_path, sizeof(yent_path), "%syent.html", exe_dir);
+    int worldmodel_len = snprintf(worldmodel_path, sizeof(worldmodel_path), "%sworldmodel.html", exe_dir);
     if (ui_len < 0 || ui_len >= (int)sizeof(ui_path) ||
-        vis_len < 0 || vis_len >= (int)sizeof(vis_path)) {
+        vis_len < 0 || vis_len >= (int)sizeof(vis_path) ||
+        yent_len < 0 || yent_len >= (int)sizeof(yent_path) ||
+        worldmodel_len < 0 || worldmodel_len >= (int)sizeof(worldmodel_path)) {
         fprintf(stderr, "[serve] static file path too long\n");
         close(server_fd);
         return;
@@ -5547,6 +5552,8 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
     printf("[serve] parliament listening on http://%s:%d\n", g_serve_public ? "0.0.0.0" : "127.0.0.1", g_serve_port);
     printf("[serve]   /         → chat UI\n");
     printf("[serve]   /visual   → parliament terminal\n");
+    printf("[serve]   /yent     → Janus parliament interface\n");
+    printf("[serve]   /worldmodel → walkable probability field\n");
     printf("[serve]   /health   → status\n");
     printf("[serve]   POST /chat/completions → inference stream\n\n");
 
@@ -5595,6 +5602,16 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
             } else if (strcmp(path, "/visual") == 0) {
                 if (!http_serve_file(client, vis_path)) {
                     const char *msg = "doe.html not found";
+                    http_send_text(client, 404, msg);
+                }
+            } else if (strcmp(path, "/yent") == 0 || strcmp(path, "/yent.html") == 0) {
+                if (!http_serve_file(client, yent_path)) {
+                    const char *msg = "yent.html not found";
+                    http_send_text(client, 404, msg);
+                }
+            } else if (strcmp(path, "/worldmodel") == 0 || strcmp(path, "/worldmodel.html") == 0) {
+                if (!http_serve_file(client, worldmodel_path)) {
+                    const char *msg = "worldmodel.html not found";
                     http_send_text(client, 404, msg);
                 }
             } else if (strcmp(path, "/health") == 0) {
@@ -5771,7 +5788,7 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printf("doe.c — DOE: inference architecture over any GGUF\n\n");
             printf("  --model PATH    GGUF to index (or auto-detect)\n");
-            printf("  --serve PORT    start HTTP server for UI (doe_ui.html, doe.html)\n");
+            printf("  --serve PORT    start HTTP server for UI (doe_ui.html, doe.html, yent.html, worldmodel.html)\n");
             printf("  --threads N     CPU threads for matvec (default: all cores)\n");
             printf("  --prophecy N    prediction horizon (default: 7)\n");
             printf("  --destiny F     destiny bias strength (default: 0.35)\n");

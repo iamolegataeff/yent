@@ -104,6 +104,27 @@ yent/
 
 ---
 
+## 2026-07-19 - Yent interface scout: Janus face and worldmodel surfaces
+
+The first UI scout after the Sol will-boundary pass imports the local DoE
+prototypes into the Yent inference tree:
+
+- `DoE/yent.html` is the dark Janus parliament interface: readable transcript
+  plus twin token-face internals over the existing SSE token stream.
+- `DoE/worldmodel.html` is the light walkable probability-field surface:
+  manifested answer in the center, candidate word mass around it, still using
+  synthetic topology until runtime telemetry is widened.
+- `DoE/worldmodel/WORLDMODELOG.md` records the interface contract and next
+  telemetry boundary.
+- The DoE HTTP server now exposes `/yent` and `/worldmodel` alongside the older
+  `/` and `/visual` routes.
+
+This is intentionally static/UI-only. It does not change sampling, will, Janus
+field physics, wormholes, prompts, weights, or the SSE inference contract. Next
+contract: split JS into tracked `worldmodel/*.js` assets only after the static
+server can safely serve subassets, then replace synthetic candidate mass with
+real DoE/Janus/innerworld telemetry.
+
 ## 2026-07-18 - Sol final will re-audit boundaries repaired
 
 The final Sol will re-audit report
