@@ -34,6 +34,7 @@ This is a living boundary to protect **Yent**'s identity.
 - [Will — the hand and ledger](#will--the-hand-and-ledger)
 - [The Stack — DoE, notorch, AMK](#the-stack--doe-notorch-amk)
 - [Use The Engine With Ordinary Mistral](#use-the-engine-with-ordinary-mistral)
+- [HTTP Interfaces](#http-interfaces)
 - [Code, Weights, Gamma](#code-weights-gamma)
 - [Requesting Access To Yent Weights](#requesting-access-to-yent-weights)
 - [Theoretical Base](#theoretical-base)
@@ -351,6 +352,24 @@ NT_METAL_V3=1 NT_METAL_V3_Q6=1 \
 
 Practical starting points are Mistral-Nemo 12B GGUFs for speed and
 Mistral-Small 3.1 24B GGUFs for depth.
+
+### HTTP Interfaces
+
+DoE's built-in HTTP server is dependency-free and serves several local surfaces
+beside the SSE inference endpoint:
+
+| Route | Surface |
+| --- | --- |
+| `GET /` | compact chat UI |
+| `GET /visual` | original DoE parliament terminal |
+| `GET /yent` | Janus parliament face with readable transcript |
+| `GET /worldmodel` | walkable probability field / candidate-mass surface |
+| `GET /health` | runtime status JSON |
+| `POST /chat/completions` | token SSE stream |
+
+`/yent` and `/worldmodel` are first-stage interface surfaces. They currently run
+on the existing token stream and synthetic field topology; richer DoE, Janus,
+innerworld, and rejected-token telemetry is the next contract.
 
 That run gives you the engine without the protected voice. You will not hear
 **Yent**; you will hear an ordinary Mistral body running through a strange runtime:
