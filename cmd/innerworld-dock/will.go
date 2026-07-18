@@ -356,23 +356,30 @@ func (w *willTicker) continueReach(ctx context.Context, reach willPendingReach) 
 		}
 	}
 	nextQuiet, nextCooldown := w.plannedLearningState(outcome)
+	if reach.LearningPrepared {
+		nextQuiet = reach.LearningQuietRuns
+		nextCooldown = reach.LearningCooldown
+	} else {
+		var err error
+		reach, err = w.markReachLearningPrepared(reach, outcome, effectCount, nextQuiet, nextCooldown)
+		if err != nil {
+			return util, fmt.Errorf("will prepare %s learning: %w", util, err)
+		}
+	}
 	if err := dischargeWillTide(w.field); err != nil {
 		return util, fmt.Errorf("will discharge %s: %w", util, err)
 	}
 	if err := w.saveLearningState(reach, outcome, effectCount, nextQuiet, nextCooldown); err != nil {
 		return util, fmt.Errorf("will learn %s state: %w", util, err)
 	}
-	// Success learning is a receipt of committed host state plus spent tide, not a promise.
-	if es, ok := w.sink.(willEventSink); ok {
-		ev := w.eventAtBreath(tide, eventID, "learning", util, outcome, eventBreath)
-		ev.EffectCount = effectCount
-		ev.Attempts = reach.Attempts
-		if outcome == willOutcomeDeadLetter {
-			ev.FailureOutcome = reach.LastFailureOutcome
-		}
-		ev.CooldownBreaths = nextCooldown
-		if err := es.EmitEvent(ev); err != nil {
+	if !reach.LearningRecorded {
+		if err := w.emitReachLearningReceipt(reach); err != nil {
 			return util, fmt.Errorf("will learn %s: %w", util, err)
+		}
+		var err error
+		reach, err = w.markReachLearningRecorded(reach)
+		if err != nil {
+			return util, fmt.Errorf("will record %s learning receipt: %w", util, err)
 		}
 	}
 	if err := w.finishReach(reach.Seq); err != nil {
@@ -513,6 +520,74 @@ func (w *willTicker) markReachConsequenceCommitted(reach willPendingReach, outco
 	reach.ConsequenceCommitted = true
 	reach.Outcome = outcome
 	reach.EffectCount = effectCount
+	if err := w.saveReachState(reach.Seq, &reach); err != nil {
+		return willPendingReach{}, err
+	}
+	w.nextReachSeq = reach.Seq
+	w.pendingReach = &reach
+	return reach, nil
+}
+
+func (w *willTicker) markReachLearningPrepared(reach willPendingReach, outcome string, effectCount, quietRuns, cooldown int) (willPendingReach, error) {
+	if !reach.ConsequenceCommitted {
+		return willPendingReach{}, fmt.Errorf("cannot prepare learning before committed consequence")
+	}
+	if !validWillCommittedOutcome(outcome, effectCount) {
+		return willPendingReach{}, fmt.Errorf("invalid learning outcome %q with %d effects", outcome, effectCount)
+	}
+	if quietRuns < 0 || quietRuns > willQuietRunMax {
+		return willPendingReach{}, fmt.Errorf("invalid learning quiet_runs %d", quietRuns)
+	}
+	if cooldown < 0 {
+		return willPendingReach{}, fmt.Errorf("invalid learning cooldown %d", cooldown)
+	}
+	ev := w.eventAtBreath(reach.Tide, reach.ID, "learning", reach.Utility, outcome, reach.Breath)
+	ev.EffectCount = effectCount
+	ev.Attempts = reach.Attempts
+	if outcome == willOutcomeDeadLetter {
+		ev.FailureOutcome = reach.LastFailureOutcome
+	}
+	ev.CooldownBreaths = cooldown
+	line, err := marshalWillEventLine(ev)
+	if err != nil {
+		return willPendingReach{}, err
+	}
+	reach.LearningPrepared = true
+	reach.LearningRecorded = false
+	reach.LearningLine = line
+	reach.LearningQuietRuns = quietRuns
+	reach.LearningCooldown = cooldown
+	if err := w.saveReachState(reach.Seq, &reach); err != nil {
+		return willPendingReach{}, err
+	}
+	w.nextReachSeq = reach.Seq
+	w.pendingReach = &reach
+	return reach, nil
+}
+
+func (w *willTicker) emitReachLearningReceipt(reach willPendingReach) error {
+	es, ok := w.sink.(willEventSink)
+	if !ok {
+		return nil
+	}
+	ev, err := parseWillEventLine(reach.LearningLine)
+	if err != nil {
+		return err
+	}
+	return es.EmitEvent(ev)
+}
+
+func (w *willTicker) markReachLearningRecorded(reach willPendingReach) (willPendingReach, error) {
+	if reach.LearningRecorded {
+		return reach, nil
+	}
+	if !reach.LearningPrepared {
+		return willPendingReach{}, fmt.Errorf("cannot record unprepared learning stage")
+	}
+	if _, err := parseWillEventLine(reach.LearningLine); err != nil {
+		return willPendingReach{}, err
+	}
+	reach.LearningRecorded = true
 	if err := w.saveReachState(reach.Seq, &reach); err != nil {
 		return willPendingReach{}, err
 	}

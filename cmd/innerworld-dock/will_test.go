@@ -141,8 +141,9 @@ func (s *fakeSink) Emit(line []byte) error {
 }
 
 type afterEmitFileSink struct {
-	path      string
-	afterEmit func()
+	path       string
+	afterEmit  func()
+	afterEvent func(willEvent)
 }
 
 func (s *afterEmitFileSink) Emit(line []byte) error {
@@ -155,10 +156,24 @@ func (s *afterEmitFileSink) Emit(line []byte) error {
 	return nil
 }
 
+func (s *afterEmitFileSink) EmitEvent(ev willEvent) error {
+	if err := (fileSink{path: s.path}).EmitEvent(ev); err != nil {
+		return err
+	}
+	if s.afterEvent != nil {
+		s.afterEvent(ev)
+	}
+	return nil
+}
+
 type emitOnlyFileSink struct{ path string }
 
 func (s emitOnlyFileSink) Emit(line []byte) error {
 	return (fileSink{path: s.path}).Emit(line)
+}
+
+func (s emitOnlyFileSink) EmitEvent(ev willEvent) error {
+	return (fileSink{path: s.path}).EmitEvent(ev)
 }
 
 func newWill(vars map[string]float32, sp *fakeSpawner, sk *fakeSink) (*willTicker, *fakeWillField) {
@@ -557,9 +572,10 @@ func TestWillTickStateCommitErrorDoesNotDischarge(t *testing.T) {
 
 type typedFakeSink struct {
 	fakeSink
-	events    []willEvent
-	failPhase string
-	phaseErr  error
+	events     []willEvent
+	failPhase  string
+	phaseErr   error
+	afterEvent func(willEvent)
 }
 
 func (s *typedFakeSink) EmitEvent(ev willEvent) error {
@@ -573,6 +589,9 @@ func (s *typedFakeSink) EmitEvent(ev willEvent) error {
 		return errors.New("phase delivery failed")
 	}
 	s.events = append(s.events, ev)
+	if s.afterEvent != nil {
+		s.afterEvent(ev)
+	}
 	return nil
 }
 
@@ -1008,6 +1027,168 @@ func TestWillTickRetryKeepsCommittedConsequenceAfterReceiptFailure(t *testing.T)
 	}
 }
 
+func TestWillTickRetryDoesNotDoubleLearnNoNoveltyAfterFinishGap(t *testing.T) {
+	stateDir := t.TempDir()
+	reachPath := willReachStatePath(stateDir)
+	learningPath := willLearningStatePath(stateDir)
+	sp := &fakeSpawner{}
+	sk := &typedFakeSink{}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp, &sk.fakeSink)
+	w.sink = sk
+	w.rootID = "rootabc"
+	w.reachStatePath = reachPath
+	w.learningStatePath = learningPath
+	w.refractory = 3
+	w.quietRuns = 2
+	brokenReachPath := t.TempDir()
+	sk.afterEvent = func(ev willEvent) {
+		if ev.Phase == "learning" && ev.Outcome == willOutcomeNoNovelty {
+			w.reachStatePath = brokenReachPath
+		}
+	}
+
+	util, err := w.tick(context.Background())
+	if err == nil {
+		t.Fatal("finish reach failure after learning receipt must surface")
+	}
+	if util != willUtilPressure {
+		t.Fatalf("got util %q", util)
+	}
+	if sp.calls != 1 || !sp.committed || !f.discharged {
+		t.Fatalf("first no-novelty reach must spawn, commit, and discharge once; calls=%d committed=%v discharged=%v",
+			sp.calls, sp.committed, f.discharged)
+	}
+	learning, err := loadWillLearningState(learningPath)
+	if err != nil {
+		t.Fatalf("load learning after first failure: %v", err)
+	}
+	if learning.QuietRuns != 3 || learning.CooldownBreaths != 6 {
+		t.Fatalf("first learning state should apply no_novelty once, got %#v", learning)
+	}
+	st, err := loadWillReachState(reachPath)
+	if err != nil {
+		t.Fatalf("load pending reach: %v", err)
+	}
+	if st.Pending == nil || !st.Pending.ConsequenceCommitted || st.Pending.Outcome != willOutcomeNoNovelty {
+		t.Fatalf("failed finish must keep the committed no_novelty reach pending, got %#v", st.Pending)
+	}
+
+	sp2 := &fakeSpawner{}
+	sk2 := &typedFakeSink{}
+	w2, _ := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 0,
+	}, sp2, &sk2.fakeSink)
+	w2.sink = sk2
+	w2.rootID = "rootabc"
+	w2.reachStatePath = reachPath
+	w2.learningStatePath = learningPath
+	w2.pendingReach = st.Pending
+	w2.nextReachSeq = st.NextSeq
+	w2.refractory = 3
+	w2.quietRuns = learning.QuietRuns
+	w2.cooldown = learning.CooldownBreaths
+
+	util, err = w2.tick(context.Background())
+	if err != nil {
+		t.Fatalf("retry should finish the same no_novelty learning without respawning: %v", err)
+	}
+	if util != willUtilPressure {
+		t.Fatalf("retry util changed, got %q", util)
+	}
+	if sp2.calls != 0 {
+		t.Fatalf("retry after committed no_novelty consequence must not respawn the utility, calls=%d", sp2.calls)
+	}
+	learning, err = loadWillLearningState(learningPath)
+	if err != nil {
+		t.Fatalf("reload learning: %v", err)
+	}
+	if learning.QuietRuns != 3 || learning.CooldownBreaths != 6 {
+		t.Fatalf("retry must not learn no_novelty twice, got %#v", learning)
+	}
+}
+
+func TestWillTickRetryDoesNotDuplicateLearningReceiptAfterFinishGap(t *testing.T) {
+	stateDir := t.TempDir()
+	reachPath := willReachStatePath(stateDir)
+	learningPath := willLearningStatePath(stateDir)
+	eventPath := filepath.Join(t.TempDir(), "sartre.jsonl")
+	sp := &fakeSpawner{}
+	sk := &afterEmitFileSink{path: eventPath}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp, &fakeSink{})
+	w.sink = sk
+	w.rootID = "rootabc"
+	w.reachStatePath = reachPath
+	w.learningStatePath = learningPath
+	w.refractory = 3
+	w.quietRuns = 2
+	brokenReachPath := t.TempDir()
+	sk.afterEvent = func(ev willEvent) {
+		if ev.Phase == "learning" && f.discharged {
+			w.reachStatePath = brokenReachPath
+		}
+	}
+
+	util, err := w.tick(context.Background())
+	if err == nil {
+		t.Fatal("finish reach failure after file-backed learning receipt must surface")
+	}
+	if util != willUtilPressure {
+		t.Fatalf("got util %q", util)
+	}
+	data, err := os.ReadFile(eventPath)
+	if err != nil {
+		t.Fatalf("read first learning delivery: %v", err)
+	}
+	if got := strings.Count(string(data), `"phase":"learning"`); got != 1 {
+		t.Fatalf("first pass should deliver one learning receipt, got %d lines: %s", got, data)
+	}
+	st, err := loadWillReachState(reachPath)
+	if err != nil {
+		t.Fatalf("load pending reach: %v", err)
+	}
+	if st.Pending == nil || !st.Pending.LearningPrepared || st.Pending.LearningRecorded {
+		t.Fatalf("failed finish must leave prepared unrecorded learning pending, got %#v", st.Pending)
+	}
+
+	sp2 := &fakeSpawner{}
+	w2, _ := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 0,
+	}, sp2, &fakeSink{})
+	w2.sink = emitOnlyFileSink{path: eventPath}
+	w2.rootID = "rootabc"
+	w2.reachStatePath = reachPath
+	w2.learningStatePath = learningPath
+	w2.pendingReach = st.Pending
+	w2.nextReachSeq = st.NextSeq
+	w2.refractory = 3
+	w2.quietRuns = 3
+	w2.cooldown = 6
+
+	util, err = w2.tick(context.Background())
+	if err != nil {
+		t.Fatalf("retry should finish the same learning receipt without duplicate append: %v", err)
+	}
+	if util != willUtilPressure {
+		t.Fatalf("retry util changed, got %q", util)
+	}
+	if sp2.calls != 0 {
+		t.Fatalf("retry after delivered learning receipt must not respawn the utility, calls=%d", sp2.calls)
+	}
+	data, err = os.ReadFile(eventPath)
+	if err != nil {
+		t.Fatalf("read retry learning delivery: %v", err)
+	}
+	if got := strings.Count(string(data), `"phase":"learning"`); got != 1 {
+		t.Fatalf("retry must not append a duplicate learning receipt, got %d lines: %s", got, data)
+	}
+}
+
 func TestWillTickRetriesRecordedEffectBaselineWithoutRespawning(t *testing.T) {
 	stateDir := t.TempDir()
 	reachPath := willReachStatePath(stateDir)
@@ -1222,8 +1403,8 @@ func TestWillTickRecoveryDoesNotRespawnAfterEffectDeliveryStateGap(t *testing.T)
 	if err != nil {
 		t.Fatalf("read first effect delivery: %v", err)
 	}
-	if got := len(completeSartreJSONLines(data)); got != 1 {
-		t.Fatalf("first pass should deliver the effect once before failing state save, got %d lines: %s", got, data)
+	if got := strings.Count(string(data), `"phase":"effect"`); got != 1 {
+		t.Fatalf("first pass should deliver the effect once before failing state save, got %d effect lines: %s", got, data)
 	}
 	if f.discharged {
 		t.Fatal("the tide must not discharge before the delivered effect is recoverably journaled")
@@ -1266,8 +1447,8 @@ func TestWillTickRecoveryDoesNotRespawnAfterEffectDeliveryStateGap(t *testing.T)
 	if err != nil {
 		t.Fatalf("read retry effect delivery: %v", err)
 	}
-	if got := len(completeSartreJSONLines(data)); got != 1 {
-		t.Fatalf("retry must not append a duplicate effect, got %d lines: %s", got, data)
+	if got := strings.Count(string(data), `"phase":"effect"`); got != 1 {
+		t.Fatalf("retry must not append a duplicate effect, got %d effect lines: %s", got, data)
 	}
 	learning, err := loadWillLearningState(learningPath)
 	if err != nil {
