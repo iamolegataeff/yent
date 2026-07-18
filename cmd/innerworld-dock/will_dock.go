@@ -113,10 +113,14 @@ func (s osSpawner) Spawn(ctx context.Context, util string) (willSpawnResult, err
 		Overflow:         cw.overflow,
 		PendingStatePath: pendingPath,
 		StatePath:        statePath,
-		Commit: func() error {
-			digest, err := willFileSHA256(pendingPath)
-			if err != nil {
-				return err
+		Commit: func(expectedSHA256 string) error {
+			digest := expectedSHA256
+			if digest == "" {
+				var err error
+				digest, err = willFileSHA256(pendingPath)
+				if err != nil {
+					return err
+				}
 			}
 			return publishPendingWillState(pendingPath, statePath, digest)
 		},
@@ -611,15 +615,7 @@ func (s fileSink) Emit(line []byte) error {
 	if s.path == "" {
 		return fmt.Errorf("SARTRE event sink path is empty")
 	}
-	var err error
-	lines, err = filterAlreadyDeliveredSinkLines(s.path, lines)
-	if err != nil {
-		return err
-	}
-	if len(lines) == 0 {
-		return nil
-	}
-	f, err := os.OpenFile(s.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(s.path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
 	}
@@ -629,35 +625,87 @@ func (s fileSink) Emit(line []byte) error {
 			_ = f.Close()
 		}
 	}()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	locked := true
+	defer func() {
+		if locked {
+			_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		}
+	}()
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	existing, err := io.ReadAll(f)
+	if err != nil {
+		return err
+	}
+	changed := false
+	lines, changed, err = repairAndFilterSinkLines(f, existing, lines)
+	if err != nil {
+		return err
+	}
+	if len(lines) > 0 {
+		if _, err := f.Seek(0, io.SeekEnd); err != nil {
+			return err
+		}
+	}
 	for _, body := range lines {
 		if err := writeAll(f, append(body, '\n')); err != nil {
 			return err
 		}
+		changed = true
 	}
-	if err := f.Sync(); err != nil {
+	if changed {
+		if err := f.Sync(); err != nil {
+			return err
+		}
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_UN); err != nil {
 		return err
 	}
+	locked = false
 	if err := f.Close(); err != nil {
 		return err
 	}
 	closed = true
-	return syncParentDir(s.path)
+	if changed {
+		return syncParentDir(s.path)
+	}
+	return nil
 }
 
-func filterAlreadyDeliveredSinkLines(path string, lines [][]byte) ([][]byte, error) {
-	if len(lines) == 0 {
-		return nil, nil
-	}
-	existing, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return lines, nil
-		}
-		return nil, err
-	}
+func repairAndFilterSinkLines(f *os.File, existing []byte, lines [][]byte) ([][]byte, bool, error) {
+	prefixEnd := completeSartreJSONLPrefixEnd(existing)
 	seen := make(map[string]struct{})
-	for _, line := range completeSartreJSONLines(existing) {
+	for _, line := range completeSartreJSONLines(existing[:prefixEnd]) {
 		seen[string(line)] = struct{}{}
+	}
+	changed := false
+	tailRaw := existing[prefixEnd:]
+	tail := bytes.TrimSpace(tailRaw)
+	if len(tailRaw) > 0 {
+		if len(tail) == 0 {
+			if err := truncateSinkFile(f, prefixEnd); err != nil {
+				return nil, changed, err
+			}
+			changed = true
+		} else if validSartreJSONLine(tail) {
+			if _, err := f.Seek(0, io.SeekEnd); err != nil {
+				return nil, changed, err
+			}
+			if err := writeAll(f, []byte{'\n'}); err != nil {
+				return nil, changed, err
+			}
+			seen[string(tail)] = struct{}{}
+			changed = true
+		} else {
+			if err := truncateSinkFile(f, prefixEnd); err != nil {
+				return nil, changed, err
+			}
+			changed = true
+		}
 	}
 	out := lines[:0]
 	for _, line := range lines {
@@ -668,7 +716,31 @@ func filterAlreadyDeliveredSinkLines(path string, lines [][]byte) ([][]byte, err
 		seen[key] = struct{}{}
 		out = append(out, line)
 	}
-	return out, nil
+	return out, changed, nil
+}
+
+func completeSartreJSONLPrefixEnd(raw []byte) int64 {
+	cut := bytes.LastIndexByte(raw, '\n')
+	if cut < 0 {
+		return 0
+	}
+	return int64(cut + 1)
+}
+
+func validSartreJSONLine(line []byte) bool {
+	line = bytes.TrimSpace(line)
+	return len(line) > 0 && line[0] == '{' && json.Valid(line)
+}
+
+func truncateSinkFile(f *os.File, keep int64) error {
+	if keep < 0 {
+		keep = 0
+	}
+	if err := f.Truncate(keep); err != nil {
+		return err
+	}
+	_, err := f.Seek(keep, io.SeekStart)
+	return err
 }
 
 func writeAll(w io.Writer, p []byte) error {
@@ -822,7 +894,7 @@ func completeSartreJSONLines(raw []byte) [][]byte {
 	var out [][]byte
 	for _, part := range bytes.Split(raw, []byte{'\n'}) {
 		line := bytes.TrimSpace(part)
-		if len(line) == 0 || line[0] != '{' || !json.Valid(line) {
+		if !validSartreJSONLine(line) {
 			continue
 		}
 		out = append(out, append([]byte(nil), line...))

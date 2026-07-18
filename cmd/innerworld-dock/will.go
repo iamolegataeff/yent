@@ -39,7 +39,7 @@ type willSpawnResult struct {
 	// the exact sensor baseline that produced an already-delivered effect without respawning it.
 	PendingStatePath string
 	StatePath        string
-	Commit           func() error
+	Commit           func(expectedSHA256 string) error
 }
 
 // willSpawner runs a self-reading utility and returns its SARTRE event line(s), or an error.
@@ -493,7 +493,7 @@ func (w *willTicker) markReachBaselineCommitted(reach willPendingReach, result w
 		return reach, nil
 	}
 	if result.Commit != nil {
-		if err := result.Commit(); err != nil {
+		if err := result.Commit(reach.BaselineSHA256); err != nil {
 			if recoverErr := publishPendingWillState(reach.BaselinePendingPath, reach.BaselineStatePath, reach.BaselineSHA256); recoverErr != nil {
 				return willPendingReach{}, err
 			}
