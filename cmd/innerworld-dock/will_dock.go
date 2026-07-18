@@ -292,6 +292,11 @@ type willPendingReach struct {
 	ConsequenceCommitted bool             `json:"consequence_committed,omitempty"`
 	Outcome              string           `json:"outcome,omitempty"`
 	EffectCount          int              `json:"effect_count,omitempty"`
+	LearningPrepared     bool             `json:"learning_prepared,omitempty"`
+	LearningRecorded     bool             `json:"learning_recorded,omitempty"`
+	LearningLine         string           `json:"learning_line,omitempty"`
+	LearningQuietRuns    int              `json:"learning_quiet_runs,omitempty"`
+	LearningCooldown     int              `json:"learning_cooldown_breaths,omitempty"`
 }
 
 type willReachState struct {
@@ -416,7 +421,14 @@ func validateWillReachState(st willReachState) error {
 				return fmt.Errorf("pending reach has dead-letter without a typed failure outcome")
 			}
 		}
+		if err := validateWillPendingLearning(*p); err != nil {
+			return err
+		}
 		return nil
+	}
+	if p.LearningPrepared || p.LearningRecorded || strings.TrimSpace(p.LearningLine) != "" ||
+		p.LearningQuietRuns != 0 || p.LearningCooldown != 0 {
+		return fmt.Errorf("pending reach has learning stage before committed consequence")
 	}
 	if p.EffectPrepared || p.EffectRecorded {
 		if !validWillCommittedOutcome(p.Outcome, p.EffectCount) || p.Outcome == willOutcomeDeadLetter {
@@ -447,6 +459,38 @@ func validateWillReachState(st willReachState) error {
 	}
 	if p.Outcome != "" || p.EffectCount != 0 || p.EffectPrepared || strings.TrimSpace(p.EffectLine) != "" {
 		return fmt.Errorf("pending reach has uncommitted outcome %q with %d effects", p.Outcome, p.EffectCount)
+	}
+	return nil
+}
+
+func validateWillPendingLearning(p willPendingReach) error {
+	if p.LearningRecorded && !p.LearningPrepared {
+		return fmt.Errorf("pending reach has recorded learning without prepared learning")
+	}
+	if !p.LearningPrepared {
+		if strings.TrimSpace(p.LearningLine) != "" || p.LearningQuietRuns != 0 || p.LearningCooldown != 0 {
+			return fmt.Errorf("pending reach has unprepared learning payload")
+		}
+		return nil
+	}
+	if p.LearningQuietRuns < 0 || p.LearningQuietRuns > willQuietRunMax {
+		return fmt.Errorf("pending reach has invalid learning quiet_runs %d", p.LearningQuietRuns)
+	}
+	if p.LearningCooldown < 0 {
+		return fmt.Errorf("pending reach has invalid learning cooldown %d", p.LearningCooldown)
+	}
+	ev, err := parseWillEventLine(p.LearningLine)
+	if err != nil {
+		return fmt.Errorf("pending reach has invalid learning receipt: %w", err)
+	}
+	if ev.ID != p.ID || ev.Phase != "learning" || ev.Utility != p.Utility ||
+		ev.Outcome != p.Outcome || ev.EffectCount != p.EffectCount ||
+		ev.Attempts != p.Attempts || ev.CooldownBreaths != p.LearningCooldown ||
+		ev.Breath != p.Breath {
+		return fmt.Errorf("pending reach learning receipt does not match committed consequence")
+	}
+	if p.Outcome == willOutcomeDeadLetter && ev.FailureOutcome != p.LastFailureOutcome {
+		return fmt.Errorf("pending reach learning receipt does not match dead-letter failure outcome")
 	}
 	return nil
 }
@@ -741,14 +785,37 @@ func publishDurableFile(tmp, path string) error {
 }
 
 func (s fileSink) EmitEvent(ev willEvent) error {
+	line, err := marshalWillEventLine(ev)
+	if err != nil {
+		return err
+	}
+	return s.Emit([]byte(line))
+}
+
+func marshalWillEventLine(ev willEvent) (string, error) {
 	if ev.Timestamp == 0 {
 		ev.Timestamp = time.Now().Unix()
 	}
 	b, err := json.Marshal(ev)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return s.Emit(b)
+	return string(b), nil
+}
+
+func parseWillEventLine(line string) (willEvent, error) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return willEvent{}, fmt.Errorf("empty event line")
+	}
+	if !json.Valid([]byte(line)) {
+		return willEvent{}, fmt.Errorf("invalid JSON")
+	}
+	var ev willEvent
+	if err := json.Unmarshal([]byte(line), &ev); err != nil {
+		return willEvent{}, err
+	}
+	return ev, nil
 }
 
 func completeSartreJSONLines(raw []byte) [][]byte {

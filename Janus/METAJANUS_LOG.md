@@ -782,3 +782,26 @@ Regressions cover the new crash window with a real file-backed sink, prove the
 retry does not spawn the utility again, and assert the effect JSONL file still
 contains one record after recovery. A separate sink test covers exact duplicate
 suppression directly.
+
+### fix 29 - will learning consequence is pinned before receipt
+
+The will reach ledger now prepares the final learning receipt and the exact
+post-learning plasticity state before discharge, learning-state publication, and
+receipt delivery. If a restart lands after the learning state was saved or the
+learning receipt was appended but before the reach itself was finished, recovery
+uses the pinned `quiet_runs`, `cooldown_breaths`, and JSON receipt instead of
+planning the consequence again.
+
+This closes the remaining final-learning crash window: a committed `no_novelty`
+reach cannot increment quiet plasticity twice, and a previously emitted final
+receipt can be replayed through the exact JSONL dedupe path rather than becoming
+a second teaching event. The non-typed sink contract remains unchanged; only
+durable typed SARTRE sinks receive the final learning receipt.
+
+Regressions force finish failures immediately after `no_novelty` learning and
+after a file-backed learning receipt. They prove the utility is not respawned,
+`quiet_runs/cooldown_breaths` remain at the first learned values, and retry does
+not append a duplicate `learning` JSONL record. Validated with focused will
+recovery tests, `go test -count=1 ./cmd/innerworld-dock`,
+`go test -count=1 ./...`, `go test -race -count=1 ./...`, `go vet ./...`,
+`sh tools/build_libamk.sh`, and `git diff --check`.
