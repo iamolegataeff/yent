@@ -732,3 +732,17 @@ test process against the same state directory, verifies that it cannot acquire
 ownership, then releases the lock and proves the namespace can be claimed again.
 This closes Sol's residual same-namespace multi-owner gap without changing the
 will tide, utility semantics, or generation path.
+
+### fix 27 - empty SARTRE sink disables will before state
+
+The will startup contract now matches the runtime boundary: `YENT_SARTRE_EVENTS`
+is required before any reach can be launched. If utilities are configured but
+the durable SARTRE event sink is missing, the dock prints an explicit disabled
+diagnostic and returns before enabling persistent will physics, resolving the
+repo root, creating the state namespace, taking the owner lock, or starting the
+will goroutine.
+
+This closes Sol's low-severity operator-contract finding. The old message said
+the will would reach and read while the spiral could not close, but the first
+intent receipt already failed on an empty `fileSink`, so the truthful behavior
+is fail-closed before state.

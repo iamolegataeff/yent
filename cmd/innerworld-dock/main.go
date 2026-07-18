@@ -1172,81 +1172,7 @@ func main() {
 			flowBody.AutumnEnergy())
 	}
 
-	// The will: default OFF. When YENT_WILL_UTILS_DIR points at the built self-reading utilities,
-	// Yent's will loop runs alongside the breath — the AML confluence physics (the_will_design.aml)
-	// crests his own MetaJanus + field metrics into a will_gaze tide, and when it crests he reaches
-	// for a utility whose perception re-enters the field through sartreSense (the spiral). Persistent
-	// globals carry the tide, so they must be armed. The loop is its own goroutine: a slow reach
-	// stalls only the will's own cadence, never the inner-world goroutines.
-	if utilsDir := strings.TrimSpace(os.Getenv("YENT_WILL_UTILS_DIR")); utilsDir != "" {
-		flowBody.PersistentMode(true)
-		sinkPath := strings.TrimSpace(os.Getenv("YENT_SARTRE_EVENTS"))
-		root, err := resolveWillRoot(os.Getenv("YENT_WILL_ROOT"))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[will] root: %v\n", err)
-		} else {
-			rootID := willRootID(root)
-			stateDir := willStateDir(root)
-			if err := os.MkdirAll(stateDir, 0o755); err != nil {
-				fmt.Fprintf(os.Stderr, "[will] state dir %s: %v\n", stateDir, err)
-			} else {
-				owner, err := acquireWillNamespaceOwner(stateDir)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "[will] namespace owner %s: %v\n", stateDir, err)
-				} else {
-					defer func() {
-						if err := owner.Close(); err != nil {
-							fmt.Fprintf(os.Stderr, "[will] namespace owner release %s: %v\n", stateDir, err)
-						}
-					}()
-					learningPath := willLearningStatePath(stateDir)
-					learningState, err := loadWillLearningState(learningPath)
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "[will] learning state %s: %v\n", learningPath, err)
-					} else {
-						reachPath := willReachStatePath(stateDir)
-						reachState, err := loadWillReachState(reachPath)
-						if err != nil {
-							fmt.Fprintf(os.Stderr, "[will] reach state %s: %v\n", reachPath, err)
-						} else {
-							initialBreath := initialWillBreath(learningState, reachState)
-							wt := &willTicker{
-								field:  flowBody,
-								script: willScriptPath(),
-								spawner: osSpawner{
-									dir:      utilsDir,
-									root:     root,
-									stateDir: stateDir,
-									timeout:  willReachTimeout(),
-								},
-								sink:              fileSink{path: sinkPath},
-								rootID:            rootID,
-								learningStatePath: learningPath,
-								reachStatePath:    reachPath,
-								refractory:        willRefractoryTicks(),
-								breath:            initialBreath,
-								cooldown:          learningState.CooldownBreaths,
-								quietRuns:         learningState.QuietRuns,
-								nextReachSeq:      reachState.NextSeq,
-								pendingReach:      reachState.Pending,
-								maxReachAttempts:  willReachMaxAttempts(),
-							}
-							go wt.run(ctx, willTickEvery())
-							pending := ""
-							if reachState.Pending != nil {
-								pending = fmt.Sprintf(", pending_reach=%s", reachState.Pending.ID)
-							}
-							fmt.Printf("=== will wired: confluence tide -> reach for a self-reading utility (utils=%s, root=%s, root_id=%s, state=%s, quiet_runs=%d, cooldown=%d, breath=%d, reach_seq=%d, max_attempts=%d%s, every %s) ===\n",
-								utilsDir, root, rootID, stateDir, learningState.QuietRuns, learningState.CooldownBreaths, initialBreath, reachState.NextSeq, willReachMaxAttempts(), pending, willTickEvery())
-							if sinkPath == "" {
-								fmt.Println("    (YENT_SARTRE_EVENTS unset: the will reaches and reads, but the spiral cannot close)")
-							}
-						}
-					}
-				}
-			}
-		}
-	}
+	wireWillFromEnv(ctx, flowBody)
 
 	iw.Breathe(ctx)
 	if limpha != nil {
@@ -1256,4 +1182,96 @@ func main() {
 		}
 	}
 	fmt.Println("=== done ===")
+}
+
+// The will: default OFF. When YENT_WILL_UTILS_DIR points at the built self-reading utilities,
+// Yent's will loop runs alongside the breath — the AML confluence physics (the_will_design.aml)
+// crests his own MetaJanus + field metrics into a will_gaze tide, and when it crests he reaches
+// for a utility whose perception re-enters the field through sartreSense (the spiral). Persistent
+// globals carry the tide, so they must be armed. The loop is its own goroutine: a slow reach
+// stalls only the will's own cadence, never the inner-world goroutines.
+func wireWillFromEnv(ctx context.Context, flowBody *aml.Body) bool {
+	utilsDir := strings.TrimSpace(os.Getenv("YENT_WILL_UTILS_DIR"))
+	if utilsDir == "" {
+		return false
+	}
+	sinkPath := strings.TrimSpace(os.Getenv("YENT_SARTRE_EVENTS"))
+	if sinkPath == "" {
+		fmt.Fprintln(os.Stderr, "[will] YENT_SARTRE_EVENTS unset: will disabled; durable SARTRE event sink is required before any reach can be launched")
+		return false
+	}
+	flowBody.PersistentMode(true)
+	root, err := resolveWillRoot(os.Getenv("YENT_WILL_ROOT"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[will] root: %v\n", err)
+		return false
+	}
+	rootID := willRootID(root)
+	stateDir := willStateDir(root)
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "[will] state dir %s: %v\n", stateDir, err)
+		return false
+	}
+	owner, err := acquireWillNamespaceOwner(stateDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[will] namespace owner %s: %v\n", stateDir, err)
+		return false
+	}
+	keepOwner := false
+	defer func() {
+		if !keepOwner {
+			if err := owner.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "[will] namespace owner release %s: %v\n", stateDir, err)
+			}
+		}
+	}()
+	learningPath := willLearningStatePath(stateDir)
+	learningState, err := loadWillLearningState(learningPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[will] learning state %s: %v\n", learningPath, err)
+		return false
+	}
+	reachPath := willReachStatePath(stateDir)
+	reachState, err := loadWillReachState(reachPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[will] reach state %s: %v\n", reachPath, err)
+		return false
+	}
+	initialBreath := initialWillBreath(learningState, reachState)
+	wt := &willTicker{
+		field:  flowBody,
+		script: willScriptPath(),
+		spawner: osSpawner{
+			dir:      utilsDir,
+			root:     root,
+			stateDir: stateDir,
+			timeout:  willReachTimeout(),
+		},
+		sink:              fileSink{path: sinkPath},
+		rootID:            rootID,
+		learningStatePath: learningPath,
+		reachStatePath:    reachPath,
+		refractory:        willRefractoryTicks(),
+		breath:            initialBreath,
+		cooldown:          learningState.CooldownBreaths,
+		quietRuns:         learningState.QuietRuns,
+		nextReachSeq:      reachState.NextSeq,
+		pendingReach:      reachState.Pending,
+		maxReachAttempts:  willReachMaxAttempts(),
+	}
+	keepOwner = true
+	go func() {
+		<-ctx.Done()
+		if err := owner.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "[will] namespace owner release %s: %v\n", stateDir, err)
+		}
+	}()
+	go wt.run(ctx, willTickEvery())
+	pending := ""
+	if reachState.Pending != nil {
+		pending = fmt.Sprintf(", pending_reach=%s", reachState.Pending.ID)
+	}
+	fmt.Printf("=== will wired: confluence tide -> reach for a self-reading utility (utils=%s, root=%s, root_id=%s, state=%s, quiet_runs=%d, cooldown=%d, breath=%d, reach_seq=%d, max_attempts=%d%s, every %s) ===\n",
+		utilsDir, root, rootID, stateDir, learningState.QuietRuns, learningState.CooldownBreaths, initialBreath, reachState.NextSeq, willReachMaxAttempts(), pending, willTickEvery())
+	return true
 }
