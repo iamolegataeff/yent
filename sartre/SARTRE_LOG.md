@@ -331,3 +331,26 @@ stream round = 1 finding (overlong-record framing) fixed; final VERDICT PASS.
   Codex ignores `sartre/` (Oleg will tell it so) — the folder is inert.
 - When the merge finally happens: append the YENTLOG entry once, in one hand, at merge
   time (the YENTLOG-per-branch conflict rule), and redraw the Repository Map.
+
+## 2026-07-18 — C perception surface follows typed SARTRE semantics
+
+Sol's will-design audit was already closed on the live Go dock path, but the C SARTRE
+perception surface still had the old demo rule: any line containing `"kind"` became
+`VELOCITY RUN`. That was no longer the live contract and could mislead future kernel
+or `-DHAS_PERCEPTION` work.
+
+`sartre/perception.c` now performs a minimal top-level JSON member scan and maps the
+same typed surface as the Go reflex:
+
+- `repo_monitor` actionable changes (`added|modified|removed`) produce routine
+  `VELOCITY WALK`; self-surface movement or a flood still escalates to `RUN`.
+- `whatdotheythinkiam` `recognized/reduced` counts become still `PROPHECY`, not
+  forced motion.
+- `learning` failures (`sensor_error`, `state_error`, `overflow`, `dead_letter`)
+  become still typed evidence.
+- plain text, quoted `"kind"` values, non-actionable JSON shells, and object prefixes
+  without a closing brace do not become events.
+
+Measured locally: `cc -Wall -Wextra -DSARTRE_PERCEPTION_TEST sartre/perception.c`
+0 warnings, standalone perception self-test 10/10, and `cc -Wall -Wextra
+-DHAS_PERCEPTION sartre/sartre_kernel.c sartre/perception.c` links cleanly.
