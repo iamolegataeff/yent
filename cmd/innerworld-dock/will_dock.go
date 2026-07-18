@@ -63,6 +63,16 @@ func willRefractoryTicks() int {
 	return 6
 }
 
+// willReachMaxAttempts bounds a single causal reach before the will records a terminal
+// dead-letter consequence and lets the field continue. The dead letter is still a typed
+// learning receipt; it is not a silent drop.
+func willReachMaxAttempts() int {
+	if n := positiveIntEnv("YENT_WILL_REACH_MAX_ATTEMPTS"); n > 0 {
+		return n
+	}
+	return willReachMaxAttemptsDefault
+}
+
 // willReachTimeout bounds a single reach (YENT_WILL_REACH_SEC), default 5s, so a hung utility
 // never stalls the will longer than one bounded wait.
 func willReachTimeout() time.Duration {
@@ -267,6 +277,8 @@ type willPendingReach struct {
 	Utility              string           `json:"util"`
 	Tide                 willTideSnapshot `json:"tide"`
 	Breath               int              `json:"breath"`
+	Attempts             int              `json:"attempts,omitempty"`
+	LastFailureOutcome   string           `json:"last_failure_outcome,omitempty"`
 	ConsequenceCommitted bool             `json:"consequence_committed,omitempty"`
 	Outcome              string           `json:"outcome,omitempty"`
 	EffectCount          int              `json:"effect_count,omitempty"`
@@ -370,9 +382,26 @@ func validateWillReachState(st willReachState) error {
 	if p.Breath < 0 {
 		return fmt.Errorf("pending reach has negative breath %d", p.Breath)
 	}
+	if p.Attempts < 0 {
+		return fmt.Errorf("pending reach has negative attempts %d", p.Attempts)
+	}
+	if p.Attempts > 0 && !willFailureOutcome(p.LastFailureOutcome) && !p.ConsequenceCommitted {
+		return fmt.Errorf("pending reach has attempts without a typed failure outcome %q", p.LastFailureOutcome)
+	}
+	if p.LastFailureOutcome != "" && !willFailureOutcome(p.LastFailureOutcome) {
+		return fmt.Errorf("pending reach has invalid failure outcome %q", p.LastFailureOutcome)
+	}
 	if p.ConsequenceCommitted {
 		if !validWillCommittedOutcome(p.Outcome, p.EffectCount) {
 			return fmt.Errorf("pending reach has invalid committed outcome %q with %d effects", p.Outcome, p.EffectCount)
+		}
+		if p.Outcome == willOutcomeDeadLetter {
+			if p.Attempts <= 0 {
+				return fmt.Errorf("pending reach has dead-letter without attempts")
+			}
+			if !willFailureOutcome(p.LastFailureOutcome) {
+				return fmt.Errorf("pending reach has dead-letter without a typed failure outcome")
+			}
 		}
 		return nil
 	}
@@ -388,6 +417,17 @@ func validWillCommittedOutcome(outcome string, effectCount int) bool {
 		return effectCount == 0
 	case willOutcomePerceptionCommitted:
 		return effectCount > 0
+	case willOutcomeDeadLetter:
+		return effectCount == 0
+	default:
+		return false
+	}
+}
+
+func willFailureOutcome(outcome string) bool {
+	switch strings.TrimSpace(outcome) {
+	case willOutcomeSensorError, willOutcomeStateError, willOutcomeOverflow:
+		return true
 	default:
 		return false
 	}
@@ -667,6 +707,8 @@ type willEvent struct {
 	EffectCount       int     `json:"effect_count,omitempty"`
 	BytesCaptured     int     `json:"bytes_captured,omitempty"`
 	BytesLimit        int     `json:"bytes_limit,omitempty"`
+	Attempts          int     `json:"attempts,omitempty"`
+	FailureOutcome    string  `json:"failure_outcome,omitempty"`
 }
 
 func newWillEventID(rootID string, seq int64, util string, tide willTideSnapshot) string {

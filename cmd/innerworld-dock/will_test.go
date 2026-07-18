@@ -340,6 +340,86 @@ func TestWillTickReusesPendingReachIDAfterRetry(t *testing.T) {
 	}
 }
 
+func TestWillTickDeadLettersRepeatedSensorFailure(t *testing.T) {
+	stateDir := t.TempDir()
+	sp := &fakeSpawner{err: errors.New("missing utility")}
+	sk := &typedFakeSink{}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp, &sk.fakeSink)
+	w.sink = sk
+	w.rootID = "rootabc"
+	w.refractory = 2
+	w.maxReachAttempts = 2
+	w.reachStatePath = willReachStatePath(stateDir)
+	w.learningStatePath = willLearningStatePath(stateDir)
+
+	util, err := w.tick(context.Background())
+	if err == nil || util != willUtilPressure {
+		t.Fatalf("first failed reach should surface the sensor error, util=%q err=%v", util, err)
+	}
+	if f.discharged {
+		t.Fatal("the first failed attempt must not spend the tide")
+	}
+	if len(sk.events) != 2 || sk.events[1].Outcome != willOutcomeSensorError || sk.events[1].Attempts != 1 {
+		t.Fatalf("first failure must emit attempt=1 sensor_error, got %#v", sk.events)
+	}
+	reachID := sk.events[0].ID
+	st, err := loadWillReachState(w.reachStatePath)
+	if err != nil {
+		t.Fatalf("load pending reach: %v", err)
+	}
+	if st.Pending == nil || st.Pending.ID != reachID || st.Pending.Attempts != 1 ||
+		st.Pending.LastFailureOutcome != willOutcomeSensorError || st.Pending.ConsequenceCommitted {
+		t.Fatalf("first failure must keep typed pending reach for retry, got %#v", st.Pending)
+	}
+
+	sk.events = nil
+	util, err = w.tick(context.Background())
+	if err != nil || util != willUtilPressure {
+		t.Fatalf("second failed reach should close as dead-letter, util=%q err=%v", util, err)
+	}
+	if sp.calls != 2 {
+		t.Fatalf("dead-letter should happen after the configured retry window, calls=%d", sp.calls)
+	}
+	if !f.discharged {
+		t.Fatal("terminal dead-letter must spend the stored tide")
+	}
+	if sp.committed {
+		t.Fatal("dead-letter must not commit failed utility state")
+	}
+	if len(sk.events) != 3 {
+		t.Fatalf("second failure should emit intention, failure learning, terminal learning, got %#v", sk.events)
+	}
+	if sk.events[0].ID != reachID || sk.events[1].ID != reachID || sk.events[2].ID != reachID {
+		t.Fatalf("dead-letter must preserve the reach id, got %#v", sk.events)
+	}
+	if sk.events[1].Outcome != willOutcomeSensorError || sk.events[1].Attempts != 2 {
+		t.Fatalf("second failure must be attempt=2 sensor_error, got %#v", sk.events[1])
+	}
+	dead := sk.events[2]
+	if dead.Phase != "learning" || dead.Outcome != willOutcomeDeadLetter || dead.Attempts != 2 ||
+		dead.FailureOutcome != willOutcomeSensorError || dead.EffectCount != 0 || dead.CooldownBreaths != 3 {
+		t.Fatalf("terminal receipt must be a typed dead-letter consequence, got %#v", dead)
+	}
+	st, err = loadWillReachState(w.reachStatePath)
+	if err != nil {
+		t.Fatalf("reload reach state: %v", err)
+	}
+	if st.Pending != nil || st.NextSeq != 2 {
+		t.Fatalf("dead-letter must clear reach state and advance sequence, got %#v", st)
+	}
+	learning, err := loadWillLearningState(w.learningStatePath)
+	if err != nil {
+		t.Fatalf("load learning state: %v", err)
+	}
+	if learning.LastOutcome != willOutcomeDeadLetter || learning.LastEffectCount != 0 ||
+		learning.LastReachID != reachID || learning.CooldownBreaths != 3 {
+		t.Fatalf("dead-letter must become durable learning state, got %#v", learning)
+	}
+}
+
 func TestWillTickEmitErrorDoesNotDischarge(t *testing.T) {
 	sp, sk := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"added","path":"README.md"}`)}, &fakeSink{err: errors.New("disk full")}
 	w, f := newWill(map[string]float32{

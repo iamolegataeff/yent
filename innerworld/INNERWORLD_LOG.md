@@ -839,6 +839,17 @@ pressure.
 This is still a host-side delivery boundary only: memory and field remain separate systems, but memory
 deduplication no longer erases an in-flight field consequence.
 
+## 2026-07-18 — Will reach failures terminate as typed dead letters
+
+The will host now gives each failed reach a bounded retry window. `sensor_error`, `overflow`, and `state_error`
+attempts increment a durable `attempts` counter on the pending reach; once the retry budget is exhausted, the
+same reach commits a `dead_letter` learning consequence with zero effects, records the last failure outcome,
+spends the stored tide, and advances the reach sequence.
+
+The final dead-letter is still pressure, not motion: SARTRE treats it as a still typed failure and does not
+emit `VELOCITY`. Bridge traces and stable-event keys include `attempts` and `failure_outcome`, so repeated
+retries remain auditable instead of being silently deduped away.
+
 ---
 
 ## Deferred / parked
