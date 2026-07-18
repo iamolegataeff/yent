@@ -104,6 +104,35 @@ yent/
 
 ---
 
+## 2026-07-18 — post-#231 will recovery self-check reaches Sol handoff
+
+The post-repair self-checks after Sol's residual will re-audit are now repaired
+through the #231 merge, at
+`origin/main@a13e107f6cfe50a77562704810d5546e9a7beb14`.
+
+Repair trail after the #228 handoff:
+
+- #230 / `6b4dc70` records the exact prepared effect payload before appending it
+  to `YENT_SARTRE_EVENTS`. A restart after append but before reach-state delivery
+  publication reuses the same payload, does not respawn the utility, and relies
+  on exact JSONL dedupe instead of emitting a duplicate effect.
+- #231 / `93c48be` pins the final learning receipt plus
+  `quiet_runs/cooldown_breaths` before discharge, learning-state publication,
+  and receipt delivery. A restart after learning publication or receipt append
+  finishes the same reach without teaching `no_novelty` twice or appending a
+  duplicate `learning` receipt.
+
+Validation receipts across the self-check pass include focused will recovery
+tests, `go test -count=1 ./cmd/innerworld-dock`, sequential
+`go test -count=1 ./...`, sequential `go test -race -count=1 ./...`,
+`go vet ./...`, `sh tools/build_libamk.sh`, and `git diff --check`.
+The first attempt to run normal and race suites concurrently reproduced the
+known resident DoE harness interference; the targeted package, full normal
+suite, and full race suite passed when run sequentially. This is the next
+read-only Sol handoff boundary, not an independent Sol closure verdict.
+
+---
+
 ## 2026-07-18 — post-#228 Sol residual will pass reaches re-audit boundary
 
 The residual Sol will re-audit findings from
