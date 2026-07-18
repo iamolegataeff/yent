@@ -118,6 +118,31 @@ func TestOsSpawnerCommitsPendingStateOnlyWhenAsked(t *testing.T) {
 	}
 }
 
+func TestPublishPendingWillStateVerifiesRecordedHash(t *testing.T) {
+	dir := t.TempDir()
+	pendingPath := filepath.Join(dir, "repo_monitor.state.pending")
+	statePath := filepath.Join(dir, "repo_monitor.state")
+	if err := os.WriteFile(pendingPath, []byte("new-baseline\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := willFileSHA256(pendingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := publishPendingWillState(pendingPath, statePath, digest); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if err := publishPendingWillState(pendingPath, statePath, digest); err != nil {
+		t.Fatalf("missing pending with matching canonical hash should be recoverable: %v", err)
+	}
+	if err := os.WriteFile(statePath, []byte("old-baseline\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := publishPendingWillState(pendingPath, statePath, digest); err == nil {
+		t.Fatal("missing pending with stale canonical state must not be treated as committed")
+	}
+}
+
 func TestWillUtilArgs(t *testing.T) {
 	// repo_monitor: --once --state <dir>/repo_monitor.state --path <root>
 	a := strings.Join(willUtilArgs(willUtilPressure, "/repo", "/st"), " ")
