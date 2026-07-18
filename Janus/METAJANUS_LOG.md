@@ -680,3 +680,17 @@ will loop anymore, but it remained compiled by `-DHAS_PERCEPTION` and was danger
 The C surface now mirrors the typed contract: routine repo novelty walks, self-surface movement or floods run,
 identity recognition/reduction emits still prophecy, sensor failures emit still prophecy, and forged/plain
 `"kind"` text is ignored. The standalone C test now covers all of those cases.
+
+### re-audit boundary — original Sol will-design findings repaired through #224
+
+After fix 24, the original Sol will-design audit has a complete repair trail on `main`:
+event framing and durable cursor boundaries, host-state acknowledgement ordering, vector
+will tide receipts, sensor territory/state namespacing, transactional AML failure rollback,
+typed field consequences, breath-count time-domain persistence, and the legacy C perception
+surface all have explicit fixes and receipts. The current baseline for an independent
+read-only re-audit is `origin/main@201957a` (`#224` merge).
+
+Known validation shape: focused will/SARTRE tests, `sh tools/build_libamk.sh`, C perception
+standalone/kernel builds, and repeated `go test -count=1 ./...` are green; the only observed
+noise was the pre-existing forged-status flaky, which passed targeted, package, and repeated
+full-suite reruns. Wormholes remain deliberately out of scope.
