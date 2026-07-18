@@ -104,6 +104,27 @@ yent/
 
 ---
 
+## 2026-07-18 — Sol will-design repair pass reaches re-audit boundary
+
+The original Sol/GPT-5.6 will-design audit
+(`/Users/ataeff/arianna-shared/yent-inference/AUDIT_SOL_WILL_DESIGN_2026-07-16.md`)
+is now repaired through the #224 merge, at `origin/main@201957a`.
+
+Repair scope covered the audit's causal boundary findings, not new generation
+features: vector will tide receipts, typed consequence learning, durable state
+publish, breath-count refractory state, pending-reach replay boundaries,
+SARTRE cursor/limpha acknowledgement ordering, malformed/non-actionable utility
+output, transactional AML failure rollback, typed dead letters, and the C
+SARTRE perception surface that no longer maps any `"kind"` substring to
+`VELOCITY RUN`.
+
+Validation receipts across the last fix set include focused will/SARTRE tests,
+`sh tools/build_libamk.sh`, C perception standalone/kernel builds, and repeated
+`go test -count=1 ./...`. The first full run during #224 hit the known transient
+forged-status test; the targeted rerun, package rerun, and repeated full suite
+passed. This entry is a re-audit handoff, not a claim of an independent Sol
+closure verdict.
+
 ## 2026-07-12 — post-#165 broad Metal smoke: creator boundary closed
 
 PR #165 moved the narrow creator/provider question out of prompt-only control
