@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -56,13 +57,16 @@ func (f *fakeWillField) Exec(script string) error {
 }
 
 type fakeSpawner struct {
-	util      string // the last util asked for
-	line      []byte
-	overflow  bool
-	err       error
-	commitErr error
-	committed bool
-	calls     int
+	util             string // the last util asked for
+	line             []byte
+	overflow         bool
+	err              error
+	commitErr        error
+	afterCommit      func() error
+	pendingStatePath string
+	statePath        string
+	committed        bool
+	calls            int
 }
 
 func (s *fakeSpawner) Spawn(_ context.Context, util string) (willSpawnResult, error) {
@@ -71,17 +75,52 @@ func (s *fakeSpawner) Spawn(_ context.Context, util string) (willSpawnResult, er
 	if s.err != nil {
 		return willSpawnResult{}, s.err
 	}
+	pendingPath, statePath, err := s.ensurePendingState(util)
+	if err != nil {
+		return willSpawnResult{}, err
+	}
 	return willSpawnResult{
-		Line:     s.line,
-		Overflow: s.overflow,
+		Line:             s.line,
+		Overflow:         s.overflow,
+		PendingStatePath: pendingPath,
+		StatePath:        statePath,
 		Commit: func() error {
 			if s.commitErr != nil {
 				return s.commitErr
 			}
+			digest, err := willFileSHA256(pendingPath)
+			if err != nil {
+				return err
+			}
+			if err := publishPendingWillState(pendingPath, statePath, digest); err != nil {
+				return err
+			}
 			s.committed = true
+			if s.afterCommit != nil {
+				return s.afterCommit()
+			}
 			return nil
 		},
 	}, nil
+}
+
+func (s *fakeSpawner) ensurePendingState(util string) (string, string, error) {
+	if s.pendingStatePath != "" || s.statePath != "" {
+		if s.pendingStatePath == "" || s.statePath == "" {
+			return "", "", errors.New("fake spawner needs both pending and canonical state paths")
+		}
+		return s.pendingStatePath, s.statePath, nil
+	}
+	dir, err := os.MkdirTemp("", "will-fake-state-*")
+	if err != nil {
+		return "", "", err
+	}
+	statePath := filepath.Join(dir, util+".state")
+	pendingPath := statePath + ".pending"
+	if err := os.WriteFile(pendingPath, []byte("pending\n"), 0o644); err != nil {
+		return "", "", err
+	}
+	return pendingPath, statePath, nil
 }
 
 type fakeSink struct {
@@ -465,7 +504,17 @@ func TestWillTickEmptyFileSinkDoesNotReachOrCommit(t *testing.T) {
 }
 
 func TestWillTickStateCommitErrorDoesNotDischarge(t *testing.T) {
-	sp, sk := &fakeSpawner{line: []byte(`{"util":"repo_monitor","kind":"added","path":"README.md"}`), commitErr: errors.New("rename")}, &fakeSink{}
+	dir := t.TempDir()
+	pendingPath := filepath.Join(dir, "repo_monitor.state.pending")
+	statePath := filepath.Join(t.TempDir(), "missing", "repo_monitor.state")
+	if err := os.WriteFile(pendingPath, []byte("pending\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sp, sk := &fakeSpawner{
+		line:             []byte(`{"util":"repo_monitor","kind":"added","path":"README.md"}`),
+		pendingStatePath: pendingPath,
+		statePath:        statePath,
+	}, &fakeSink{}
 	w, f := newWill(map[string]float32{
 		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
 	}, sp, sk)
@@ -931,6 +980,184 @@ func TestWillTickRetryKeepsCommittedConsequenceAfterReceiptFailure(t *testing.T)
 	}
 	if st.Pending != nil || st.NextSeq != 2 {
 		t.Fatalf("finalized retry must clear pending reach and advance sequence, got %#v", st)
+	}
+}
+
+func TestWillTickRetriesRecordedEffectBaselineWithoutRespawning(t *testing.T) {
+	stateDir := t.TempDir()
+	reachPath := willReachStatePath(stateDir)
+	learningPath := willLearningStatePath(stateDir)
+	pendingPath := filepath.Join(stateDir, "repo_monitor.state.pending")
+	statePath := filepath.Join(t.TempDir(), "missing", "repo_monitor.state")
+	if err := os.WriteFile(pendingPath, []byte("baseline-v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sp := &fakeSpawner{
+		line:             []byte(`{"util":"repo_monitor","kind":"modified","path":"README.md"}`),
+		pendingStatePath: pendingPath,
+		statePath:        statePath,
+	}
+	sk := &typedFakeSink{}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp, &sk.fakeSink)
+	w.sink = sk
+	w.rootID = "rootabc"
+	w.reachStatePath = reachPath
+	w.learningStatePath = learningPath
+
+	util, err := w.tick(context.Background())
+	if err == nil {
+		t.Fatal("baseline publish failure must surface")
+	}
+	if util != willUtilPressure {
+		t.Fatalf("got util %q", util)
+	}
+	if f.discharged {
+		t.Fatal("the tide must not discharge before the recorded baseline is published")
+	}
+	if _, err := os.Stat(pendingPath); err != nil {
+		t.Fatalf("failed baseline publish must preserve the exact pending artifact: %v", err)
+	}
+	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+		t.Fatalf("canonical baseline must not be visible yet, err=%v", err)
+	}
+	st, err := loadWillReachState(reachPath)
+	if err != nil {
+		t.Fatalf("load reach state: %v", err)
+	}
+	if st.Pending == nil || !st.Pending.EffectRecorded || st.Pending.BaselineCommitted ||
+		st.Pending.Outcome != willOutcomePerceptionCommitted || st.Pending.EffectCount != 1 ||
+		st.Pending.BaselinePendingPath != pendingPath || st.Pending.BaselineStatePath != statePath ||
+		!validSHA256Hex(st.Pending.BaselineSHA256) {
+		t.Fatalf("pending reach must journal the delivered effect and exact baseline artifact, got %#v", st.Pending)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sp2 := &fakeSpawner{}
+	sk2 := &typedFakeSink{}
+	w2, f2 := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 0,
+	}, sp2, &sk2.fakeSink)
+	w2.sink = sk2
+	w2.rootID = "rootabc"
+	w2.reachStatePath = reachPath
+	w2.learningStatePath = learningPath
+	w2.pendingReach = st.Pending
+	w2.nextReachSeq = st.NextSeq
+
+	util, err = w2.tick(context.Background())
+	if err != nil {
+		t.Fatalf("retry should publish the recorded baseline and finish without respawning: %v", err)
+	}
+	if util != willUtilPressure {
+		t.Fatalf("retry util changed, got %q", util)
+	}
+	if sp2.calls != 0 {
+		t.Fatalf("retry from recorded effect stage must not respawn the utility, calls=%d", sp2.calls)
+	}
+	if !f2.discharged {
+		t.Fatal("retry must discharge the original tide after publishing the baseline")
+	}
+	if data, err := os.ReadFile(statePath); err != nil || string(data) != "baseline-v2\n" {
+		t.Fatalf("retry must publish the exact recorded baseline, data=%q err=%v", data, err)
+	}
+	if len(sk2.events) != 1 || sk2.events[0].Outcome != willOutcomePerceptionCommitted || sk2.events[0].EffectCount != 1 {
+		t.Fatalf("retry must learn the original committed perception, got %#v", sk2.events)
+	}
+}
+
+func TestWillTickRecoveryKeepsEffectOutcomeAfterBaselinePublicationGap(t *testing.T) {
+	stateDir := t.TempDir()
+	reachPath := willReachStatePath(stateDir)
+	learningPath := willLearningStatePath(stateDir)
+	pendingPath := filepath.Join(stateDir, "repo_monitor.state.pending")
+	statePath := filepath.Join(stateDir, "repo_monitor.state")
+	if err := os.WriteFile(pendingPath, []byte("baseline-v3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sp := &fakeSpawner{
+		line:             []byte(`{"util":"repo_monitor","kind":"modified","path":"README.md"}`),
+		pendingStatePath: pendingPath,
+		statePath:        statePath,
+	}
+	sk := &typedFakeSink{}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp, &sk.fakeSink)
+	w.sink = sk
+	w.rootID = "rootabc"
+	w.reachStatePath = reachPath
+	w.learningStatePath = learningPath
+	brokenReachPath := t.TempDir()
+	sp.afterCommit = func() error {
+		w.reachStatePath = brokenReachPath
+		return nil
+	}
+
+	util, err := w.tick(context.Background())
+	if err == nil {
+		t.Fatal("reach-state publication failure after baseline publish must surface")
+	}
+	if util != willUtilPressure {
+		t.Fatalf("got util %q", util)
+	}
+	if !sp.committed {
+		t.Fatal("the utility baseline should have been published before the forced reach-state failure")
+	}
+	if f.discharged {
+		t.Fatal("the tide must not discharge before the consequence is durably marked")
+	}
+	if data, err := os.ReadFile(statePath); err != nil || string(data) != "baseline-v3\n" {
+		t.Fatalf("baseline should be visible after the gap, data=%q err=%v", data, err)
+	}
+	st, err := loadWillReachState(reachPath)
+	if err != nil {
+		t.Fatalf("load reach state: %v", err)
+	}
+	if st.Pending == nil || !st.Pending.EffectRecorded || st.Pending.BaselineCommitted ||
+		st.Pending.Outcome != willOutcomePerceptionCommitted || st.Pending.EffectCount != 1 {
+		t.Fatalf("original reach state must retain the recoverable effect stage, got %#v", st.Pending)
+	}
+
+	sp2 := &fakeSpawner{}
+	sk2 := &typedFakeSink{}
+	w2, f2 := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 0,
+	}, sp2, &sk2.fakeSink)
+	w2.sink = sk2
+	w2.rootID = "rootabc"
+	w2.reachStatePath = reachPath
+	w2.learningStatePath = learningPath
+	w2.pendingReach = st.Pending
+	w2.nextReachSeq = st.NextSeq
+
+	util, err = w2.tick(context.Background())
+	if err != nil {
+		t.Fatalf("retry should recognize the already-published baseline and finish: %v", err)
+	}
+	if util != willUtilPressure {
+		t.Fatalf("retry util changed, got %q", util)
+	}
+	if sp2.calls != 0 {
+		t.Fatalf("retry after baseline gap must not respawn and re-derive no_novelty, calls=%d", sp2.calls)
+	}
+	if !f2.discharged {
+		t.Fatal("retry must discharge the original tide after consequence recovery")
+	}
+	if len(sk2.events) != 1 || sk2.events[0].Outcome != willOutcomePerceptionCommitted || sk2.events[0].EffectCount != 1 {
+		t.Fatalf("retry must preserve the delivered effect outcome, got %#v", sk2.events)
+	}
+	learning, err := loadWillLearningState(learningPath)
+	if err != nil {
+		t.Fatalf("load learning: %v", err)
+	}
+	if learning.LastOutcome != willOutcomePerceptionCommitted || learning.LastEffectCount != 1 {
+		t.Fatalf("learning must not relabel the committed effect as no_novelty, got %#v", learning)
 	}
 }
 

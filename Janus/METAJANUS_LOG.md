@@ -694,3 +694,26 @@ Known validation shape: focused will/SARTRE tests, `sh tools/build_libamk.sh`, C
 standalone/kernel builds, and repeated `go test -count=1 ./...` are green; the only observed
 noise was the pre-existing forged-status flaky, which passed targeted, package, and repeated
 full-suite reruns. Wormholes remain deliberately out of scope.
+
+### fix 25 - will effect recovery cannot become no-novelty
+
+The will host now records a recoverable effect stage between durable effect delivery
+and utility baseline publication. The reach state stores the delivered outcome,
+effect count, pending utility-state path, canonical state path, and the pending
+state SHA-256. On restart, an unfinished reach publishes exactly that recorded
+baseline artifact before marking the baseline stage and consequence complete; it
+does not respawn the utility and re-derive `no_novelty` from the already-advanced
+state.
+
+The utility baseline publisher is now hash-aware and treats the "rename succeeded
+but parent fsync reported failure" shape as recoverable only when the canonical
+state matches the recorded pending-state hash. Rename failures preserve the pending
+artifact for retry instead of deleting the only recoverable baseline.
+
+Regressions cover both Sol re-audit crash windows: failure before baseline publish
+with the pending artifact preserved, and failure after baseline publication but
+before consequence publication. Both restarts finish the same reach without a new
+utility spawn and preserve `perception_committed` plus the original effect count.
+Validated with focused will tests, `go test -count=1 ./cmd/innerworld-dock`,
+`go test -count=1 ./...`, `go test -race -count=1 ./...`, `go vet ./...`, and
+`git diff --check`.

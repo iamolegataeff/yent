@@ -109,13 +109,16 @@ func (s osSpawner) Spawn(ctx context.Context, util string) (willSpawnResult, err
 		return willSpawnResult{}, fmt.Errorf("run %s: %w", bin, err)
 	}
 	return willSpawnResult{
-		Line:     cw.buf.Bytes(),
-		Overflow: cw.overflow,
+		Line:             cw.buf.Bytes(),
+		Overflow:         cw.overflow,
+		PendingStatePath: pendingPath,
+		StatePath:        statePath,
 		Commit: func() error {
-			if err := syncFilePath(pendingPath); err != nil {
+			digest, err := willFileSHA256(pendingPath)
+			if err != nil {
 				return err
 			}
-			return publishDurableFile(pendingPath, statePath)
+			return publishPendingWillState(pendingPath, statePath, digest)
 		},
 	}, nil
 }
@@ -279,6 +282,11 @@ type willPendingReach struct {
 	Breath               int              `json:"breath"`
 	Attempts             int              `json:"attempts,omitempty"`
 	LastFailureOutcome   string           `json:"last_failure_outcome,omitempty"`
+	EffectRecorded       bool             `json:"effect_recorded,omitempty"`
+	BaselineCommitted    bool             `json:"baseline_committed,omitempty"`
+	BaselinePendingPath  string           `json:"baseline_pending_path,omitempty"`
+	BaselineStatePath    string           `json:"baseline_state_path,omitempty"`
+	BaselineSHA256       string           `json:"baseline_sha256,omitempty"`
 	ConsequenceCommitted bool             `json:"consequence_committed,omitempty"`
 	Outcome              string           `json:"outcome,omitempty"`
 	EffectCount          int              `json:"effect_count,omitempty"`
@@ -385,11 +393,14 @@ func validateWillReachState(st willReachState) error {
 	if p.Attempts < 0 {
 		return fmt.Errorf("pending reach has negative attempts %d", p.Attempts)
 	}
-	if p.Attempts > 0 && !willFailureOutcome(p.LastFailureOutcome) && !p.ConsequenceCommitted {
+	if p.Attempts > 0 && !willFailureOutcome(p.LastFailureOutcome) && !p.ConsequenceCommitted && !p.EffectRecorded {
 		return fmt.Errorf("pending reach has attempts without a typed failure outcome %q", p.LastFailureOutcome)
 	}
 	if p.LastFailureOutcome != "" && !willFailureOutcome(p.LastFailureOutcome) {
 		return fmt.Errorf("pending reach has invalid failure outcome %q", p.LastFailureOutcome)
+	}
+	if p.BaselineCommitted && !p.EffectRecorded && !p.ConsequenceCommitted {
+		return fmt.Errorf("pending reach has committed baseline without a recorded effect stage")
 	}
 	if p.ConsequenceCommitted {
 		if !validWillCommittedOutcome(p.Outcome, p.EffectCount) {
@@ -405,10 +416,43 @@ func validateWillReachState(st willReachState) error {
 		}
 		return nil
 	}
+	if p.EffectRecorded {
+		if !validWillCommittedOutcome(p.Outcome, p.EffectCount) || p.Outcome == willOutcomeDeadLetter {
+			return fmt.Errorf("pending reach has invalid recorded outcome %q with %d effects", p.Outcome, p.EffectCount)
+		}
+		if strings.TrimSpace(p.BaselineStatePath) == "" {
+			if p.BaselineCommitted {
+				return nil
+			}
+			return fmt.Errorf("pending reach has no utility baseline state path")
+		}
+		if !p.BaselineCommitted {
+			if strings.TrimSpace(p.BaselinePendingPath) == "" {
+				return fmt.Errorf("pending reach has no utility baseline pending path")
+			}
+			if !validSHA256Hex(p.BaselineSHA256) {
+				return fmt.Errorf("pending reach has invalid utility baseline sha256")
+			}
+		}
+		return nil
+	}
 	if p.Outcome != "" || p.EffectCount != 0 {
 		return fmt.Errorf("pending reach has uncommitted outcome %q with %d effects", p.Outcome, p.EffectCount)
 	}
 	return nil
+}
+
+func validSHA256Hex(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, c := range s {
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validWillCommittedOutcome(outcome string, effectCount int) bool {
@@ -573,6 +617,70 @@ func syncParentDir(path string) error {
 		// been fsynced; keep those platforms usable instead of turning a
 		// durability hardening pass into an unrelated portability failure.
 		if errors.Is(err, syscall.EINVAL) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func willFileSHA256(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func publishPendingWillState(pendingPath, statePath, wantSHA256 string) error {
+	if strings.TrimSpace(pendingPath) == "" || strings.TrimSpace(statePath) == "" {
+		return fmt.Errorf("missing pending or canonical utility state path")
+	}
+	verifyState := func() error {
+		if _, err := os.Stat(statePath); err != nil {
+			return err
+		}
+		if wantSHA256 == "" {
+			return nil
+		}
+		got, err := willFileSHA256(statePath)
+		if err != nil {
+			return err
+		}
+		if got != wantSHA256 {
+			return fmt.Errorf("published utility state hash mismatch: got %s want %s", got, wantSHA256)
+		}
+		return nil
+	}
+	if wantSHA256 != "" {
+		got, err := willFileSHA256(pendingPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return verifyState()
+			}
+			return err
+		}
+		if got != wantSHA256 {
+			return fmt.Errorf("pending utility state hash mismatch: got %s want %s", got, wantSHA256)
+		}
+	} else if _, err := os.Stat(pendingPath); err != nil {
+		if os.IsNotExist(err) {
+			return verifyState()
+		}
+		return err
+	}
+	if err := syncFilePath(pendingPath); err != nil {
+		if os.IsNotExist(err) {
+			return verifyState()
+		}
+		return err
+	}
+	if err := os.Rename(pendingPath, statePath); err != nil {
+		return err
+	}
+	if err := syncParentDir(statePath); err != nil {
+		if verifyErr := verifyState(); verifyErr == nil {
 			return nil
 		}
 		return err
