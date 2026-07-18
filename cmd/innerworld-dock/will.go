@@ -66,6 +66,7 @@ const (
 	willOutcomeSensorError         = "sensor_error"
 	willOutcomeStateError          = "state_error"
 	willOutcomeOverflow            = "overflow"
+	willOutcomeDeadLetter          = "dead_letter"
 )
 
 type willTideSnapshot struct {
@@ -190,6 +191,7 @@ type willTicker struct {
 	quietRuns         int           // consecutive completed reaches that found no novelty
 	nextReachSeq      int64         // next durable reach sequence in the namespaced state dir
 	pendingReach      *willPendingReach
+	maxReachAttempts  int // bounded retry window before a typed terminal dead-letter receipt
 }
 
 // tick advances the will one step and, if the tide crests, reaches for the utility the dominant
@@ -239,68 +241,101 @@ func (w *willTicker) continueReach(ctx context.Context, reach willPendingReach) 
 	outcome := reach.Outcome
 	effectCount := reach.EffectCount
 	if !reach.ConsequenceCommitted {
+		attempt := reach.Attempts + 1
+		terminalFailure := false
 		if es, ok := w.sink.(willEventSink); ok {
-			if err := es.EmitEvent(w.eventAtBreath(tide, eventID, "intention", util, "crest", eventBreath)); err != nil {
+			ev := w.eventAtBreath(tide, eventID, "intention", util, "crest", eventBreath)
+			ev.Attempts = attempt
+			if err := es.EmitEvent(ev); err != nil {
 				return util, fmt.Errorf("will intent %s: %w", util, err)
 			}
 		}
 		result, err := w.spawner.Spawn(ctx, util)
 		if err != nil {
 			if es, ok := w.sink.(willEventSink); ok {
-				_ = es.EmitEvent(w.eventAtBreath(tide, eventID, "learning", util, willOutcomeSensorError, eventBreath))
+				ev := w.eventAtBreath(tide, eventID, "learning", util, willOutcomeSensorError, eventBreath)
+				ev.Attempts = attempt
+				_ = es.EmitEvent(ev)
 			}
-			return util, fmt.Errorf("will reach %s: %w", util, err)
-		}
-		if es, ok := w.sink.(willEventSink); ok {
-			if err := es.EmitEvent(w.eventAtBreath(tide, eventID, "act", util, "spawned", eventBreath)); err != nil {
-				return util, fmt.Errorf("will act %s: %w", util, err)
+			reach, terminalFailure, err = w.recordReachFailure(reach, willOutcomeSensorError, attempt, fmt.Errorf("will reach %s: %w", util, err))
+			if err != nil {
+				return util, err
 			}
 		}
-		if result.Overflow {
+		if !terminalFailure {
+			if es, ok := w.sink.(willEventSink); ok {
+				ev := w.eventAtBreath(tide, eventID, "act", util, "spawned", eventBreath)
+				ev.Attempts = attempt
+				if err := es.EmitEvent(ev); err != nil {
+					return util, fmt.Errorf("will act %s: %w", util, err)
+				}
+			}
+		}
+		if !terminalFailure && result.Overflow {
 			if es, ok := w.sink.(willEventSink); ok {
 				ev := w.eventAtBreath(tide, eventID, "learning", util, willOutcomeOverflow, eventBreath)
+				ev.Attempts = attempt
 				ev.BytesCaptured = len(result.Line)
 				ev.BytesLimit = willMaxStdout
 				if err := es.EmitEvent(ev); err != nil {
 					return util, fmt.Errorf("will overflow %s: %w", util, err)
 				}
 			}
-			return util, fmt.Errorf("will reach %s overflowed stdout cap (%d bytes)", util, willMaxStdout)
+			reach, terminalFailure, err = w.recordReachFailure(reach, willOutcomeOverflow, attempt, fmt.Errorf("will reach %s overflowed stdout cap (%d bytes)", util, willMaxStdout))
+			if err != nil {
+				return util, err
+			}
 		}
-		effectLine := tagSartreEffectLines(result.Line, eventID, w.rootID)
-		effectCount = len(completeSartreJSONLines(effectLine))
-		if effectCount == 0 && hasNonEmptySartreOutput(result.Line) {
-			if es, ok := w.sink.(willEventSink); ok {
-				ev := w.eventAtBreath(tide, eventID, "learning", util, willOutcomeSensorError, eventBreath)
-				ev.BytesCaptured = len(result.Line)
-				if err := es.EmitEvent(ev); err != nil {
-					return util, fmt.Errorf("will malformed output %s: %w", util, err)
+		if !terminalFailure {
+			effectLine := tagSartreEffectLines(result.Line, eventID, w.rootID)
+			effectCount = len(completeSartreJSONLines(effectLine))
+			if effectCount == 0 && hasNonEmptySartreOutput(result.Line) {
+				if es, ok := w.sink.(willEventSink); ok {
+					ev := w.eventAtBreath(tide, eventID, "learning", util, willOutcomeSensorError, eventBreath)
+					ev.Attempts = attempt
+					ev.BytesCaptured = len(result.Line)
+					if err := es.EmitEvent(ev); err != nil {
+						return util, fmt.Errorf("will malformed output %s: %w", util, err)
+					}
+				}
+				reach, terminalFailure, err = w.recordReachFailure(reach, willOutcomeSensorError, attempt, fmt.Errorf("will reach %s produced no valid SARTRE JSONL records", util))
+				if err != nil {
+					return util, err
 				}
 			}
-			return util, fmt.Errorf("will reach %s produced no valid SARTRE JSONL records", util)
-		}
-		if len(effectLine) > 0 {
-			if err := w.sink.Emit(effectLine); err != nil {
-				return util, fmt.Errorf("will emit %s: %w", util, err)
+			if !terminalFailure && len(effectLine) > 0 {
+				if err := w.sink.Emit(effectLine); err != nil {
+					return util, fmt.Errorf("will emit %s: %w", util, err)
+				}
 			}
 		}
-		if result.Commit != nil {
+		if !terminalFailure && result.Commit != nil {
 			if err := result.Commit(); err != nil {
 				if es, ok := w.sink.(willEventSink); ok {
-					_ = es.EmitEvent(w.eventAtBreath(tide, eventID, "learning", util, willOutcomeStateError, eventBreath))
+					ev := w.eventAtBreath(tide, eventID, "learning", util, willOutcomeStateError, eventBreath)
+					ev.Attempts = attempt
+					_ = es.EmitEvent(ev)
 				}
-				return util, fmt.Errorf("will commit %s state: %w", util, err)
+				reach, terminalFailure, err = w.recordReachFailure(reach, willOutcomeStateError, attempt, fmt.Errorf("will commit %s state: %w", util, err))
+				if err != nil {
+					return util, err
+				}
 			}
 		}
-		outcome = willOutcomeNoNovelty
-		if effectCount > 0 {
-			outcome = willOutcomePerceptionCommitted
+		if terminalFailure {
+			outcome = reach.Outcome
+			effectCount = reach.EffectCount
+		} else {
+			outcome = willOutcomeNoNovelty
+			if effectCount > 0 {
+				outcome = willOutcomePerceptionCommitted
+			}
+			committedReach, err := w.markReachConsequenceCommitted(reach, outcome, effectCount, attempt)
+			if err != nil {
+				return util, fmt.Errorf("will commit %s consequence: %w", util, err)
+			}
+			reach = committedReach
 		}
-		committedReach, err := w.markReachConsequenceCommitted(reach, outcome, effectCount)
-		if err != nil {
-			return util, fmt.Errorf("will commit %s consequence: %w", util, err)
-		}
-		reach = committedReach
 	}
 	nextQuiet, nextCooldown := w.plannedLearningState(outcome)
 	if err := dischargeWillTide(w.field); err != nil {
@@ -313,6 +348,10 @@ func (w *willTicker) continueReach(ctx context.Context, reach willPendingReach) 
 	if es, ok := w.sink.(willEventSink); ok {
 		ev := w.eventAtBreath(tide, eventID, "learning", util, outcome, eventBreath)
 		ev.EffectCount = effectCount
+		ev.Attempts = reach.Attempts
+		if outcome == willOutcomeDeadLetter {
+			ev.FailureOutcome = reach.LastFailureOutcome
+		}
 		ev.CooldownBreaths = nextCooldown
 		if err := es.EmitEvent(ev); err != nil {
 			return util, fmt.Errorf("will learn %s: %w", util, err)
@@ -362,9 +401,12 @@ func (w *willTicker) finishReach(seq int64) error {
 	return nil
 }
 
-func (w *willTicker) markReachConsequenceCommitted(reach willPendingReach, outcome string, effectCount int) (willPendingReach, error) {
+func (w *willTicker) markReachConsequenceCommitted(reach willPendingReach, outcome string, effectCount, attempts int) (willPendingReach, error) {
 	if !validWillCommittedOutcome(outcome, effectCount) {
 		return willPendingReach{}, fmt.Errorf("invalid committed outcome %q with %d effects", outcome, effectCount)
+	}
+	if attempts > 0 {
+		reach.Attempts = attempts
 	}
 	reach.ConsequenceCommitted = true
 	reach.Outcome = outcome
@@ -375,6 +417,39 @@ func (w *willTicker) markReachConsequenceCommitted(reach willPendingReach, outco
 	w.nextReachSeq = reach.Seq
 	w.pendingReach = &reach
 	return reach, nil
+}
+
+const willReachMaxAttemptsDefault = 3
+
+func (w *willTicker) reachMaxAttempts() int {
+	if w.maxReachAttempts > 0 {
+		return w.maxReachAttempts
+	}
+	return willReachMaxAttemptsDefault
+}
+
+func (w *willTicker) recordReachFailure(reach willPendingReach, failureOutcome string, attempt int, cause error) (willPendingReach, bool, error) {
+	if !willFailureOutcome(failureOutcome) {
+		return willPendingReach{}, false, fmt.Errorf("invalid failure outcome %q", failureOutcome)
+	}
+	if attempt <= reach.Attempts {
+		attempt = reach.Attempts + 1
+	}
+	reach.Attempts = attempt
+	reach.LastFailureOutcome = failureOutcome
+	if attempt < w.reachMaxAttempts() {
+		if err := w.saveReachState(reach.Seq, &reach); err != nil {
+			return willPendingReach{}, false, fmt.Errorf("will failure state %s: %w", reach.Utility, err)
+		}
+		w.nextReachSeq = reach.Seq
+		w.pendingReach = &reach
+		return reach, false, cause
+	}
+	dead, err := w.markReachConsequenceCommitted(reach, willOutcomeDeadLetter, 0, attempt)
+	if err != nil {
+		return willPendingReach{}, false, fmt.Errorf("will dead-letter %s: %w", reach.Utility, err)
+	}
+	return dead, true, nil
 }
 
 func (w *willTicker) saveReachState(nextSeq int64, pending *willPendingReach) error {
@@ -408,6 +483,8 @@ func (w *willTicker) plannedLearningState(outcome string) (quietRuns, cooldown i
 		return quietRuns, base + extra
 	case willOutcomePerceptionCommitted:
 		return 0, base
+	case willOutcomeDeadLetter:
+		return w.quietRuns, base + 1
 	default:
 		return w.quietRuns, base
 	}

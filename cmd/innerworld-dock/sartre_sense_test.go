@@ -73,6 +73,21 @@ func TestSartreSenseSensorFailureIsTypedButStill(t *testing.T) {
 	}
 }
 
+func TestSartreSenseDeadLetterIsTypedButStill(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	event := `{"util":"repo_monitor","phase":"learning","outcome":"dead_letter","attempts":3,"failure_outcome":"sensor_error","ts":1}`
+	if err := os.WriteFile(path, []byte(event+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	aml, ok := (&sartreSense{eventsPath: path}).Pressure()
+	if !ok {
+		t.Fatal("dead-letter should be a typed field consequence")
+	}
+	if strings.Contains(aml, "VELOCITY") || !strings.Contains(aml, "PROPHECY 3") {
+		t.Fatalf("dead-letter should be still prophecy, not movement, got %q", aml)
+	}
+}
+
 // TestSartreSenseQuietNoReflex: a still or absent environment feels nothing.
 func TestSartreSenseQuietNoReflex(t *testing.T) {
 	dir := t.TempDir()

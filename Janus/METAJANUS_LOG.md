@@ -644,3 +644,17 @@ could leave `AM_State` mutated even though the caller received a failed exec.
 The regression extends the persistent failure case with a pre-error `DESTINY` mutation and verifies the field
 returns to its previous value after the failing script. The boundary stays intentionally local: irreversible host
 I/O remains outside this rollback contract.
+
+### fix 22 — failed will reaches end as typed dead letters
+
+The will reach ledger now bounds retry attempts for sensor/protocol/state failures. A failed reach records its
+attempt number and last typed failure outcome in `will-reach.state.json`; if it reaches
+`YENT_WILL_REACH_MAX_ATTEMPTS` (default 3), the same reach becomes a committed `dead_letter` consequence with
+zero effects, spends the stored vector tide, publishes learning state, emits a final typed receipt, and clears
+the pending reach.
+
+This prevents a corrupted utility, stdout overflow, or utility-state commit failure from keeping one causal hand
+pending forever across restarts. The SARTRE bridge carries `attempts` and `failure_outcome` through trace/dedupe,
+so repeated attempts remain visible evidence instead of collapsing into one memory row. Sink delivery failures
+remain pending rather than dead-lettering blindly, because a missing receipt channel cannot honestly receive the
+terminal receipt either.

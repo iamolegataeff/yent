@@ -42,6 +42,8 @@ type SartreEvent struct {
 	EffectCount       int     `json:"effect_count,omitempty"`
 	BytesCaptured     int     `json:"bytes_captured,omitempty"`
 	BytesLimit        int     `json:"bytes_limit,omitempty"`
+	Attempts          int     `json:"attempts,omitempty"`
+	FailureOutcome    string  `json:"failure_outcome,omitempty"`
 }
 
 // SartreReceipt is the machine-readable memory_delta written into limpha.
@@ -280,6 +282,8 @@ func sartreEventKey(ev SartreEvent) (string, bool) {
 		fmt.Sprintf("%d", ev.EffectCount),
 		fmt.Sprintf("%d", ev.BytesCaptured),
 		fmt.Sprintf("%d", ev.BytesLimit),
+		fmt.Sprintf("%d", ev.Attempts),
+		ev.FailureOutcome,
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(sum[:]), true
@@ -364,6 +368,12 @@ func (ev SartreEvent) Trace() string {
 		}
 		if ev.BytesCaptured > 0 || ev.BytesLimit > 0 {
 			parts = append(parts, fmt.Sprintf("bytes=%d/%d", ev.BytesCaptured, ev.BytesLimit))
+		}
+		if ev.Attempts > 0 {
+			parts = append(parts, fmt.Sprintf("attempts=%d", ev.Attempts))
+		}
+		if ev.FailureOutcome != "" {
+			parts = append(parts, "failure="+ev.FailureOutcome)
 		}
 		if ev.Kind != "" {
 			parts = append(parts, ev.Kind)
@@ -487,6 +497,8 @@ func normalizeSartreEvent(ev SartreEvent) SartreEvent {
 	ev.EffectCount = maxInt(0, ev.EffectCount)
 	ev.BytesCaptured = maxInt(0, ev.BytesCaptured)
 	ev.BytesLimit = maxInt(0, ev.BytesLimit)
+	ev.Attempts = maxInt(0, ev.Attempts)
+	ev.FailureOutcome = strings.ToLower(strings.TrimSpace(ev.FailureOutcome))
 	return ev
 }
 

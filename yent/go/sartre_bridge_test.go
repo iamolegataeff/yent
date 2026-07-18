@@ -159,6 +159,30 @@ func TestStoreNewSartreEventsKeepsNewPhaseForSameReach(t *testing.T) {
 	}
 }
 
+func TestStoreNewSartreEventsKeepsRetryAttempts(t *testing.T) {
+	lc := newTestLimpha(t)
+	first := SartreEvent{
+		ID:       "reach-retry",
+		RootID:   "root-a",
+		Phase:    "learning",
+		Outcome:  "sensor_error",
+		Utility:  "repo_monitor",
+		Attempts: 1,
+	}
+	if id, accepted, err := lc.StoreNewSartreEvents([]SartreEvent{first}, LimphaState{}); err != nil || id == 0 || len(accepted) != 1 {
+		t.Fatalf("first attempt should store: id=%d accepted=%#v err=%v", id, accepted, err)
+	}
+	second := first
+	second.Attempts = 2
+	id, accepted, err := lc.StoreNewSartreEvents([]SartreEvent{second}, LimphaState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == 0 || len(accepted) != 1 || accepted[0].Attempts != 2 {
+		t.Fatalf("a new retry attempt should pass stable-event dedupe, id=%d accepted=%#v", id, accepted)
+	}
+}
+
 func TestStoreNewSartreEventsAcknowledgesTraceEmptyStableEvent(t *testing.T) {
 	lc := newTestLimpha(t)
 	ev := SartreEvent{
@@ -219,11 +243,12 @@ func TestBuildSartreReceiptKeepsWillPhasesOutOfChangeCounts(t *testing.T) {
 		{ID: "r1", Phase: "act", Outcome: "spawned", Utility: "repo_monitor"},
 		{ID: "r1", Phase: "learning", Outcome: "no_novelty", Utility: "repo_monitor"},
 		{ID: "r2", Phase: "learning", Outcome: "overflow", Utility: "repo_monitor", BytesCaptured: 1024, BytesLimit: 2048},
+		{ID: "r2", Phase: "learning", Outcome: "dead_letter", Utility: "repo_monitor", Attempts: 3, FailureOutcome: "overflow"},
 		{ID: "r2", Phase: "effect", Utility: "repo_monitor", Kind: "modified", Path: "README.md"},
 		{ID: "r2", Phase: "learning", Outcome: "perception_committed", Utility: "repo_monitor", EffectCount: 1},
 	}
 	receipt := BuildSartreReceipt(events)
-	if receipt.EventCount != 6 {
+	if receipt.EventCount != 7 {
 		t.Fatalf("all typed events should be counted as received, got %d", receipt.EventCount)
 	}
 	if receipt.Changed != 1 || !receipt.ReadmeChanged {
@@ -231,6 +256,7 @@ func TestBuildSartreReceiptKeepsWillPhasesOutOfChangeCounts(t *testing.T) {
 	}
 	if receipt.OutcomeCounts["no_novelty"] != 1 ||
 		receipt.OutcomeCounts["overflow"] != 1 ||
+		receipt.OutcomeCounts["dead_letter"] != 1 ||
 		receipt.OutcomeCounts["perception_committed"] != 1 {
 		t.Fatalf("learning outcomes should be typed counters: %+v", receipt.OutcomeCounts)
 	}
@@ -240,6 +266,7 @@ func TestBuildSartreReceiptKeepsWillPhasesOutOfChangeCounts(t *testing.T) {
 		!strings.Contains(trace, "root=rootabc") ||
 		!strings.Contains(trace, "breath=2 cadence_ms=750 refractory_breaths=3") ||
 		!strings.Contains(trace, "will repo_monitor learning overflow bytes=1024/2048") ||
+		!strings.Contains(trace, "will repo_monitor learning dead_letter attempts=3 failure=overflow") ||
 		!strings.Contains(trace, "will repo_monitor learning perception_committed effects=1") ||
 		!strings.Contains(trace, "repo_monitor modified README.md") {
 		t.Fatalf("receipt should preserve will phases and effect trace: %#v", receipt.Trace)

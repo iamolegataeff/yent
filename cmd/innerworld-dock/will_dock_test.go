@@ -272,6 +272,8 @@ func TestWillReachStateRoundTrip(t *testing.T) {
 		Utility:              willUtilPressure,
 		Tide:                 willTideSnapshot{Threshold: 1, Gaze: 1.5, PressureTide: 1.5},
 		Breath:               12,
+		Attempts:             2,
+		LastFailureOutcome:   willOutcomeSensorError,
 		ConsequenceCommitted: true,
 		Outcome:              willOutcomePerceptionCommitted,
 		EffectCount:          2,
@@ -284,6 +286,7 @@ func TestWillReachStateRoundTrip(t *testing.T) {
 		t.Fatalf("load pending reach: %v", err)
 	}
 	if st.NextSeq != 3 || st.Pending == nil || st.Pending.ID != "reach3" || st.Pending.Utility != willUtilPressure ||
+		st.Pending.Attempts != 2 || st.Pending.LastFailureOutcome != willOutcomeSensorError ||
 		!st.Pending.ConsequenceCommitted || st.Pending.Outcome != willOutcomePerceptionCommitted || st.Pending.EffectCount != 2 {
 		t.Fatalf("wrong pending reach after round-trip: %#v", st)
 	}
@@ -309,10 +312,23 @@ func TestWillReachStateRejectsCorruptPending(t *testing.T) {
 	}
 }
 
+func TestWillReachStateRejectsAttemptWithoutFailureOutcome(t *testing.T) {
+	path := willReachStatePath(t.TempDir())
+	body := `{"version":1,"next_seq":2,"pending":{"seq":2,"id":"x","util":"repo_monitor","tide":{"threshold":1},"attempts":1}}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadWillReachState(path); err == nil {
+		t.Fatal("pending reach attempts must carry a typed failure outcome")
+	}
+}
+
 func TestWillReachStateRejectsCorruptCommittedConsequence(t *testing.T) {
 	cases := []string{
 		`{"version":1,"next_seq":2,"pending":{"seq":2,"id":"x","util":"repo_monitor","tide":{"threshold":1},"consequence_committed":true,"outcome":"perception_committed","effect_count":0}}`,
 		`{"version":1,"next_seq":2,"pending":{"seq":2,"id":"x","util":"repo_monitor","tide":{"threshold":1},"consequence_committed":true,"outcome":"no_novelty","effect_count":1}}`,
+		`{"version":1,"next_seq":2,"pending":{"seq":2,"id":"x","util":"repo_monitor","tide":{"threshold":1},"consequence_committed":true,"outcome":"dead_letter","effect_count":0}}`,
+		`{"version":1,"next_seq":2,"pending":{"seq":2,"id":"x","util":"repo_monitor","tide":{"threshold":1},"consequence_committed":true,"outcome":"dead_letter","effect_count":0,"attempts":2,"last_failure_outcome":"made_up"}}`,
 		`{"version":1,"next_seq":2,"pending":{"seq":2,"id":"x","util":"repo_monitor","tide":{"threshold":1},"outcome":"perception_committed","effect_count":1}}`,
 	}
 	for i, body := range cases {

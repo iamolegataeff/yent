@@ -606,7 +606,7 @@ func sartreSelfSurface(path string) bool {
 
 func sartreSensorFailure(outcome string) bool {
 	switch strings.TrimSpace(outcome) {
-	case "sensor_error", "state_error", "overflow":
+	case "sensor_error", "state_error", "overflow", "dead_letter":
 		return true
 	default:
 		return false
@@ -1204,14 +1204,15 @@ func main() {
 							quietRuns:         learningState.QuietRuns,
 							nextReachSeq:      reachState.NextSeq,
 							pendingReach:      reachState.Pending,
+							maxReachAttempts:  willReachMaxAttempts(),
 						}
 						go wt.run(ctx, willTickEvery())
 						pending := ""
 						if reachState.Pending != nil {
 							pending = fmt.Sprintf(", pending_reach=%s", reachState.Pending.ID)
 						}
-						fmt.Printf("=== will wired: confluence tide -> reach for a self-reading utility (utils=%s, root=%s, root_id=%s, state=%s, quiet_runs=%d, cooldown=%d, breath=%d, reach_seq=%d%s, every %s) ===\n",
-							utilsDir, root, rootID, stateDir, learningState.QuietRuns, learningState.CooldownBreaths, initialBreath, reachState.NextSeq, pending, willTickEvery())
+						fmt.Printf("=== will wired: confluence tide -> reach for a self-reading utility (utils=%s, root=%s, root_id=%s, state=%s, quiet_runs=%d, cooldown=%d, breath=%d, reach_seq=%d, max_attempts=%d%s, every %s) ===\n",
+							utilsDir, root, rootID, stateDir, learningState.QuietRuns, learningState.CooldownBreaths, initialBreath, reachState.NextSeq, willReachMaxAttempts(), pending, willTickEvery())
 						if sinkPath == "" {
 							fmt.Println("    (YENT_SARTRE_EVENTS unset: the will reaches and reads, but the spiral cannot close)")
 						}
