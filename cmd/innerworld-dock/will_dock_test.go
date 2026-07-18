@@ -111,7 +111,11 @@ func TestOsSpawnerCommitsPendingStateOnlyWhenAsked(t *testing.T) {
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
 		t.Fatalf("canonical state must not be published before commit, err=%v", err)
 	}
-	if err := result.Commit(); err != nil {
+	digest, err := willFileSHA256(result.PendingStatePath)
+	if err != nil {
+		t.Fatalf("pending digest: %v", err)
+	}
+	if err := result.Commit(digest); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
 	if _, err := os.Stat(statePath); err != nil {
@@ -468,6 +472,102 @@ func TestFileSinkDropsNoiseAndIncompleteRecords(t *testing.T) {
 	want := `{"util":"repo_monitor","kind":"added","path":"a.md"}`
 	if got != want {
 		t.Fatalf("sink must persist only complete valid JSONL records\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+func TestFileSinkRepairsMatchingValidJSONTailBeforeDedupe(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	cursor := filepath.Join(dir, "cursor.json")
+	line := []byte(`{"id":"reach1","phase":"effect","util":"repo_monitor","kind":"modified","path":"README.md"}`)
+	if err := os.WriteFile(path, line, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := (fileSink{path: path}).Emit(line); err != nil {
+		t.Fatalf("retry Emit: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(line)+"\n" {
+		t.Fatalf("matching valid tail must be framed, not duplicated\ngot: %q", data)
+	}
+	got := string((&sartreSense{eventsPath: path, cursorPath: cursor}).readNew())
+	if !strings.Contains(got, `"path":"README.md"`) {
+		t.Fatalf("repaired tail must become visible to sartreSense, got %q", got)
+	}
+	if err := (fileSink{path: path}).Emit(line); err != nil {
+		t.Fatalf("duplicate Emit after repair: %v", err)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(data), `"id":"reach1"`) != 1 {
+		t.Fatalf("retry after repair must not duplicate the event: %s", data)
+	}
+}
+
+func TestFileSinkFramesMismatchedValidJSONTailBeforeAppend(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	oldLine := `{"id":"other","phase":"effect","util":"repo_monitor","kind":"modified","path":"old.md"}`
+	newLine := []byte(`{"id":"reach2","phase":"effect","util":"repo_monitor","kind":"added","path":"new.md"}`)
+	if err := os.WriteFile(path, []byte(oldLine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := (fileSink{path: path}).Emit(newLine); err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := oldLine + "\n" + string(newLine) + "\n"
+	if string(data) != want {
+		t.Fatalf("valid shared-sink tail must be completed before appending\ngot:  %q\nwant: %q", data, want)
+	}
+}
+
+func TestFileSinkRepairsValidTailAndAppendsRemainingBatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	first := []byte(`{"id":"reach1","phase":"effect","util":"repo_monitor","kind":"modified","path":"first.md"}`)
+	second := []byte(`{"id":"reach1","phase":"learning","util":"repo_monitor","outcome":"perception_committed","effect_count":1}`)
+	if err := os.WriteFile(path, first, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	retry := append(append(append([]byte(nil), first...), '\n'), second...)
+	if err := (fileSink{path: path}).Emit(retry); err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := string(first) + "\n" + string(second) + "\n"
+	if string(data) != want {
+		t.Fatalf("batch retry must frame the tail once and append remaining records\ngot:  %q\nwant: %q", data, want)
+	}
+}
+
+func TestFileSinkTruncatesMalformedTailBeforeAppend(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	first := `{"id":"reach1","phase":"effect","util":"repo_monitor","kind":"modified","path":"old.md"}`
+	badTail := `{"id":"broken","phase":"effect"`
+	next := []byte(`{"id":"reach2","phase":"effect","util":"repo_monitor","kind":"added","path":"new.md"}`)
+	if err := os.WriteFile(path, []byte(first+"\n"+badTail), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := (fileSink{path: path}).Emit(next); err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := first + "\n" + string(next) + "\n"
+	if string(data) != want {
+		t.Fatalf("malformed tail must be cut to the last complete newline before append\ngot:  %q\nwant: %q", data, want)
 	}
 }
 

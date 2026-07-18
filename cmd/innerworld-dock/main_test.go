@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ariannamethod/yent/innerworld"
+	"github.com/ariannamethod/yent/innerworld/aml"
 	yent "github.com/ariannamethod/yent/yent/go"
 )
 
@@ -238,6 +239,31 @@ func TestWireWillRequiresSartreEventsBeforeState(t *testing.T) {
 	}
 	if _, err := os.Stat(stateBase); !os.IsNotExist(err) {
 		t.Fatalf("missing event sink must fail before state namespace creation, err=%v", err)
+	}
+}
+
+func TestWireWillFailureDoesNotArmAMLPersistence(t *testing.T) {
+	aml.Init()
+	body := aml.New(nil)
+	defer body.PersistentMode(false)
+	dir := t.TempDir()
+	stateBase := filepath.Join(dir, "will-state-file")
+	if err := os.WriteFile(stateBase, []byte("not a directory\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("YENT_WILL_UTILS_DIR", t.TempDir())
+	t.Setenv("YENT_WILL_STATE_DIR", stateBase)
+	t.Setenv("YENT_WILL_ROOT", t.TempDir())
+	t.Setenv("YENT_SARTRE_EVENTS", filepath.Join(dir, "events.jsonl"))
+
+	if wireWillFromEnv(context.Background(), body) {
+		t.Fatal("invalid state base must fail will wiring")
+	}
+	if err := body.Exec("probe_persistence_leak = 7"); err != nil {
+		t.Fatalf("probe exec: %v", err)
+	}
+	if got := body.GetVarFloat("probe_persistence_leak"); got != 0 {
+		t.Fatalf("failed wiring left AML persistence armed, probe=%.3f", got)
 	}
 }
 

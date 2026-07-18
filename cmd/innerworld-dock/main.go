@@ -1200,7 +1200,6 @@ func wireWillFromEnv(ctx context.Context, flowBody *aml.Body) bool {
 		fmt.Fprintln(os.Stderr, "[will] YENT_SARTRE_EVENTS unset: will disabled; durable SARTRE event sink is required before any reach can be launched")
 		return false
 	}
-	flowBody.PersistentMode(true)
 	root, err := resolveWillRoot(os.Getenv("YENT_WILL_ROOT"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[will] root: %v\n", err)
@@ -1259,14 +1258,9 @@ func wireWillFromEnv(ctx context.Context, flowBody *aml.Body) bool {
 		pendingReach:      reachState.Pending,
 		maxReachAttempts:  willReachMaxAttempts(),
 	}
+	flowBody.PersistentMode(true)
 	keepOwner = true
-	go func() {
-		<-ctx.Done()
-		if err := owner.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "[will] namespace owner release %s: %v\n", stateDir, err)
-		}
-	}()
-	go wt.run(ctx, willTickEvery())
+	go runWillWithOwner(ctx, wt, owner, stateDir, willTickEvery())
 	pending := ""
 	if reachState.Pending != nil {
 		pending = fmt.Sprintf(", pending_reach=%s", reachState.Pending.ID)
@@ -1274,4 +1268,13 @@ func wireWillFromEnv(ctx context.Context, flowBody *aml.Body) bool {
 	fmt.Printf("=== will wired: confluence tide -> reach for a self-reading utility (utils=%s, root=%s, root_id=%s, state=%s, quiet_runs=%d, cooldown=%d, breath=%d, reach_seq=%d, max_attempts=%d%s, every %s) ===\n",
 		utilsDir, root, rootID, stateDir, learningState.QuietRuns, learningState.CooldownBreaths, initialBreath, reachState.NextSeq, willReachMaxAttempts(), pending, willTickEvery())
 	return true
+}
+
+func runWillWithOwner(ctx context.Context, wt *willTicker, owner *willNamespaceOwner, stateDir string, tickEvery time.Duration) {
+	defer func() {
+		if err := owner.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "[will] namespace owner release %s: %v\n", stateDir, err)
+		}
+	}()
+	wt.run(ctx, tickEvery)
 }

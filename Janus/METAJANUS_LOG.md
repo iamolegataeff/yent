@@ -824,3 +824,28 @@ Known validation shape: focused will recovery tests, `go test -count=1
 `go test -race -count=1 ./...`, `go vet ./...`, `sh tools/build_libamk.sh`, and
 `git diff --check` are green. This remains a handoff boundary, not the auditor's
 closure verdict.
+
+### fix 30 - final will boundaries repair sink, owner, baseline, and wiring
+
+Sol's final 2026-07-18 will re-audit separated the old closed causal gap from
+four still-open process boundaries. The repair keeps the will design unchanged
+and hardens the host envelope:
+
+- `YENT_SARTRE_EVENTS` delivery repairs the file tail and filters duplicates
+  under one exclusive lock. Newline-terminated records are the delivered set; a
+  valid unterminated JSON tail is completed before dedupe, while malformed tail
+  bytes are truncated to the last complete record.
+- The namespace owner is released only after `willTicker.run` returns, not merely
+  when context cancellation fires.
+- Same-process baseline publication receives the SHA recorded in
+  `will-reach.state.json`, so a mutated pending file cannot become the trusted
+  utility baseline.
+- `wireWillFromEnv` enables AML persistence only after the fallible startup path
+  succeeds, preventing failed wiring from leaving persistent will state armed.
+
+Regressions cover valid and malformed JSONL tails, batch replay after tail
+repair, owner lifetime through a blocked run, journal-SHA rejection after
+prepared effect delivery, and failed wiring with AML persistence left disabled.
+Validated with focused tests, full innerworld-dock tests, sequential full Go and
+race suites, `go vet`, rebuilt `libamk.a`, Rust utility tests, C perception
+checks, and `git diff --check`.

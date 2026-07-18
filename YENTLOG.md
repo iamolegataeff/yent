@@ -104,6 +104,37 @@ yent/
 
 ---
 
+## 2026-07-18 - Sol final will re-audit boundaries repaired
+
+The final Sol will re-audit report
+`/Users/ataeff/arianna-shared/yent-inference/AUDIT_SOL_WILL_FINAL_REAUDIT_2026-07-18.md`
+reproduced four remaining boundaries at
+`origin/main@4adb10d746fe4b7c58041739b68b79ba71dba0e1`. This pass repairs
+them in the dock/reach layer:
+
+- `YENT_SARTRE_EVENTS` delivery now repairs and serializes the JSONL tail under
+  a single exclusive file lock. Only newline-terminated records count as already
+  delivered; a valid unterminated tail is framed with a newline, malformed tail
+  bytes are truncated to the last complete record, and dedupe happens after
+  repair.
+- The will namespace owner now lives until `willTicker.run` actually returns.
+  Cancellation no longer releases the advisory owner lock while the will loop is
+  still unwinding inside the same state namespace.
+- Same-process baseline publication now enforces the reach-journaled pending
+  state SHA, matching restart recovery semantics instead of recomputing trust
+  from the current pending file.
+- AML persistent will physics is armed only after fallible startup boundaries
+  have passed, so a failed environment wire cannot leave persistence enabled
+  after will startup has been disabled.
+
+Validation: focused sink/reach/owner/wiring tests, `go test -count=1
+./cmd/innerworld-dock`, sequential `go test -count=1 ./...`, sequential
+`go test -race -count=1 ./...`, `go vet ./...`, `sh tools/build_libamk.sh`,
+Rust utility tests for `repo_monitor` and `whatdotheythinkiam`, C perception
+and SARTRE/perception builds, and `git diff --check`. The first normal+race
+suite attempt was run concurrently and reproduced the known resident DoE
+harness interference; the sequential normal and race suites passed cleanly.
+
 ## 2026-07-18 — post-#231 will recovery self-check reaches Sol handoff
 
 The post-repair self-checks after Sol's residual will re-audit are now repaired

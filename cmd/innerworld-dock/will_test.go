@@ -84,13 +84,17 @@ func (s *fakeSpawner) Spawn(_ context.Context, util string) (willSpawnResult, er
 		Overflow:         s.overflow,
 		PendingStatePath: pendingPath,
 		StatePath:        statePath,
-		Commit: func() error {
+		Commit: func(expectedSHA256 string) error {
 			if s.commitErr != nil {
 				return s.commitErr
 			}
-			digest, err := willFileSHA256(pendingPath)
-			if err != nil {
-				return err
+			digest := expectedSHA256
+			if digest == "" {
+				var err error
+				digest, err = willFileSHA256(pendingPath)
+				if err != nil {
+					return err
+				}
 			}
 			if err := publishPendingWillState(pendingPath, statePath, digest); err != nil {
 				return err
@@ -121,6 +125,22 @@ func (s *fakeSpawner) ensurePendingState(util string) (string, string, error) {
 		return "", "", err
 	}
 	return pendingPath, statePath, nil
+}
+
+type blockingSpawner struct {
+	base    fakeSpawner
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingSpawner) Spawn(_ context.Context, util string) (willSpawnResult, error) {
+	select {
+	case <-s.entered:
+	default:
+		close(s.entered)
+	}
+	<-s.release
+	return s.base.Spawn(context.Background(), util)
 }
 
 type fakeSink struct {
@@ -179,6 +199,63 @@ func (s emitOnlyFileSink) EmitEvent(ev willEvent) error {
 func newWill(vars map[string]float32, sp *fakeSpawner, sk *fakeSink) (*willTicker, *fakeWillField) {
 	f := &fakeWillField{vars: vars}
 	return &willTicker{field: f, script: "x.aml", spawner: sp, sink: sk}, f
+}
+
+func TestWillOwnerLivesUntilRunReturns(t *testing.T) {
+	stateDir := t.TempDir()
+	owner, err := acquireWillNamespaceOwner(stateDir)
+	if err != nil {
+		t.Fatalf("acquire owner: %v", err)
+	}
+	sp := &blockingSpawner{
+		base: fakeSpawner{
+			line: []byte(`{"util":"repo_monitor","kind":"modified","path":"README.md"}`),
+		},
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	sk := &fakeSink{}
+	f := &fakeWillField{vars: map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}}
+	wt := &willTicker{
+		field:             f,
+		script:            "x.aml",
+		spawner:           sp,
+		sink:              sk,
+		rootID:            "rootabc",
+		reachStatePath:    willReachStatePath(stateDir),
+		learningStatePath: willLearningStatePath(stateDir),
+		refractory:        1,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		runWillWithOwner(ctx, wt, owner, stateDir, time.Millisecond)
+		close(done)
+	}()
+
+	select {
+	case <-sp.entered:
+	case <-time.After(2 * time.Second):
+		cancel()
+		close(sp.release)
+		t.Fatal("will run did not enter the blocked reach")
+	}
+	cancel()
+	if out, err := willNamespaceOwnerHelperCommand(stateDir).CombinedOutput(); err == nil {
+		t.Fatalf("namespace became claimable while cancelled run was still inside reach, output=%s", out)
+	}
+	close(sp.release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("will run did not return after blocked reach was released")
+	}
+	if out, err := willNamespaceOwnerHelperCommand(stateDir).CombinedOutput(); err != nil {
+		t.Fatalf("namespace should be claimable only after run returns, err=%v output=%s", err, out)
+	}
 }
 
 func TestWillTickReachesOnOriginCrest(t *testing.T) {
@@ -1273,6 +1350,60 @@ func TestWillTickRetriesRecordedEffectBaselineWithoutRespawning(t *testing.T) {
 	}
 	if len(sk2.events) != 1 || sk2.events[0].Outcome != willOutcomePerceptionCommitted || sk2.events[0].EffectCount != 1 {
 		t.Fatalf("retry must learn the original committed perception, got %#v", sk2.events)
+	}
+}
+
+func TestWillTickRejectsBaselineMutationAfterPreparedSHA(t *testing.T) {
+	stateDir := t.TempDir()
+	reachPath := willReachStatePath(stateDir)
+	learningPath := willLearningStatePath(stateDir)
+	pendingPath := filepath.Join(stateDir, "repo_monitor.state.pending")
+	statePath := filepath.Join(stateDir, "repo_monitor.state")
+	if err := os.WriteFile(pendingPath, []byte("baseline-original\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sp := &fakeSpawner{
+		line:             []byte(`{"util":"repo_monitor","kind":"modified","path":"README.md"}`),
+		pendingStatePath: pendingPath,
+		statePath:        statePath,
+	}
+	sk := &fakeSink{}
+	sk.afterEmit = func() {
+		if err := os.WriteFile(pendingPath, []byte("baseline-mutated\n"), 0o644); err != nil {
+			t.Fatalf("mutate pending state: %v", err)
+		}
+	}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp, sk)
+	w.rootID = "rootabc"
+	w.reachStatePath = reachPath
+	w.learningStatePath = learningPath
+
+	util, err := w.tick(context.Background())
+	if err == nil {
+		t.Fatal("baseline mutation after recorded SHA must fail closed")
+	}
+	if util != willUtilPressure {
+		t.Fatalf("got util %q", util)
+	}
+	if sp.committed {
+		t.Fatal("mutated baseline must not be accepted as committed")
+	}
+	if f.discharged {
+		t.Fatal("the tide must not discharge after a baseline integrity failure")
+	}
+	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+		t.Fatalf("mutated baseline must not be published, err=%v", err)
+	}
+	st, err := loadWillReachState(reachPath)
+	if err != nil {
+		t.Fatalf("load reach state: %v", err)
+	}
+	if st.Pending == nil || !st.Pending.EffectRecorded || st.Pending.BaselineCommitted ||
+		st.Pending.BaselineSHA256 == "" {
+		t.Fatalf("reach must keep the delivered effect and original baseline SHA for retry, got %#v", st.Pending)
 	}
 }
 
