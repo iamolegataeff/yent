@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -221,6 +222,22 @@ quote	test=false	text=This should not reach runtime.
 	}
 	if strings.Contains(text, "This should not reach runtime") {
 		t.Fatalf("RI memory leaked non-test quote:\n%s", text)
+	}
+}
+
+func TestWireWillRequiresSartreEventsBeforeState(t *testing.T) {
+	stateBase := filepath.Join(t.TempDir(), "will-state")
+	utilsDir := t.TempDir()
+	t.Setenv("YENT_WILL_UTILS_DIR", utilsDir)
+	t.Setenv("YENT_WILL_STATE_DIR", stateBase)
+	t.Setenv("YENT_WILL_ROOT", t.TempDir())
+	t.Setenv("YENT_SARTRE_EVENTS", "")
+
+	if wireWillFromEnv(context.Background(), nil) {
+		t.Fatal("will must not start without a durable SARTRE event sink")
+	}
+	if _, err := os.Stat(stateBase); !os.IsNotExist(err) {
+		t.Fatalf("missing event sink must fail before state namespace creation, err=%v", err)
 	}
 }
 
