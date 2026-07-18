@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -212,6 +213,51 @@ func TestWillStateDirNamespacesByRootAndOrganism(t *testing.T) {
 	}
 	if !strings.Contains(filepath.Base(a), "-cfg-") {
 		t.Fatalf("state dir must include sensor config namespace, got %q", a)
+	}
+}
+
+func TestWillNamespaceOwnerLockRejectsSecondProcess(t *testing.T) {
+	stateDir := t.TempDir()
+	owner, err := acquireWillNamespaceOwner(stateDir)
+	if err != nil {
+		t.Fatalf("acquire owner: %v", err)
+	}
+	defer owner.Close()
+
+	cmd := willNamespaceOwnerHelperCommand(stateDir)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("second process acquired an occupied will namespace, output=%s", out)
+	}
+	if !strings.Contains(string(out), "already has an active owner") {
+		t.Fatalf("second process must fail with owner diagnostic, err=%v output=%s", err, out)
+	}
+
+	if err := owner.Close(); err != nil {
+		t.Fatalf("release owner: %v", err)
+	}
+	out, err = willNamespaceOwnerHelperCommand(stateDir).CombinedOutput()
+	if err != nil {
+		t.Fatalf("released namespace should be claimable, err=%v output=%s", err, out)
+	}
+}
+
+func willNamespaceOwnerHelperCommand(stateDir string) *osexec.Cmd {
+	cmd := osexec.Command(os.Args[0], "-test.run=^TestWillNamespaceOwnerLockHelper$")
+	cmd.Env = append(os.Environ(), "YENT_WILL_LOCK_HELPER=1", "YENT_WILL_LOCK_HELPER_DIR="+stateDir)
+	return cmd
+}
+
+func TestWillNamespaceOwnerLockHelper(t *testing.T) {
+	if os.Getenv("YENT_WILL_LOCK_HELPER") != "1" {
+		return
+	}
+	owner, err := acquireWillNamespaceOwner(os.Getenv("YENT_WILL_LOCK_HELPER_DIR"))
+	if err != nil {
+		t.Fatalf("helper lock: %v", err)
+	}
+	if err := owner.Close(); err != nil {
+		t.Fatalf("helper unlock: %v", err)
 	}
 }
 
