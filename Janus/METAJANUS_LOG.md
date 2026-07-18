@@ -805,3 +805,22 @@ not append a duplicate `learning` JSONL record. Validated with focused will
 recovery tests, `go test -count=1 ./cmd/innerworld-dock`,
 `go test -count=1 ./...`, `go test -race -count=1 ./...`, `go vet ./...`,
 `sh tools/build_libamk.sh`, and `git diff --check`.
+
+### re-audit boundary - Sol will recovery repaired through #231
+
+After fixes 25-29, Sol's residual will recovery audit and the subsequent
+self-check gaps have a complete repair trail on `main`:
+
+- #226 / `9dc5bf9`: recoverable effect/baseline/consequence stage.
+- #227 / `40af729`: one live owner per will namespace.
+- #228 / `74dd88f`: missing durable SARTRE sink disables will before state.
+- #230 / `6b4dc70`: prepared effect JSONL is recorded before append.
+- #231 / `93c48be`: final learning state and receipt are pinned before delivery.
+
+The current baseline for the next independent read-only Sol re-audit is
+`origin/main@a13e107f6cfe50a77562704810d5546e9a7beb14` (`#231` merge).
+Known validation shape: focused will recovery tests, `go test -count=1
+./cmd/innerworld-dock`, sequential `go test -count=1 ./...`, sequential
+`go test -race -count=1 ./...`, `go vet ./...`, `sh tools/build_libamk.sh`, and
+`git diff --check` are green. This remains a handoff boundary, not the auditor's
+closure verdict.
