@@ -717,3 +717,18 @@ utility spawn and preserve `perception_committed` plus the original effect count
 Validated with focused will tests, `go test -count=1 ./cmd/innerworld-dock`,
 `go test -count=1 ./...`, `go test -race -count=1 ./...`, `go vet ./...`, and
 `git diff --check`.
+
+### fix 26 - will namespace has one live owner
+
+The will namespace now has a process-lifetime owner lock before host state is
+loaded or the will goroutine starts. The lock file lives inside the namespaced
+state directory, is acquired with a non-blocking exclusive advisory lock, and
+keeps its file descriptor open until shutdown. A second dock for the same
+organism/root/sensor configuration now fails closed with an explicit owner
+diagnostic instead of sharing fixed `.pending` state names.
+
+The regression holds the namespace in the parent test process, spawns a second
+test process against the same state directory, verifies that it cannot acquire
+ownership, then releases the lock and proves the namespace can be claimed again.
+This closes Sol's residual same-namespace multi-owner gap without changing the
+will tide, utility semantics, or generation path.

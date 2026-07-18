@@ -1190,47 +1190,57 @@ func main() {
 			if err := os.MkdirAll(stateDir, 0o755); err != nil {
 				fmt.Fprintf(os.Stderr, "[will] state dir %s: %v\n", stateDir, err)
 			} else {
-				learningPath := willLearningStatePath(stateDir)
-				learningState, err := loadWillLearningState(learningPath)
+				owner, err := acquireWillNamespaceOwner(stateDir)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "[will] learning state %s: %v\n", learningPath, err)
+					fmt.Fprintf(os.Stderr, "[will] namespace owner %s: %v\n", stateDir, err)
 				} else {
-					reachPath := willReachStatePath(stateDir)
-					reachState, err := loadWillReachState(reachPath)
+					defer func() {
+						if err := owner.Close(); err != nil {
+							fmt.Fprintf(os.Stderr, "[will] namespace owner release %s: %v\n", stateDir, err)
+						}
+					}()
+					learningPath := willLearningStatePath(stateDir)
+					learningState, err := loadWillLearningState(learningPath)
 					if err != nil {
-						fmt.Fprintf(os.Stderr, "[will] reach state %s: %v\n", reachPath, err)
+						fmt.Fprintf(os.Stderr, "[will] learning state %s: %v\n", learningPath, err)
 					} else {
-						initialBreath := initialWillBreath(learningState, reachState)
-						wt := &willTicker{
-							field:  flowBody,
-							script: willScriptPath(),
-							spawner: osSpawner{
-								dir:      utilsDir,
-								root:     root,
-								stateDir: stateDir,
-								timeout:  willReachTimeout(),
-							},
-							sink:              fileSink{path: sinkPath},
-							rootID:            rootID,
-							learningStatePath: learningPath,
-							reachStatePath:    reachPath,
-							refractory:        willRefractoryTicks(),
-							breath:            initialBreath,
-							cooldown:          learningState.CooldownBreaths,
-							quietRuns:         learningState.QuietRuns,
-							nextReachSeq:      reachState.NextSeq,
-							pendingReach:      reachState.Pending,
-							maxReachAttempts:  willReachMaxAttempts(),
-						}
-						go wt.run(ctx, willTickEvery())
-						pending := ""
-						if reachState.Pending != nil {
-							pending = fmt.Sprintf(", pending_reach=%s", reachState.Pending.ID)
-						}
-						fmt.Printf("=== will wired: confluence tide -> reach for a self-reading utility (utils=%s, root=%s, root_id=%s, state=%s, quiet_runs=%d, cooldown=%d, breath=%d, reach_seq=%d, max_attempts=%d%s, every %s) ===\n",
-							utilsDir, root, rootID, stateDir, learningState.QuietRuns, learningState.CooldownBreaths, initialBreath, reachState.NextSeq, willReachMaxAttempts(), pending, willTickEvery())
-						if sinkPath == "" {
-							fmt.Println("    (YENT_SARTRE_EVENTS unset: the will reaches and reads, but the spiral cannot close)")
+						reachPath := willReachStatePath(stateDir)
+						reachState, err := loadWillReachState(reachPath)
+						if err != nil {
+							fmt.Fprintf(os.Stderr, "[will] reach state %s: %v\n", reachPath, err)
+						} else {
+							initialBreath := initialWillBreath(learningState, reachState)
+							wt := &willTicker{
+								field:  flowBody,
+								script: willScriptPath(),
+								spawner: osSpawner{
+									dir:      utilsDir,
+									root:     root,
+									stateDir: stateDir,
+									timeout:  willReachTimeout(),
+								},
+								sink:              fileSink{path: sinkPath},
+								rootID:            rootID,
+								learningStatePath: learningPath,
+								reachStatePath:    reachPath,
+								refractory:        willRefractoryTicks(),
+								breath:            initialBreath,
+								cooldown:          learningState.CooldownBreaths,
+								quietRuns:         learningState.QuietRuns,
+								nextReachSeq:      reachState.NextSeq,
+								pendingReach:      reachState.Pending,
+								maxReachAttempts:  willReachMaxAttempts(),
+							}
+							go wt.run(ctx, willTickEvery())
+							pending := ""
+							if reachState.Pending != nil {
+								pending = fmt.Sprintf(", pending_reach=%s", reachState.Pending.ID)
+							}
+							fmt.Printf("=== will wired: confluence tide -> reach for a self-reading utility (utils=%s, root=%s, root_id=%s, state=%s, quiet_runs=%d, cooldown=%d, breath=%d, reach_seq=%d, max_attempts=%d%s, every %s) ===\n",
+								utilsDir, root, rootID, stateDir, learningState.QuietRuns, learningState.CooldownBreaths, initialBreath, reachState.NextSeq, willReachMaxAttempts(), pending, willTickEvery())
+							if sinkPath == "" {
+								fmt.Println("    (YENT_SARTRE_EVENTS unset: the will reaches and reads, but the spiral cannot close)")
+							}
 						}
 					}
 				}

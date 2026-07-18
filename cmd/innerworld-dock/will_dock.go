@@ -835,6 +835,72 @@ func willStateDir(root string) string {
 	return filepath.Join(base, willStateNamespace(root))
 }
 
+type willNamespaceOwner struct {
+	path string
+	file *os.File
+}
+
+func willNamespaceOwnerLockPath(stateDir string) string {
+	return filepath.Join(stateDir, "will-owner.lock")
+}
+
+func acquireWillNamespaceOwner(stateDir string) (*willNamespaceOwner, error) {
+	if strings.TrimSpace(stateDir) == "" {
+		return nil, fmt.Errorf("empty will state namespace")
+	}
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		return nil, err
+	}
+	lockPath := willNamespaceOwnerLockPath(stateDir)
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return nil, fmt.Errorf("will namespace %s already has an active owner (lock %s)", stateDir, lockPath)
+		}
+		return nil, fmt.Errorf("lock will namespace %s: %w", stateDir, err)
+	}
+	meta := []byte(fmt.Sprintf("pid=%d\nstarted_unix=%d\n", os.Getpid(), time.Now().Unix()))
+	if err := f.Truncate(0); err != nil {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+		return nil, err
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+		return nil, err
+	}
+	if err := writeAll(f, meta); err != nil {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+		return nil, err
+	}
+	if err := f.Sync(); err != nil {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+		return nil, err
+	}
+	return &willNamespaceOwner{path: lockPath, file: f}, nil
+}
+
+func (o *willNamespaceOwner) Close() error {
+	if o == nil || o.file == nil {
+		return nil
+	}
+	f := o.file
+	o.file = nil
+	unlockErr := syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	closeErr := f.Close()
+	if unlockErr != nil {
+		return unlockErr
+	}
+	return closeErr
+}
+
 func willStateNamespace(root string) string {
 	organism := safeWillNamespacePart(willOrganismID())
 	rootID := willRootID(root)
