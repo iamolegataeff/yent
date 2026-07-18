@@ -746,3 +746,21 @@ This closes Sol's low-severity operator-contract finding. The old message said
 the will would reach and read while the spiral could not close, but the first
 intent receipt already failed on an empty `fileSink`, so the truthful behavior
 is fail-closed before state.
+
+### re-audit boundary — Sol residual will findings repaired through #228
+
+After fixes 25-27, the residual findings from Sol's 2026-07-18 will re-audit
+have a complete repair trail on `main`:
+
+- HIGH residual: `9dc5bf9` records a recoverable effect stage so a delivered
+  effect and utility baseline cannot restart as `no_novelty`.
+- MEDIUM residual: `40af729` gives each state namespace one live owner before
+  any state load or will goroutine startup.
+- LOW residual: `74dd88f` makes a missing durable SARTRE event sink fail closed
+  before state or physics are touched.
+
+The current baseline for another independent read-only re-audit is
+`origin/main@127951eb0db2906c0de03e7c6eeaae06bf7de231` (`#228` merge).
+Known validation shape: focused will tests, repeated full Go suites including
+race, `go vet`, `sh tools/build_libamk.sh`, and `git diff --check` are green.
+This is a handoff boundary, not a claim that the auditor has already reclosed it.

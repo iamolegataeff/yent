@@ -104,6 +104,35 @@ yent/
 
 ---
 
+## 2026-07-18 — post-#228 Sol residual will pass reaches re-audit boundary
+
+The residual Sol will re-audit findings from
+`/Users/ataeff/arianna-shared/yent-inference/AUDIT_SOL_WILL_REAUDIT_2026-07-18.md`
+are now repaired through the #228 merge, at
+`origin/main@127951eb0db2906c0de03e7c6eeaae06bf7de231`.
+
+Repair trail:
+
+- #226 / `9dc5bf9` closed the remaining HIGH causal-accounting window:
+  delivered effects, utility baseline publication, reach consequence state, and
+  restart recovery now move through a recoverable effect stage instead of
+  allowing a committed effect to be relabelled `no_novelty`.
+- #227 / `40af729` closed the same-namespace multi-owner gap with a
+  process-lifetime advisory owner lock acquired before state load or will
+  goroutine startup.
+- #228 / `74dd88f` closed the no-sink operator-contract gap: an empty
+  `YENT_SARTRE_EVENTS` disables will before persistent physics, root resolution,
+  namespace creation, owner lock acquisition, or goroutine startup.
+
+Validation receipts across this residual pass include focused
+`cmd/innerworld-dock` will tests, repeated `go test -count=1 ./...`,
+`go test -race -count=1 ./...`, `go vet ./...`, `sh tools/build_libamk.sh`,
+and `git diff --check`. The known forged-status flake appeared once during
+#228 verification and passed targeted, package, and repeated full-suite reruns.
+This entry is a re-audit handoff, not an independent Sol closure verdict.
+
+---
+
 ## 2026-07-18 — Sol will-design repair pass reaches re-audit boundary
 
 The original Sol/GPT-5.6 will-design audit
