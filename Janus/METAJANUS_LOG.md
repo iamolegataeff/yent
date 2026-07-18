@@ -670,3 +670,13 @@ field-moving AML again.
 The regression forces a cursor publish failure after limpha has already stored the event, then proves the live
 field does not receive the same pressure a second time, limpha does not grow a duplicate seam, and a later cursor
 repair clears the pending batch. This is still delivery plumbing, not wormholes or generation control.
+
+### fix 24 — C SARTRE perception stops teaching universal RUN
+
+The live Go dock already uses typed SARTRE semantics, but the C `sartre/perception.c` surface still carried the
+old demo rule where any line containing `"kind"` became file motion and `VELOCITY RUN`. That was not in the live
+will loop anymore, but it remained compiled by `-DHAS_PERCEPTION` and was dangerous documentation-by-code.
+
+The C surface now mirrors the typed contract: routine repo novelty walks, self-surface movement or floods run,
+identity recognition/reduction emits still prophecy, sensor failures emit still prophecy, and forged/plain
+`"kind"` text is ignored. The standalone C test now covers all of those cases.
