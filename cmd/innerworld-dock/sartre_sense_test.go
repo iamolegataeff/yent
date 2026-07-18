@@ -247,6 +247,54 @@ func TestSartreSenseRetriesPendingPressureBeforeAck(t *testing.T) {
 	}
 }
 
+func TestSartreSenseAckFailureDoesNotReplayAppliedPressure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	goodCursor := filepath.Join(dir, "cursor.json")
+	badCursor := filepath.Join(dir, "cursor-is-dir")
+	if err := os.Mkdir(badCursor, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"id":"reach-ack-fail","root_id":"root-ack-fail","phase":"effect","util":"repo_monitor","kind":"modified","path":"README.md"}`
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lc, err := yent.NewLimphaClientAt(filepath.Join(dir, "limpha.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lc.Close()
+	s := &sartreSense{eventsPath: path, cursorPath: goodCursor, limpha: lc}
+	aml, ok := s.Pressure()
+	if !ok || !strings.Contains(aml, "PROPHECY") {
+		t.Fatalf("active field pressure expected, got ok=%v aml=%q", ok, aml)
+	}
+	s.cursorPath = badCursor
+	if err := s.AckPressure(); err == nil {
+		t.Fatal("cursor publish failure should keep the pending ack open")
+	}
+	if aml, ok := s.Pressure(); ok || aml != "" {
+		t.Fatalf("post-field ack retry must not replay applied pressure, got ok=%v aml=%q", ok, aml)
+	}
+	stats, err := lc.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats["total_seams"].(int64) != 1 {
+		t.Fatalf("failed cursor ack retry should not duplicate the limpha seam, got %v", stats["total_seams"])
+	}
+	s.cursorPath = goodCursor
+	if err := s.AckPressure(); err != nil {
+		t.Fatal(err)
+	}
+	if s.pendingAck.ok {
+		t.Fatal("successful retry should clear the pending ack")
+	}
+	if aml, ok := (&sartreSense{eventsPath: path, cursorPath: s.cursorPath, limpha: lc}).Pressure(); ok || aml != "" {
+		t.Fatalf("final acked pressure must not replay after restart, got ok=%v aml=%q", ok, aml)
+	}
+}
+
 func TestSartreSensePersistentCursorDoesNotAckPartialAcrossRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	cursor := filepath.Join(t.TempDir(), "cursor.json")
