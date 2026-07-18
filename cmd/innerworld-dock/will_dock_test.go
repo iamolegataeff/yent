@@ -432,6 +432,25 @@ func TestFileSinkAppends(t *testing.T) {
 	}
 }
 
+func TestFileSinkSkipsAlreadyDeliveredRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	sink := fileSink{path: path}
+	line := []byte(`{"id":"reach1","phase":"effect","util":"repo_monitor","kind":"modified","path":"README.md"}`)
+	if err := sink.Emit(line); err != nil {
+		t.Fatalf("first Emit: %v", err)
+	}
+	if err := sink.Emit(line); err != nil {
+		t.Fatalf("duplicate Emit: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if got := len(completeSartreJSONLines(data)); got != 1 {
+		t.Fatalf("duplicate effect should be skipped, got %d lines: %s", got, data)
+	}
+}
+
 func TestFileSinkDropsNoiseAndIncompleteRecords(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	sink := fileSink{path: path}

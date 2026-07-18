@@ -124,8 +124,9 @@ func (s *fakeSpawner) ensurePendingState(util string) (string, string, error) {
 }
 
 type fakeSink struct {
-	lines [][]byte
-	err   error
+	lines     [][]byte
+	err       error
+	afterEmit func()
 }
 
 func (s *fakeSink) Emit(line []byte) error {
@@ -133,7 +134,31 @@ func (s *fakeSink) Emit(line []byte) error {
 		return s.err
 	}
 	s.lines = append(s.lines, append([]byte(nil), line...))
+	if s.afterEmit != nil {
+		s.afterEmit()
+	}
 	return nil
+}
+
+type afterEmitFileSink struct {
+	path      string
+	afterEmit func()
+}
+
+func (s *afterEmitFileSink) Emit(line []byte) error {
+	if err := (fileSink{path: s.path}).Emit(line); err != nil {
+		return err
+	}
+	if len(completeSartreJSONLines(line)) > 0 && s.afterEmit != nil {
+		s.afterEmit()
+	}
+	return nil
+}
+
+type emitOnlyFileSink struct{ path string }
+
+func (s emitOnlyFileSink) Emit(line []byte) error {
+	return (fileSink{path: s.path}).Emit(line)
 }
 
 func newWill(vars map[string]float32, sp *fakeSpawner, sk *fakeSink) (*willTicker, *fakeWillField) {
@@ -1158,6 +1183,98 @@ func TestWillTickRecoveryKeepsEffectOutcomeAfterBaselinePublicationGap(t *testin
 	}
 	if learning.LastOutcome != willOutcomePerceptionCommitted || learning.LastEffectCount != 1 {
 		t.Fatalf("learning must not relabel the committed effect as no_novelty, got %#v", learning)
+	}
+}
+
+func TestWillTickRecoveryDoesNotRespawnAfterEffectDeliveryStateGap(t *testing.T) {
+	stateDir := t.TempDir()
+	reachPath := willReachStatePath(stateDir)
+	learningPath := willLearningStatePath(stateDir)
+	eventPath := filepath.Join(t.TempDir(), "sartre.jsonl")
+	sp := &fakeSpawner{
+		line: []byte(`{"util":"repo_monitor","kind":"modified","path":"README.md"}`),
+	}
+	sk := &afterEmitFileSink{path: eventPath}
+	w, f := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 1.5, "pull_origin": 0.0, "pull_pressure": 0.3,
+		"will_pressure_tide": 1.5,
+	}, sp, &fakeSink{})
+	w.sink = sk
+	w.rootID = "rootabc"
+	w.reachStatePath = reachPath
+	w.learningStatePath = learningPath
+	brokenReachPath := t.TempDir()
+	sk.afterEmit = func() {
+		w.reachStatePath = brokenReachPath
+	}
+
+	util, err := w.tick(context.Background())
+	if err == nil {
+		t.Fatal("reach-state publication failure after effect delivery must surface")
+	}
+	if util != willUtilPressure {
+		t.Fatalf("got util %q", util)
+	}
+	if sp.calls != 1 {
+		t.Fatalf("first pass should spawn once, calls=%d", sp.calls)
+	}
+	data, err := os.ReadFile(eventPath)
+	if err != nil {
+		t.Fatalf("read first effect delivery: %v", err)
+	}
+	if got := len(completeSartreJSONLines(data)); got != 1 {
+		t.Fatalf("first pass should deliver the effect once before failing state save, got %d lines: %s", got, data)
+	}
+	if f.discharged {
+		t.Fatal("the tide must not discharge before the delivered effect is recoverably journaled")
+	}
+	st, err := loadWillReachState(reachPath)
+	if err != nil {
+		t.Fatalf("load reach state: %v", err)
+	}
+	if st.Pending == nil || !st.Pending.EffectPrepared || st.Pending.EffectRecorded ||
+		st.Pending.Outcome != willOutcomePerceptionCommitted || st.Pending.EffectCount != 1 ||
+		len(completeSartreJSONLines([]byte(st.Pending.EffectLine))) != 1 {
+		t.Fatalf("pending reach must remember the prepared effect payload without respawn, got %#v", st.Pending)
+	}
+
+	sp2 := &fakeSpawner{}
+	w2, f2 := newWill(map[string]float32{
+		"will_threshold": 1.0, "will_gaze": 0,
+	}, sp2, &fakeSink{})
+	w2.sink = emitOnlyFileSink{path: eventPath}
+	w2.rootID = "rootabc"
+	w2.reachStatePath = reachPath
+	w2.learningStatePath = learningPath
+	w2.pendingReach = st.Pending
+	w2.nextReachSeq = st.NextSeq
+
+	util, err = w2.tick(context.Background())
+	if err != nil {
+		t.Fatalf("retry should finish the same delivered effect without respawning: %v", err)
+	}
+	if util != willUtilPressure {
+		t.Fatalf("retry util changed, got %q", util)
+	}
+	if sp2.calls != 0 {
+		t.Fatalf("retry after delivered effect must not respawn the utility, calls=%d", sp2.calls)
+	}
+	if !f2.discharged {
+		t.Fatal("retry must discharge the original tide")
+	}
+	data, err = os.ReadFile(eventPath)
+	if err != nil {
+		t.Fatalf("read retry effect delivery: %v", err)
+	}
+	if got := len(completeSartreJSONLines(data)); got != 1 {
+		t.Fatalf("retry must not append a duplicate effect, got %d lines: %s", got, data)
+	}
+	learning, err := loadWillLearningState(learningPath)
+	if err != nil {
+		t.Fatalf("load learning: %v", err)
+	}
+	if learning.LastOutcome != willOutcomePerceptionCommitted || learning.LastEffectCount != 1 {
+		t.Fatalf("learning must preserve the delivered effect, got %#v", learning)
 	}
 }
 
