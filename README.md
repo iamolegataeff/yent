@@ -378,7 +378,8 @@ JavaScript is served from exact `/worldmodel/*.js` routes rather than a general
 directory server. The Janus face keeps the readable answer on the selected token
 stream while using non-selected top-token text as a separate latent projection;
 the worldmodel weights its candidate cloud by probability/rank/tail mass instead
-of treating all surrounding words alike. Both surfaces display selected-token
+of treating all surrounding words alike, and also mirrors the chosen token stream
+into a readable `MANIFEST` surface. Both surfaces display selected-token
 probability, selected rank, and candidate tail mass when the stream provides
 those fields. The HTML entry surfaces live at the repository root as `yent.html`
 and `worldmodel.html`; the DoE server resolves them there when launched from

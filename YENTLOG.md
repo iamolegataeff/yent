@@ -104,6 +104,19 @@ yent/
 
 ---
 
+## 2026-07-19 - Worldmodel answer becomes readable
+
+`/worldmodel` now includes a readable `MANIFEST` surface for the selected answer.
+It is fed from the same SSE token stream that drives the central manifested text
+inside the probability field, so the visual world and readable output stay tied
+to one selected-token source.
+
+This is an interface-only observability pass. Candidate mass, wall words, HUD
+metrics, sampler behavior, prompts, weights, Janus/will semantics, and wormholes
+are unchanged.
+
+---
+
 ## 2026-07-19 - Interface HUD exposes candidate certainty
 
 The `/yent` and `/worldmodel` HUDs now show selected-token probability (`P`),
