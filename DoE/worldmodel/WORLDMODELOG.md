@@ -89,3 +89,9 @@ Yent worldmodel interface log.
 - Candidate clouds, wall words, and Janus/worldmodel physics remain
   observational UI layers only; sampler, prompt, weights, will, wormholes, and
   runtime semantics did not change.
+
+## 2026-07-19 - interface mode switch
+
+- Added a shared `JANUS` / `WORLD` mode switch to `/yent` and `/worldmodel`.
+- The switch is plain navigation between the two root HTML surfaces; it does not
+  create shared browser state or alter the SSE generation path.

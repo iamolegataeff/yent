@@ -381,7 +381,8 @@ the worldmodel weights its candidate cloud by probability/rank/tail mass instead
 of treating all surrounding words alike, and also mirrors the chosen token stream
 into a readable `MANIFEST` surface. Both surfaces display selected-token
 probability, selected rank, and candidate tail mass when the stream provides
-those fields. The HTML entry surfaces live at the repository root as `yent.html`
+those fields, and expose a shared `JANUS` / `WORLD` switch between the two
+interfaces. The HTML entry surfaces live at the repository root as `yent.html`
 and `worldmodel.html`; the DoE server resolves them there when launched from
 `DoE/doe_field`.
 
