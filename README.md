@@ -378,9 +378,11 @@ JavaScript is served from exact `/worldmodel/*.js` routes rather than a general
 directory server. The Janus face keeps the readable answer on the selected token
 stream while using non-selected top-token text as a separate latent projection;
 the worldmodel weights its candidate cloud by probability/rank/tail mass instead
-of treating all surrounding words alike. The HTML entry surfaces live at the
-repository root as `yent.html` and `worldmodel.html`; the DoE server resolves
-them there when launched from `DoE/doe_field`.
+of treating all surrounding words alike. Both surfaces display selected-token
+probability, selected rank, and candidate tail mass when the stream provides
+those fields. The HTML entry surfaces live at the repository root as `yent.html`
+and `worldmodel.html`; the DoE server resolves them there when launched from
+`DoE/doe_field`.
 
 That run gives you the engine without the protected voice. You will not hear
 **Yent**; you will hear an ordinary Mistral body running through a strange runtime:

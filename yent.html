@@ -82,8 +82,8 @@
 
   .hud {
     display: grid;
-    grid-template-columns: repeat(5, max-content);
-    gap: 18px;
+    grid-template-columns: repeat(8, max-content);
+    gap: 14px;
     align-items: center;
     font-family: var(--mono);
     font-size: 11px;
@@ -98,6 +98,8 @@
   .hud .debt b { color: var(--red); }
   .hud .cons b { color: var(--cyan); }
   .hud .field b { color: var(--green); }
+  .hud .prob b,
+  .hud .tail b { color: var(--amber); }
 
   .answer-shell {
     position: fixed;
@@ -388,6 +390,9 @@
     <div class="debt">DEBT <b id="hud-debt">0.00</b></div>
     <div class="cons">CONS <b id="hud-cons">0.00</b></div>
     <div class="field">FIELD <b id="hud-field">1.00</b></div>
+    <div class="prob">P <b id="hud-prob">-</b></div>
+    <div>RANK <b id="hud-rank">-</b></div>
+    <div class="tail">TAIL <b id="hud-tail">-</b></div>
   </div>
 </header>
 

@@ -10,7 +10,10 @@ const hud = {
   ent: document.getElementById('hud-ent'),
   debt: document.getElementById('hud-debt'),
   cons: document.getElementById('hud-cons'),
-  field: document.getElementById('hud-field')
+  field: document.getElementById('hud-field'),
+  prob: document.getElementById('hud-prob'),
+  rank: document.getElementById('hud-rank'),
+  tail: document.getElementById('hud-tail')
 };
 
 const baseWords = (
@@ -34,7 +37,9 @@ const state = {
   topologySeed: 0.37,
   topologyWarp: 0.0,
   selectedProb: 0.0,
+  selectedRank: 0,
   candidateTail: 0.0,
+  hasCandidateTelemetry: false,
   pulse: 0,
   quake: 0,
   idle: 0
@@ -63,6 +68,10 @@ function clamp(v, lo, hi) {
 
 function mix(a, b, t) {
   return a + (b - a) * t;
+}
+
+function metricProb(v) {
+  return Number.isFinite(v) ? v.toFixed(v < 0.01 ? 4 : 3) : '-';
 }
 
 function hash(n) {
@@ -179,8 +188,11 @@ function absorbToken(token, data) {
   const tailMass = Number.isFinite(data && data.candidate_tail_mass) ? clamp(data.candidate_tail_mass, 0, 1) : 0;
   const hasSelectedProb = Number.isFinite(data && data.selected_prob);
   const selectedProb = hasSelectedProb ? clamp(data.selected_prob, 0, 1) : state.selectedProb;
+  const selectedRank = Number.isFinite(data && data.selected_rank) ? Math.max(0, Math.floor(data.selected_rank)) : state.selectedRank;
   state.candidateTail = tailMass;
   state.selectedProb = selectedProb;
+  state.selectedRank = selectedRank;
+  state.hasCandidateTelemetry = state.hasCandidateTelemetry || hasSelectedProb || alternatives.length > 0;
   rememberCandidates(alternatives, tailMass);
   state.topologyWarp = clamp(state.topologyWarp + 0.032 + tailMass * 0.025 + (hasSelectedProb ? (1 - selectedProb) * 0.008 : 0), 0, 1);
   state.debt = clamp(Number.isFinite(data && data.debt) ? data.debt : state.debt * 0.985 + 0.006, 0, 1);
@@ -478,6 +490,9 @@ function updateHud() {
   hud.debt.textContent = state.debt.toFixed(2);
   hud.cons.textContent = state.consensus.toFixed(2);
   hud.field.textContent = state.field.toFixed(2);
+  hud.prob.textContent = state.hasCandidateTelemetry ? metricProb(state.selectedProb) : '-';
+  hud.rank.textContent = state.hasCandidateTelemetry && state.selectedRank > 0 ? String(state.selectedRank) : '-';
+  hud.tail.textContent = state.hasCandidateTelemetry ? state.candidateTail.toFixed(2) : '-';
 }
 
 function tickCamera(dt) {
@@ -559,7 +574,9 @@ async function generate(text) {
   state.field = 0.92;
   state.entropy = Math.max(state.entropy, 3.4);
   state.selectedProb = 0;
+  state.selectedRank = 0;
   state.candidateTail = 0;
+  state.hasCandidateTelemetry = false;
   candidateCloud = [];
   state.topologySeed = textSeed(text);
   state.topologyWarp = 1;

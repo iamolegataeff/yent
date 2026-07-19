@@ -15,7 +15,10 @@ const hud = {
   exp: document.getElementById('hud-exp'),
   debt: document.getElementById('hud-debt'),
   cons: document.getElementById('hud-cons'),
-  field: document.getElementById('hud-field')
+  field: document.getElementById('hud-field'),
+  prob: document.getElementById('hud-prob'),
+  rank: document.getElementById('hud-rank'),
+  tail: document.getElementById('hud-tail')
 };
 
 const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_./-=+*#@%&';
@@ -29,7 +32,9 @@ const state = {
   velocity: 1.2,
   sidePulse: 0.0,
   selectedProb: 0.0,
-  candidateTail: 0.0
+  selectedRank: 0,
+  candidateTail: 0.0,
+  hasCandidateTelemetry: false
 };
 
 let width = 0;
@@ -57,6 +62,10 @@ function clamp(v, lo, hi) {
 
 function mix(a, b, t) {
   return a + (b - a) * t;
+}
+
+function metricProb(v) {
+  return Number.isFinite(v) ? v.toFixed(v < 0.01 ? 4 : 3) : '-';
 }
 
 function tokenTextForTape(text) {
@@ -382,8 +391,11 @@ function absorbToken(token, data) {
   const tailMass = Number.isFinite(data && data.candidate_tail_mass) ? clamp(data.candidate_tail_mass, 0, 1) : 0;
   const hasSelectedProb = Number.isFinite(data && data.selected_prob);
   const selectedProb = hasSelectedProb ? clamp(data.selected_prob, 0, 1) : state.selectedProb;
+  const selectedRank = Number.isFinite(data && data.selected_rank) ? Math.max(0, Math.floor(data.selected_rank)) : state.selectedRank;
   state.candidateTail = tailMass;
   state.selectedProb = selectedProb;
+  state.selectedRank = selectedRank;
+  state.hasCandidateTelemetry = state.hasCandidateTelemetry || hasSelectedProb || latent.length > 0;
   state.sidePulse = clamp(state.sidePulse + tailMass * 0.2 + (hasSelectedProb ? (1 - selectedProb) * 0.05 : 0), 0, 1);
   state.velocity = 0.75 + state.debt * 2.7 + (1 - state.consensus) * 1.2 + tailMass * 0.8;
   if (/[.!?]/.test(token)) pushBurst(0.55);
@@ -420,6 +432,9 @@ function updateHud() {
   hud.debt.textContent = state.debt.toFixed(2);
   hud.cons.textContent = state.consensus.toFixed(2);
   hud.field.textContent = state.field.toFixed(2);
+  hud.prob.textContent = state.hasCandidateTelemetry ? metricProb(state.selectedProb) : '-';
+  hud.rank.textContent = state.hasCandidateTelemetry && state.selectedRank > 0 ? String(state.selectedRank) : '-';
+  hud.tail.textContent = state.hasCandidateTelemetry ? state.candidateTail.toFixed(2) : '-';
 }
 
 function drawFieldHaze(scene) {
@@ -539,7 +554,9 @@ async function generate(text) {
   state.field = 0.86;
   state.velocity = 2.4;
   state.selectedProb = 0;
+  state.selectedRank = 0;
   state.candidateTail = 0;
+  state.hasCandidateTelemetry = false;
   state.sidePulse = 0.5;
   latentTape = seedWords.join('');
   pushBurst(2.4);

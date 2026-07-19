@@ -85,8 +85,8 @@
 
   .hud {
     display: grid;
-    grid-template-columns: repeat(6, max-content);
-    gap: 17px;
+    grid-template-columns: repeat(9, max-content);
+    gap: 14px;
     align-items: center;
     font-family: var(--mono);
     font-size: 10px;
@@ -103,6 +103,8 @@
   .hud .cons b { color: var(--blue); }
   .hud .field b { color: var(--green); }
   .hud .entropy b { color: var(--amber); }
+  .hud .prob b,
+  .hud .tail b { color: var(--accent); }
 
   .composer {
     position: fixed;
@@ -256,6 +258,9 @@
     <span class="debt">DEBT <b id="hud-debt">0.00</b></span>
     <span class="cons">CONS <b id="hud-cons">0.62</b></span>
     <span class="field">FIELD <b id="hud-field">1.00</b></span>
+    <span class="prob">P <b id="hud-prob">-</b></span>
+    <span>RANK <b id="hud-rank">-</b></span>
+    <span class="tail">TAIL <b id="hud-tail">-</b></span>
   </div>
 </header>
 
