@@ -61,6 +61,7 @@
   .brand {
     display: flex;
     align-items: baseline;
+    flex-wrap: wrap;
     gap: 12px;
     min-width: 0;
     letter-spacing: 0;
@@ -78,6 +79,33 @@
     font-size: 11px;
     color: var(--muted);
     white-space: nowrap;
+  }
+
+  .mode-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .mode-switch a {
+    display: inline-flex;
+    min-height: 24px;
+    align-items: center;
+    padding: 0 8px;
+    border-radius: 6px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 10px;
+    text-decoration: none;
+  }
+
+  .mode-switch a[aria-current="page"] {
+    background: rgba(85, 167, 216, 0.14);
+    color: var(--text);
   }
 
   .hud {
@@ -382,6 +410,10 @@
 <header class="topbar">
   <div class="brand">
     <strong>YENT</strong>
+    <nav class="mode-switch" aria-label="Interface mode">
+      <a href="/yent" aria-current="page">JANUS</a>
+      <a href="/worldmodel">WORLD</a>
+    </nav>
     <span>DOE JANUS INTERFACE</span>
   </div>
   <div class="hud">

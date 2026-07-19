@@ -104,6 +104,17 @@ yent/
 
 ---
 
+## 2026-07-19 - Interfaces gain a mode switch
+
+`/yent` and `/worldmodel` now expose a shared `JANUS` / `WORLD` mode switch in
+the top bar. It is plain navigation between the dark Janus parliament face and
+the light probability-space surface.
+
+No browser session state, SSE payload, runtime sampling, prompt construction,
+Janus/will semantics, or wormhole behavior changed.
+
+---
+
 ## 2026-07-19 - Worldmodel answer becomes readable
 
 `/worldmodel` now includes a readable `MANIFEST` surface for the selected answer.
