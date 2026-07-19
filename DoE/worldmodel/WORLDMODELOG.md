@@ -60,3 +60,15 @@ Yent worldmodel interface log.
   candidate mass while keeping the chosen token as the manifested answer.
 - Raw pre-sampler logits, full rejected-token traces, and innerworld event
   geometry remain out of this pass.
+
+## 2026-07-19 - weighted candidate projection
+
+- Promoted non-selected `top_tokens` from plain surrounding words into weighted
+  candidate entries with probability, rank, logprob, seed, side, age, and decay.
+- `worldmodel.html` renders those entries as a short-lived candidate cloud whose
+  size, alpha, wake, and motion come from the bounded post-sampler distribution.
+- `/yent` keeps selected output as the readable transcript while feeding
+  non-selected candidate token text into a separate latent tape for the torn
+  Janus face.
+- This remains observational UI physics only: no sampler, prompt, weights,
+  wormhole, Janus/will, or raw-logit behavior changed.

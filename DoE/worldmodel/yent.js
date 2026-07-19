@@ -27,7 +27,9 @@ const state = {
   experts: 0,
   tokps: 0.0,
   velocity: 1.2,
-  sidePulse: 0.0
+  sidePulse: 0.0,
+  selectedProb: 0.0,
+  candidateTail: 0.0
 };
 
 let width = 0;
@@ -37,6 +39,7 @@ let particles = [];
 let bursts = [];
 let traceHistory = [];
 let tokenTape = seedWords.join('');
+let latentTape = seedWords.join('');
 let messages = [];
 let running = false;
 let aborter = null;
@@ -54,6 +57,22 @@ function clamp(v, lo, hi) {
 
 function mix(a, b, t) {
   return a + (b - a) * t;
+}
+
+function tokenTextForTape(text) {
+  return (text || '').replace(/\s+/g, '_').replace(/[^\p{L}\p{N}_./=+\-*#@%&_]/gu, '');
+}
+
+function candidateTapeText(data) {
+  const candidates = Array.isArray(data && data.top_tokens) ? data.top_tokens : [];
+  const parts = [];
+  for (const c of candidates) {
+    if (!c || c.selected || typeof c.token !== 'string') continue;
+    const text = tokenTextForTape(c.token);
+    if (text) parts.push(text);
+    if (parts.length >= 10) break;
+  }
+  return parts.join(' ');
 }
 
 function setCanvasSize(canvas, context, cssW, cssH) {
@@ -160,7 +179,7 @@ class Particle {
     const anchorX = scene.x + this.side * splitSep;
     const anchorY = scene.y;
     const seamPull = this.side * torn * clamp(1 - Math.abs(this.localX) / (scene.scale * 115), 0, 1) * scene.scale * 16;
-    const unrest = 0.32 + state.debt * 0.78 + torn * 0.56;
+    const unrest = 0.32 + state.debt * 0.78 + torn * 0.56 + state.candidateTail * 0.35;
     const localRadius = Math.hypot(this.localX, this.localY);
     const edge = clamp(localRadius / (scene.scale * 155), 0, 1);
     const drift = Math.sin(now * 0.7 + this.phase) * (3 + state.debt * 14) * (0.45 + torn);
@@ -250,7 +269,8 @@ class Particle {
     }
 
     const alpha = clamp(b * (0.22 + state.field * 0.55 + state.consensus * 0.32), 0.04, 0.96);
-    const ch = this.eye ? 'Y' : tokenTape[(this.charIndex + Math.floor(time * 5)) % tokenTape.length] || charset[this.charIndex % charset.length];
+    const sourceTape = this.side < 0 && latentTape.length > seedWords.join('').length ? latentTape : tokenTape;
+    const ch = this.eye ? 'Y' : sourceTape[(this.charIndex + Math.floor(time * (5 + state.candidateTail * 5))) % sourceTape.length] || charset[this.charIndex % charset.length];
 
     ctx.fillStyle = this.eye
       ? `rgba(255,255,255,${clamp(alpha + 0.32, 0, 1)})`
@@ -340,8 +360,10 @@ function pushBurst(power) {
 
 function absorbToken(token, data) {
   if (!token) return;
-  const printable = token.replace(/\s+/g, '_');
+  const printable = tokenTextForTape(token);
   tokenTape = (tokenTape + printable + ' ').slice(-900);
+  const latent = candidateTapeText(data);
+  if (latent) latentTape = (latentTape + latent + ' ').slice(-900);
   tokenCount += 1;
 
   const elapsed = Math.max((performance.now() - startTime) / 1000, 0.01);
@@ -357,7 +379,13 @@ function absorbToken(token, data) {
   if (typeof data.field_health === 'number') state.field = clamp(data.field_health, 0, 1);
   else state.field = clamp(1.0 - state.debt * 0.38 + state.consensus * 0.08, 0, 1);
 
-  state.velocity = 0.75 + state.debt * 2.7 + (1 - state.consensus) * 1.2;
+  const tailMass = Number.isFinite(data && data.candidate_tail_mass) ? clamp(data.candidate_tail_mass, 0, 1) : 0;
+  const hasSelectedProb = Number.isFinite(data && data.selected_prob);
+  const selectedProb = hasSelectedProb ? clamp(data.selected_prob, 0, 1) : state.selectedProb;
+  state.candidateTail = tailMass;
+  state.selectedProb = selectedProb;
+  state.sidePulse = clamp(state.sidePulse + tailMass * 0.2 + (hasSelectedProb ? (1 - selectedProb) * 0.05 : 0), 0, 1);
+  state.velocity = 0.75 + state.debt * 2.7 + (1 - state.consensus) * 1.2 + tailMass * 0.8;
   if (/[.!?]/.test(token)) pushBurst(0.55);
 }
 
@@ -439,6 +467,11 @@ function drawFieldHaze(scene) {
 function animate() {
   requestAnimationFrame(animate);
   time += 0.016;
+  state.sidePulse *= 0.96;
+  if (!running) {
+    state.candidateTail = mix(state.candidateTail, 0, 0.018);
+    state.selectedProb = mix(state.selectedProb, 0, 0.018);
+  }
   smoothX += (mouseX - smoothX) * 0.08;
   smoothY += (mouseY - smoothY) * 0.08;
 
@@ -505,6 +538,10 @@ async function generate(text) {
   state.consensus = 0.12;
   state.field = 0.86;
   state.velocity = 2.4;
+  state.selectedProb = 0;
+  state.candidateTail = 0;
+  state.sidePulse = 0.5;
+  latentTape = seedWords.join('');
   pushBurst(2.4);
 
   messages.push({ role: 'user', content: text });
