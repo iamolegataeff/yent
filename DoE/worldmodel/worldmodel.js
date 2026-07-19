@@ -98,6 +98,17 @@ function rebuildManifest() {
   manifestWords = cleanWords(chosenText).slice(-90);
 }
 
+function candidateWords(data) {
+  const candidates = Array.isArray(data && data.top_tokens) ? data.top_tokens : [];
+  const words = [];
+  for (const c of candidates) {
+    if (!c || c.selected || typeof c.token !== 'string') continue;
+    words.push(...cleanWords(c.token).slice(0, 2));
+    if (words.length >= 18) break;
+  }
+  return words;
+}
+
 function absorbToken(token, data) {
   if (!token) return;
   chosenText += token;
@@ -107,13 +118,21 @@ function absorbToken(token, data) {
     fieldWords.unshift(w);
     if (fieldWords.length > 260) fieldWords.pop();
   }
+  const alternatives = candidateWords(data);
+  let insertAt = Math.min(fieldWords.length, Math.max(1, words.length + 1));
+  for (const w of alternatives) {
+    fieldWords.splice(insertAt, 0, w);
+    insertAt++;
+  }
+  while (fieldWords.length > 280) fieldWords.pop();
   tokenCount++;
   if (Number.isFinite(data && data.step)) state.step = Math.max(0, Math.floor(data.step));
   else state.step++;
   state.pulse = 1;
   state.quake = clamp(state.quake + 0.2, 0, 1);
   state.topologySeed = (state.topologySeed * 0.985 + textSeed(token) * 0.015) % 1;
-  state.topologyWarp = clamp(state.topologyWarp + 0.035, 0, 1);
+  const tailMass = Number.isFinite(data && data.candidate_tail_mass) ? clamp(data.candidate_tail_mass, 0, 1) : 0;
+  state.topologyWarp = clamp(state.topologyWarp + 0.035 + tailMass * 0.018, 0, 1);
   state.debt = clamp(Number.isFinite(data && data.debt) ? data.debt : state.debt * 0.985 + 0.006, 0, 1);
   state.consensus = clamp(Number.isFinite(data && data.consensus) ? data.consensus : state.consensus * 0.992 + 0.004, 0, 1);
   state.field = clamp(Number.isFinite(data && data.field_health) ? data.field_health : state.field * 0.996 + 0.004, 0, 1);

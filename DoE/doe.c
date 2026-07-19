@@ -118,6 +118,7 @@
 #define MYCELIUM_MAX      64
 #define META_HIST_CAP     128
 #define PROFILE_BINS      16
+#define HTTP_SSE_TOP_N     8
 
 /* Field physics constants — from AML core */
 #define SCHUMANN_BASE_HZ    7.83f
@@ -5322,6 +5323,93 @@ static float http_layer0_consensus(const GGUFIndex *ps) {
     return isfinite(c) ? clamp01(c) : 0.5f;
 }
 
+typedef struct {
+    int id;
+    float prob;
+} HttpTopToken;
+
+static float http_logprob_from_prob(float p) {
+    if (!isfinite(p) || p <= 0.0f) p = 1e-30f;
+    return logf(p);
+}
+
+static void http_collect_top_tokens(const float *probs, int vocab, int selected,
+                                    HttpTopToken *top, int top_cap, int *top_n,
+                                    float *tail_mass, float *selected_prob,
+                                    int *selected_rank) {
+    if (top_n) *top_n = 0;
+    if (tail_mass) *tail_mass = 0.0f;
+    if (selected_prob) *selected_prob = 0.0f;
+    if (selected_rank) *selected_rank = 0;
+    if (!probs || vocab <= 0 || !top || top_cap <= 0) return;
+
+    float total = 0.0f;
+    float sp = 0.0f;
+    if (selected >= 0 && selected < vocab && isfinite(probs[selected]) && probs[selected] > 0.0f)
+        sp = probs[selected];
+    int rank = sp > 0.0f ? 1 : 0;
+    int n = 0;
+    for (int i = 0; i < vocab; i++) {
+        float p = probs[i];
+        if (!isfinite(p) || p <= 0.0f) continue;
+        total += p;
+        if (sp > 0.0f && p > sp) rank++;
+        int at = n;
+        if (n < top_cap) {
+            n++;
+        } else if (p > top[n - 1].prob) {
+            at = n - 1;
+        } else {
+            continue;
+        }
+        while (at > 0 && p > top[at - 1].prob) {
+            top[at] = top[at - 1];
+            at--;
+        }
+        top[at].id = i;
+        top[at].prob = p;
+    }
+
+    float shown = 0.0f;
+    for (int i = 0; i < n; i++) shown += top[i].prob;
+    if (top_n) *top_n = n;
+    if (tail_mass) *tail_mass = clamp01(total - shown);
+    if (selected_prob) *selected_prob = sp;
+    if (selected_rank) *selected_rank = rank;
+}
+
+static int http_appendf(char *buf, int bufsz, int *used, const char *fmt, ...) {
+    if (!buf || !used || *used < 0 || *used >= bufsz) return 0;
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf + *used, (size_t)(bufsz - *used), fmt, ap);
+    va_end(ap);
+    if (n < 0 || n >= bufsz - *used) return 0;
+    *used += n;
+    return 1;
+}
+
+static int http_top_tokens_json(GGUFIndex *ps, const HttpTopToken *top, int top_n,
+                                int selected, char *buf, int bufsz) {
+    if (!buf || bufsz <= 0) return 0;
+    int used = 0;
+    if (!http_appendf(buf, bufsz, &used, "[")) return 0;
+    for (int i = 0; i < top_n; i++) {
+        char tok[64], esc[160];
+        token_decode_buf(ps, top[i].id, tok, sizeof(tok));
+        if (json_escape(tok, esc, sizeof(esc)) < 0) esc[0] = '\0';
+        if (!http_appendf(buf, bufsz, &used,
+                          "%s{\"id\":%d,\"token\":\"%s\",\"prob\":%.6g,"
+                          "\"logprob\":%.6g,\"selected\":%s}",
+                          i ? "," : "", top[i].id, esc,
+                          http_metric_float(top[i].prob, 0.0f),
+                          http_logprob_from_prob(top[i].prob),
+                          top[i].id == selected ? "true" : "false"))
+            return 0;
+    }
+    return http_appendf(buf, bufsz, &used, "]");
+}
+
 /* Extract JSON string value for a key from body. Simple parser. */
 static int json_get_string(const char *json, const char *key, char *out, int outsz) {
     if (!json || !key || !out || outsz <= 0) return -1;
@@ -5479,6 +5567,11 @@ static void http_stream_inference(int fd, GGUFIndex *ps, const char *user_msg, f
 
         float temp = temperature > 0.01f ? temperature : F.effective_temp;
         int next = sample(lg, ps->host_vocab, temp, 40);
+        HttpTopToken top[HTTP_SSE_TOP_N];
+        int n_top = 0, selected_rank = 0;
+        float tail_mass = 0.0f, selected_prob = 0.0f;
+        http_collect_top_tokens(lg, ps->host_vocab, next, top, HTTP_SSE_TOP_N, &n_top,
+                                &tail_mass, &selected_prob, &selected_rank);
 
         /* Stop on EOS */
         if (next == ps->eos_id) break;
@@ -5524,13 +5617,18 @@ static void http_stream_inference(int fd, GGUFIndex *ps, const char *user_msg, f
         }
 
         /* Send SSE event with real runtime telemetry for UI observers. */
-        char sse[1536];
+        char top_json[2048];
+        if (!http_top_tokens_json(ps, top, n_top, next, top_json, sizeof(top_json)))
+            strcpy(top_json, "[]");
+        char sse[4096];
         int slen = snprintf(sse, sizeof(sse),
             "data: {\"token\":\"%s\",\"token_id\":%d,\"step\":%d,"
             "\"experts\":%d,\"debt\":%.6g,\"prophecy_debt\":%.6g,"
             "\"field_health\":%.6g,\"consensus\":%.6g,"
             "\"entropy\":%.6g,\"resonance\":%.6g,\"emergence\":%.6g,"
-            "\"temperature\":%.6g}\n\n",
+            "\"temperature\":%.6g,\"selected_prob\":%.6g,"
+            "\"selected_logprob\":%.6g,\"selected_rank\":%d,"
+            "\"candidate_tail_mass\":%.6g,\"top_tokens\":%s}\n\n",
             escaped, next, F.step,
             http_alive_expert_count(ps),
             http_metric_float(F.debt, 0.0f),
@@ -5540,7 +5638,12 @@ static void http_stream_inference(int fd, GGUFIndex *ps, const char *user_msg, f
             http_metric_float(F.entropy, 0.0f),
             http_metric_float(F.resonance, 0.0f),
             http_metric_float(F.emergence, 0.0f),
-            http_metric_float(temp, 0.0f));
+            http_metric_float(temp, 0.0f),
+            http_metric_float(selected_prob, 0.0f),
+            http_logprob_from_prob(selected_prob),
+            selected_rank,
+            http_metric_float(tail_mass, 0.0f),
+            top_json);
         if (slen < 0 || slen >= (int)sizeof(sse)) {
             const char *err = "data: {\"error\":\"token event too large\"}\n\n";
             http_send(fd, err, (int)strlen(err));

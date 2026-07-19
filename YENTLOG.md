@@ -104,6 +104,19 @@ yent/
 
 ---
 
+## 2026-07-19 - Worldmodel receives candidate distribution
+
+The `/chat/completions` SSE stream now includes bounded post-sampler candidate
+distribution telemetry: `selected_prob`, `selected_logprob`, `selected_rank`,
+`candidate_tail_mass`, and `top_tokens[]` entries with token id, decoded token
+text, probability, logprob, and selected marker.
+
+`worldmodel.html` feeds alternative top-token words into the surrounding
+candidate mass while keeping the chosen token as the manifested answer in the
+center. This is still observation, not intervention: sampler behavior, prompts,
+weights, Janus/will, wormholes, and raw logits remain unchanged. Full rejected
+token traces and innerworld event geometry are still future work.
+
 ## 2026-07-19 - Interface tokens start carrying field telemetry
 
 The `/chat/completions` SSE stream now sends observer metrics with each token:
