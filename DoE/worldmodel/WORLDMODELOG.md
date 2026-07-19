@@ -72,3 +72,11 @@ Yent worldmodel interface log.
   Janus face.
 - This remains observational UI physics only: no sampler, prompt, weights,
   wormhole, Janus/will, or raw-logit behavior changed.
+
+## 2026-07-19 - candidate telemetry HUD
+
+- Added `P`, `RANK`, and `TAIL` HUD fields to `/worldmodel` and `/yent`.
+- These show selected-token probability, selected rank, and candidate tail mass
+  only when the SSE stream provides real bounded candidate telemetry.
+- Older or partial streams display `-`, avoiding fake certainty from missing
+  fields.

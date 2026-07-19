@@ -104,6 +104,19 @@ yent/
 
 ---
 
+## 2026-07-19 - Interface HUD exposes candidate certainty
+
+The `/yent` and `/worldmodel` HUDs now show selected-token probability (`P`),
+selected rank (`RANK`), and candidate tail mass (`TAIL`) when the SSE stream
+provides bounded top-token telemetry.
+
+This keeps the visual candidate physics auditable: the chosen answer, latent
+Janus tape, and worldmodel candidate cloud are now backed by visible per-token
+numbers instead of only motion/alpha changes. Older streams keep a `-` fallback
+rather than displaying synthetic zeros.
+
+---
+
 ## 2026-07-19 - Candidate mass becomes weighted interface physics
 
 The Janus/worldmodel interfaces now separate the chosen token stream from the
