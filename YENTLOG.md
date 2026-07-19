@@ -104,6 +104,23 @@ yent/
 
 ---
 
+## 2026-07-19 - Candidate mass becomes weighted interface physics
+
+The Janus/worldmodel interfaces now separate the chosen token stream from the
+candidate projection more explicitly.
+
+`yent.html` keeps the transcript and main token tape bound to selected tokens,
+but feeds non-selected bounded `top_tokens[]` text into a separate latent tape
+for the torn Janus face. `worldmodel.html` turns candidate alternatives into a
+short-lived weighted cloud where probability, rank, selected probability, and
+candidate tail mass affect size, alpha, motion, and field wake.
+
+This is an interface-only projection of already-streamed telemetry. It does not
+change sampling, prompt construction, model weights, Janus/will semantics,
+wormholes, raw-logit exposure, or DoE runtime state.
+
+---
+
 ## 2026-07-19 - Worldmodel receives candidate distribution
 
 The `/chat/completions` SSE stream now includes bounded post-sampler candidate

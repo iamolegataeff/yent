@@ -33,6 +33,8 @@ const state = {
   angle: 0,
   topologySeed: 0.37,
   topologyWarp: 0.0,
+  selectedProb: 0.0,
+  candidateTail: 0.0,
   pulse: 0,
   quake: 0,
   idle: 0
@@ -46,6 +48,7 @@ let lastFrame = performance.now();
 let chosenText = '';
 let manifestWords = [];
 let fieldWords = baseWords.slice();
+let candidateCloud = [];
 let messages = [];
 let running = false;
 let aborter = null;
@@ -98,15 +101,57 @@ function rebuildManifest() {
   manifestWords = cleanWords(chosenText).slice(-90);
 }
 
-function candidateWords(data) {
+function candidateEntries(data) {
   const candidates = Array.isArray(data && data.top_tokens) ? data.top_tokens : [];
-  const words = [];
-  for (const c of candidates) {
+  const entries = [];
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i];
     if (!c || c.selected || typeof c.token !== 'string') continue;
-    words.push(...cleanWords(c.token).slice(0, 2));
-    if (words.length >= 18) break;
+    const words = cleanWords(c.token).slice(0, 2);
+    if (!words.length) continue;
+    const prob = clamp(Number.isFinite(c.prob) ? c.prob : 0, 0, 1);
+    const logprob = Number.isFinite(c.logprob) ? c.logprob : Math.log(Math.max(prob, 1e-9));
+    for (const word of words) {
+      entries.push({
+        word,
+        prob,
+        logprob,
+        rank: i + 1,
+        seed: textSeed(`${word}:${i}:${state.step}`)
+      });
+      if (entries.length >= 18) break;
+    }
+    if (entries.length >= 18) break;
   }
-  return words;
+  return entries;
+}
+
+function rememberCandidates(entries, tailMass) {
+  const baseStep = state.step;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    const seed = (e.seed * 0.67 + textSeed(`${e.word}:${baseStep}:${i}`) * 0.33) % 1;
+    candidateCloud.unshift({
+      word: e.word,
+      prob: e.prob,
+      logprob: e.logprob,
+      rank: e.rank,
+      seed,
+      side: hash(seed * 1009 + baseStep) < 0.5 ? -1 : 1,
+      age: 0,
+      life: clamp(0.46 + Math.sqrt(e.prob) * 1.6 + tailMass * 0.24, 0.42, 1.15)
+    });
+  }
+  while (candidateCloud.length > 128) candidateCloud.pop();
+}
+
+function decayCandidateCloud(dt) {
+  for (let i = candidateCloud.length - 1; i >= 0; i--) {
+    const c = candidateCloud[i];
+    c.age += dt;
+    c.life *= Math.pow(0.986, dt * 60);
+    if (c.life < 0.035) candidateCloud.splice(i, 1);
+  }
 }
 
 function absorbToken(token, data) {
@@ -118,10 +163,10 @@ function absorbToken(token, data) {
     fieldWords.unshift(w);
     if (fieldWords.length > 260) fieldWords.pop();
   }
-  const alternatives = candidateWords(data);
+  const alternatives = candidateEntries(data);
   let insertAt = Math.min(fieldWords.length, Math.max(1, words.length + 1));
-  for (const w of alternatives) {
-    fieldWords.splice(insertAt, 0, w);
+  for (const alt of alternatives) {
+    fieldWords.splice(insertAt, 0, alt.word);
     insertAt++;
   }
   while (fieldWords.length > 280) fieldWords.pop();
@@ -132,7 +177,12 @@ function absorbToken(token, data) {
   state.quake = clamp(state.quake + 0.2, 0, 1);
   state.topologySeed = (state.topologySeed * 0.985 + textSeed(token) * 0.015) % 1;
   const tailMass = Number.isFinite(data && data.candidate_tail_mass) ? clamp(data.candidate_tail_mass, 0, 1) : 0;
-  state.topologyWarp = clamp(state.topologyWarp + 0.035 + tailMass * 0.018, 0, 1);
+  const hasSelectedProb = Number.isFinite(data && data.selected_prob);
+  const selectedProb = hasSelectedProb ? clamp(data.selected_prob, 0, 1) : state.selectedProb;
+  state.candidateTail = tailMass;
+  state.selectedProb = selectedProb;
+  rememberCandidates(alternatives, tailMass);
+  state.topologyWarp = clamp(state.topologyWarp + 0.032 + tailMass * 0.025 + (hasSelectedProb ? (1 - selectedProb) * 0.008 : 0), 0, 1);
   state.debt = clamp(Number.isFinite(data && data.debt) ? data.debt : state.debt * 0.985 + 0.006, 0, 1);
   state.consensus = clamp(Number.isFinite(data && data.consensus) ? data.consensus : state.consensus * 0.992 + 0.004, 0, 1);
   state.field = clamp(Number.isFinite(data && data.field_health) ? data.field_health : state.field * 0.996 + 0.004, 0, 1);
@@ -304,15 +354,17 @@ function drawWalls() {
 
 function drawRejectedMass() {
   const view = viewFrame();
-  const count = width < 720 ? 48 : 100;
+  const count = (width < 720 ? 42 : 88) + Math.floor(state.candidateTail * 42);
   const stress = clamp(0.35 + state.debt * 0.9 + (1 - state.consensus) * 0.5, 0, 1.6);
+  const span = 3400;
 
   ctx.save();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   for (let i = 0; i < count; i++) {
     const topo = state.topologySeed * 4096;
-    const depth = 780 + hash(i * 19 + 3 + topo) * 2850;
+    const rawDepth = ((hash(i * 19 + 3 + topo) * span - state.cameraZ * 0.62) % span + span) % span;
+    const depth = 720 + rawDepth;
     const worldX = (hash(i * 31 + 7 + topo) - 0.5) * (960 + state.topologyWarp * 260) + Math.sin(time * 0.11 + i) * 70 * stress;
     const worldY = -250 + hash(i * 17 + 9 + topo) * (300 + state.topologyWarp * 140) + Math.cos(time * 0.17 + i) * 28 * stress;
     const p = projectWorld(worldX, depth, worldY);
@@ -327,6 +379,32 @@ function drawRejectedMass() {
       : `rgba(73,72,67,${alpha})`;
     ctx.fillText(word, p.x, p.y);
   }
+
+  for (let i = candidateCloud.length - 1; i >= 0; i--) {
+    const c = candidateCloud[i];
+    const seed = c.seed * 8192 + c.rank * 17;
+    const rawDepth = ((c.seed * span + c.rank * 113 - state.cameraZ * 0.74) % span + span) % span;
+    const depth = 620 + rawDepth;
+    const orbit = time * (0.14 + c.rank * 0.008) + seed;
+    const side = c.side || (hash(seed) < 0.5 ? -1 : 1);
+    const worldX = side * (120 + hash(seed + 11) * (760 + state.topologyWarp * 210)) + Math.sin(orbit) * (24 + stress * 58);
+    const worldY = -230 + hash(seed + 19) * (420 + state.topologyWarp * 120) + Math.cos(orbit * 0.83) * (18 + stress * 44);
+    const p = projectWorld(worldX, depth, worldY);
+    if (p.x < -120 || p.x > width + 120 || p.y < view.horizon - 210 || p.y > height - 110) continue;
+
+    const depthFade = clamp((depth - 620) / 560, 0, 1) * clamp((span + 620 - depth) / 920, 0, 1);
+    const probBoost = Math.sqrt(clamp(c.prob, 0, 1));
+    const rankBoost = 1 / (1 + c.rank * 0.2);
+    const alpha = depthFade * c.life * clamp(0.1 + probBoost * 1.35 + rankBoost * 0.18, 0, 0.84);
+    if (alpha <= 0.025) continue;
+    const fs = clamp(8 + p.scale * 26 + probBoost * 24 + rankBoost * 4, 8, 34);
+    const weight = c.rank <= 2 ? 720 : c.rank <= 5 ? 610 : 470;
+    ctx.font = `${weight} ${fs}px ${getComputedStyle(document.documentElement).getPropertyValue('--mono')}`;
+    ctx.fillStyle = c.rank <= 2
+      ? `rgba(197,68,107,${alpha})`
+      : `rgba(71,122,168,${alpha * 0.76})`;
+    ctx.fillText(c.word, p.x, p.y);
+  }
   ctx.restore();
 }
 
@@ -338,6 +416,7 @@ function drawManifestedAnswer() {
   const maxW = clamp(width * 0.54, 300, 820);
   const words = manifestWords.slice(-34);
   const pulse = state.pulse;
+  const certainty = clamp(state.selectedProb * 3.2, 0, 1);
 
   ctx.save();
   ctx.textAlign = 'center';
@@ -367,12 +446,12 @@ function drawManifestedAnswer() {
   const lineH = fontSize * 1.34;
   const startY = centerY - (visible.length - 1) * lineH * 0.5;
 
-  ctx.shadowColor = `rgba(197,68,107,${0.18 + pulse * 0.18})`;
-  ctx.shadowBlur = 18 + pulse * 26;
+  ctx.shadowColor = `rgba(197,68,107,${0.14 + pulse * 0.18 + certainty * 0.08})`;
+  ctx.shadowBlur = 14 + pulse * 24 + state.candidateTail * 14;
   for (let i = 0; i < visible.length; i++) {
     const y = startY + i * lineH;
     const age = visible.length - 1 - i;
-    ctx.fillStyle = `rgba(13,13,11,${clamp(0.38 + i * 0.18, 0, 0.96)})`;
+    ctx.fillStyle = `rgba(13,13,11,${clamp(0.34 + i * 0.16 + certainty * 0.12, 0, 0.96)})`;
     ctx.fillText(visible[i], centerX, y);
     if (age === 0) {
       const last = words[words.length - 1] || '';
@@ -431,7 +510,10 @@ function animate(now) {
     state.debt = mix(state.debt, 0, 0.006);
     state.consensus = mix(state.consensus, 0.62, 0.004);
     state.tokps = mix(state.tokps, 0, 0.03);
+    state.candidateTail = mix(state.candidateTail, 0, 0.01);
+    state.selectedProb = mix(state.selectedProb, 0, 0.012);
   }
+  decayCandidateCloud(dt);
   tickCamera(dt);
   drawBackground();
   drawWalls();
@@ -476,6 +558,9 @@ async function generate(text) {
   state.consensus = 0.16;
   state.field = 0.92;
   state.entropy = Math.max(state.entropy, 3.4);
+  state.selectedProb = 0;
+  state.candidateTail = 0;
+  candidateCloud = [];
   state.topologySeed = textSeed(text);
   state.topologyWarp = 1;
   state.cameraY = mix(state.cameraY, (state.topologySeed - 0.5) * 170, 0.22);
