@@ -111,8 +111,10 @@ user/assistant turns inside the current browser tab.
 
 Switching between `JANUS` and `WORLD` restores the readable transcript/manifest
 and seeds the face tape or probability field from the same selected text. This is
-browser-local UI continuity only: no limpha write, no prompt injection, no
-sampler state, no model-side persistence, and no runtime semantic channel.
+browser-local UI continuity only: restored turns are display-only after a view
+switch and do not repopulate the next `/chat/completions` request. There is no
+limpha write, prompt injection, sampler state, model-side persistence, or runtime
+semantic channel.
 
 ---
 

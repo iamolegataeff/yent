@@ -48,6 +48,7 @@ let traceHistory = [];
 let tokenTape = seedWords.join('');
 let latentTape = seedWords.join('');
 let messages = [];
+let visibleMessages = [];
 let running = false;
 let aborter = null;
 let startTime = 0;
@@ -398,11 +399,11 @@ function restoreInterfaceSession() {
   const restored = loadInterfaceSession();
   if (!restored.length) return;
 
-  messages = restored;
+  visibleMessages = restored;
   transcript.textContent = '';
-  for (const msg of messages) addTurn(msg.role, msg.content);
+  for (const msg of visibleMessages) addTurn(msg.role, msg.content);
 
-  const tapeText = tokenTextForTape(messages.map(msg => msg.content).join(' '));
+  const tapeText = tokenTextForTape(visibleMessages.map(msg => msg.content).join(' '));
   if (tapeText) tokenTape = (seedWords.join('') + ' ' + tapeText).slice(-900);
 }
 
@@ -612,7 +613,9 @@ async function generate(text) {
   pushBurst(2.4);
 
   messages.push({ role: 'user', content: text });
-  saveInterfaceSession(messages, true);
+  visibleMessages.push({ role: 'user', content: text });
+  visibleMessages = normalizeSessionMessages(visibleMessages);
+  saveInterfaceSession(visibleMessages, true);
   addTurn('user', text);
   const assistantBody = addTurn('assistant', '');
   let fullResponse = '';
@@ -651,7 +654,7 @@ async function generate(text) {
         if (data.token) {
           fullResponse += data.token;
           assistantBody.textContent = fullResponse;
-          saveInterfaceSession(messages.concat({ role: 'assistant', content: fullResponse }));
+          saveInterfaceSession(visibleMessages.concat({ role: 'assistant', content: fullResponse }));
           absorbToken(data.token, data);
           transcript.scrollTop = transcript.scrollHeight;
         }
@@ -660,7 +663,9 @@ async function generate(text) {
 
     if (fullResponse.trim()) {
       messages.push({ role: 'assistant', content: fullResponse });
-      saveInterfaceSession(messages, true);
+      visibleMessages.push({ role: 'assistant', content: fullResponse });
+      visibleMessages = normalizeSessionMessages(visibleMessages);
+      saveInterfaceSession(visibleMessages, true);
     }
     setStatus('COMPLETE');
     state.consensus = clamp(state.consensus + 0.16, 0, 1);
@@ -670,7 +675,9 @@ async function generate(text) {
       setStatus('STOPPED');
       if (fullResponse.trim()) {
         messages.push({ role: 'assistant', content: fullResponse });
-        saveInterfaceSession(messages, true);
+        visibleMessages.push({ role: 'assistant', content: fullResponse });
+        visibleMessages = normalizeSessionMessages(visibleMessages);
+        saveInterfaceSession(visibleMessages, true);
       }
     } else {
       setStatus('FAULT');

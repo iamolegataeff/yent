@@ -60,6 +60,7 @@ let manifestWords = [];
 let fieldWords = baseWords.slice();
 let candidateCloud = [];
 let messages = [];
+let visibleMessages = [];
 let running = false;
 let aborter = null;
 let tokenCount = 0;
@@ -615,8 +616,8 @@ function restoreInterfaceSession() {
   const restored = loadInterfaceSession();
   if (!restored.length) return;
 
-  messages = restored;
-  const combined = messages.map(msg => msg.content).join(' ');
+  visibleMessages = restored;
+  const combined = visibleMessages.map(msg => msg.content).join(' ');
   const words = cleanWords(combined).slice(-120);
   if (words.length) {
     fieldWords.unshift(...words);
@@ -625,7 +626,7 @@ function restoreInterfaceSession() {
     state.entropy = Math.log(Math.max(1, new Set(words.map(w => w.toLowerCase())).size));
   }
 
-  const lastAssistant = messages.slice().reverse().find(msg => msg.role === 'assistant');
+  const lastAssistant = visibleMessages.slice().reverse().find(msg => msg.role === 'assistant');
   if (lastAssistant) {
     chosenText = lastAssistant.content;
     rebuildManifest();
@@ -667,7 +668,9 @@ async function generate(text) {
   fieldWords = fieldWords.slice(0, 260);
 
   messages.push({ role: 'user', content: text });
-  saveInterfaceSession(messages, true);
+  visibleMessages.push({ role: 'user', content: text });
+  visibleMessages = normalizeSessionMessages(visibleMessages);
+  saveInterfaceSession(visibleMessages, true);
   let fullResponse = '';
 
   try {
@@ -700,7 +703,7 @@ async function generate(text) {
         if (data.token) {
           fullResponse += data.token;
           setManifestText(fullResponse);
-          saveInterfaceSession(messages.concat({ role: 'assistant', content: fullResponse }));
+          saveInterfaceSession(visibleMessages.concat({ role: 'assistant', content: fullResponse }));
           absorbToken(data.token, data);
         }
       });
@@ -708,7 +711,9 @@ async function generate(text) {
 
     if (fullResponse.trim()) {
       messages.push({ role: 'assistant', content: fullResponse });
-      saveInterfaceSession(messages, true);
+      visibleMessages.push({ role: 'assistant', content: fullResponse });
+      visibleMessages = normalizeSessionMessages(visibleMessages);
+      saveInterfaceSession(visibleMessages, true);
     }
     setStatus('FIELD SETTLED.');
     setManifestState(fullResponse.trim() ? 'COMPLETE' : 'EMPTY', Boolean(fullResponse.trim()));
@@ -720,7 +725,9 @@ async function generate(text) {
       setManifestState(fullResponse.trim() ? 'STOPPED' : 'IDLE', Boolean(fullResponse.trim()));
       if (fullResponse.trim()) {
         messages.push({ role: 'assistant', content: fullResponse });
-        saveInterfaceSession(messages, true);
+        visibleMessages.push({ role: 'assistant', content: fullResponse });
+        visibleMessages = normalizeSessionMessages(visibleMessages);
+        saveInterfaceSession(visibleMessages, true);
       }
     } else {
       setStatus(`FIELD FAULT: ${err.message}`);

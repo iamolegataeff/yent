@@ -102,5 +102,7 @@ Yent worldmodel interface log.
 - The browser tab keeps a bounded recent user/assistant turn list so switching
   interfaces preserves the readable transcript/manifest and seeds the visual
   tape/field from the same selected text.
+- Restored handoff turns are display-only. They do not populate the
+  `/chat/completions` `messages` request after a view switch.
 - This is local UI continuity only, not limpha, model memory, prompt injection,
   sampler state, or a runtime semantic channel.
