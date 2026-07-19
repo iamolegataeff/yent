@@ -5297,6 +5297,13 @@ static int http_serve_file(int fd, const char *filepath) {
     return http_serve_static_file(fd, filepath, "text/html; charset=utf-8");
 }
 
+static int http_serve_first_file(int fd, const char *primary, const char *fallback, const char *content_type) {
+    if (http_serve_static_file(fd, primary, content_type)) return 1;
+    if (fallback && strcmp(primary, fallback) != 0)
+        return http_serve_static_file(fd, fallback, content_type);
+    return 0;
+}
+
 /* Extract JSON string value for a key from body. Simple parser. */
 static int json_get_string(const char *json, const char *key, char *out, int outsz) {
     if (!json || !key || !out || outsz <= 0) return -1;
@@ -5541,17 +5548,22 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
 
     /* Resolve HTML file paths relative to executable */
     char ui_path[512], vis_path[512], yent_path[512], worldmodel_path[512];
+    char yent_adj_path[512], worldmodel_adj_path[512];
     char yent_js_path[512], worldmodel_js_path[512];
     int ui_len = snprintf(ui_path, sizeof(ui_path), "%sdoe_ui.html", exe_dir);
     int vis_len = snprintf(vis_path, sizeof(vis_path), "%sdoe.html", exe_dir);
-    int yent_len = snprintf(yent_path, sizeof(yent_path), "%syent.html", exe_dir);
-    int worldmodel_len = snprintf(worldmodel_path, sizeof(worldmodel_path), "%sworldmodel.html", exe_dir);
+    int yent_len = snprintf(yent_path, sizeof(yent_path), "%s../yent.html", exe_dir);
+    int worldmodel_len = snprintf(worldmodel_path, sizeof(worldmodel_path), "%s../worldmodel.html", exe_dir);
+    int yent_adj_len = snprintf(yent_adj_path, sizeof(yent_adj_path), "%syent.html", exe_dir);
+    int worldmodel_adj_len = snprintf(worldmodel_adj_path, sizeof(worldmodel_adj_path), "%sworldmodel.html", exe_dir);
     int yent_js_len = snprintf(yent_js_path, sizeof(yent_js_path), "%sworldmodel/yent.js", exe_dir);
     int worldmodel_js_len = snprintf(worldmodel_js_path, sizeof(worldmodel_js_path), "%sworldmodel/worldmodel.js", exe_dir);
     if (ui_len < 0 || ui_len >= (int)sizeof(ui_path) ||
         vis_len < 0 || vis_len >= (int)sizeof(vis_path) ||
         yent_len < 0 || yent_len >= (int)sizeof(yent_path) ||
         worldmodel_len < 0 || worldmodel_len >= (int)sizeof(worldmodel_path) ||
+        yent_adj_len < 0 || yent_adj_len >= (int)sizeof(yent_adj_path) ||
+        worldmodel_adj_len < 0 || worldmodel_adj_len >= (int)sizeof(worldmodel_adj_path) ||
         yent_js_len < 0 || yent_js_len >= (int)sizeof(yent_js_path) ||
         worldmodel_js_len < 0 || worldmodel_js_len >= (int)sizeof(worldmodel_js_path)) {
         fprintf(stderr, "[serve] static file path too long\n");
@@ -5615,12 +5627,12 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
                     http_send_text(client, 404, msg);
                 }
             } else if (strcmp(path, "/yent") == 0 || strcmp(path, "/yent.html") == 0) {
-                if (!http_serve_file(client, yent_path)) {
+                if (!http_serve_first_file(client, yent_path, yent_adj_path, "text/html; charset=utf-8")) {
                     const char *msg = "yent.html not found";
                     http_send_text(client, 404, msg);
                 }
             } else if (strcmp(path, "/worldmodel") == 0 || strcmp(path, "/worldmodel.html") == 0) {
-                if (!http_serve_file(client, worldmodel_path)) {
+                if (!http_serve_first_file(client, worldmodel_path, worldmodel_adj_path, "text/html; charset=utf-8")) {
                     const char *msg = "worldmodel.html not found";
                     http_send_text(client, 404, msg);
                 }

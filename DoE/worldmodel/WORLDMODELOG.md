@@ -30,3 +30,11 @@ Yent worldmodel interface log.
   directory.
 - Next boundary is telemetry honesty: define real token/logit/expert/Janus/
   innerworld fields before replacing synthetic topology.
+
+## 2026-07-19 - root entry surfaces
+
+- Moved the HTML entry surfaces to repository root: `yent.html` and
+  `worldmodel.html`.
+- Kept JavaScript under `DoE/worldmodel/`, served by exact routes only.
+- The server resolves root HTML first and keeps an adjacent-layout fallback for
+  copied binary bundles.
