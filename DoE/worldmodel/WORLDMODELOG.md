@@ -48,3 +48,15 @@ Yent worldmodel interface log.
   old synthetic fallback preserved for older streams.
 - This is still token-level observability, not top-k/logprob/rejected-token
   geometry.
+
+## 2026-07-19 - bounded candidate distribution
+
+- Added bounded post-sampler `top_tokens` telemetry to each SSE token event,
+  including token id, decoded token text, probability, logprob, and selected
+  marker.
+- Added selected-token probability/logprob/rank plus `candidate_tail_mass` for
+  the probability mass outside the displayed top list.
+- `worldmodel.html` now feeds alternative top-token words into the surrounding
+  candidate mass while keeping the chosen token as the manifested answer.
+- Raw pre-sampler logits, full rejected-token traces, and innerworld event
+  geometry remain out of this pass.
