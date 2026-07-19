@@ -80,3 +80,12 @@ Yent worldmodel interface log.
   only when the SSE stream provides real bounded candidate telemetry.
 - Older or partial streams display `-`, avoiding fake certainty from missing
   fields.
+
+## 2026-07-19 - readable manifestation surface
+
+- Added a readable `MANIFEST` answer surface to `/worldmodel`.
+- The panel is fed by the same selected SSE token stream as the central canvas
+  manifestation, so it exposes the answer without inventing a second text path.
+- Candidate clouds, wall words, and Janus/worldmodel physics remain
+  observational UI layers only; sampler, prompt, weights, will, wormholes, and
+  runtime semantics did not change.

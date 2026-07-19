@@ -4,6 +4,9 @@ const promptInput = document.getElementById('prompt');
 const composer = document.getElementById('composer');
 const sendButton = document.getElementById('send');
 const statusNote = document.getElementById('status-note');
+const manifestShell = document.getElementById('manifest-shell');
+const manifestState = document.getElementById('manifest-state');
+const manifestText = document.getElementById('manifest-text');
 const hud = {
   tok: document.getElementById('hud-tok'),
   step: document.getElementById('hud-step'),
@@ -558,12 +561,26 @@ function setStatus(text) {
   statusNote.textContent = text;
 }
 
+function setManifestState(text, active) {
+  manifestState.textContent = text;
+  if (typeof active === 'boolean') {
+    manifestShell.dataset.active = active ? 'true' : 'false';
+  }
+}
+
+function setManifestText(text) {
+  manifestText.textContent = text;
+  manifestText.scrollTop = manifestText.scrollHeight;
+}
+
 async function generate(text) {
   running = true;
   aborter = new AbortController();
   sendButton.textContent = 'STOP';
   sendButton.disabled = false;
   setStatus('FIELD DISTORTED.');
+  setManifestState('GENERATING', true);
+  setManifestText('');
   chosenText = '';
   manifestWords = [];
   tokenCount = 0;
@@ -616,6 +633,7 @@ async function generate(text) {
         }
         if (data.token) {
           fullResponse += data.token;
+          setManifestText(fullResponse);
           absorbToken(data.token, data);
         }
       });
@@ -623,14 +641,18 @@ async function generate(text) {
 
     if (fullResponse.trim()) messages.push({ role: 'assistant', content: fullResponse });
     setStatus('FIELD SETTLED.');
+    setManifestState(fullResponse.trim() ? 'COMPLETE' : 'EMPTY', Boolean(fullResponse.trim()));
     state.consensus = clamp(state.consensus + 0.18, 0, 1);
     state.debt = clamp(state.debt * 0.68, 0, 1);
   } catch (err) {
     if (err.name === 'AbortError') {
       setStatus('MANIFESTATION STOPPED.');
+      setManifestState(fullResponse.trim() ? 'STOPPED' : 'IDLE', Boolean(fullResponse.trim()));
       if (fullResponse.trim()) messages.push({ role: 'assistant', content: fullResponse });
     } else {
       setStatus(`FIELD FAULT: ${err.message}`);
+      setManifestState('FAULT', Boolean(fullResponse.trim()));
+      if (!fullResponse.trim()) setManifestText(`FIELD FAULT: ${err.message}`);
       fieldWords.unshift('fault', 'unreachable');
     }
   } finally {
