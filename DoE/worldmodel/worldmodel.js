@@ -108,7 +108,8 @@ function absorbToken(token, data) {
     if (fieldWords.length > 260) fieldWords.pop();
   }
   tokenCount++;
-  state.step++;
+  if (Number.isFinite(data && data.step)) state.step = Math.max(0, Math.floor(data.step));
+  else state.step++;
   state.pulse = 1;
   state.quake = clamp(state.quake + 0.2, 0, 1);
   state.topologySeed = (state.topologySeed * 0.985 + textSeed(token) * 0.015) % 1;
@@ -118,8 +119,12 @@ function absorbToken(token, data) {
   state.field = clamp(Number.isFinite(data && data.field_health) ? data.field_health : state.field * 0.996 + 0.004, 0, 1);
   const elapsed = Math.max(0.001, (performance.now() - startTime) / 1000);
   state.tokps = tokenCount / elapsed;
-  const diversity = new Set(fieldWords.slice(0, 80).map(w => w.toLowerCase())).size;
-  state.entropy = Math.log(Math.max(1, diversity));
+  if (Number.isFinite(data && data.entropy)) {
+    state.entropy = Math.max(0, data.entropy);
+  } else {
+    const diversity = new Set(fieldWords.slice(0, 80).map(w => w.toLowerCase())).size;
+    state.entropy = Math.log(Math.max(1, diversity));
+  }
 }
 
 function wordAt(i) {
