@@ -104,13 +104,26 @@ yent/
 
 ---
 
+## 2026-07-19 - Interfaces move to the repository threshold
+
+`yent.html` and `worldmodel.html` now live at the repository root so the two
+human-facing Yent interfaces are visible as entry surfaces rather than buried
+inside DoE internals. The DoE server resolves them from the root when launched
+as `DoE/doe_field`, with fallback to the old adjacent layout for copied binary
+bundles.
+
+The JavaScript assets remain under `DoE/worldmodel/` and are still served only
+through exact `/worldmodel/yent.js` and `/worldmodel/worldmodel.js` routes. This
+is a path/layout change only: generation, telemetry, sampling, will, Janus field
+physics, prompts, and wormholes remain unchanged.
+
 ## 2026-07-19 - Worldmodel scripts leave the inline body
 
 The first tracked Janus/worldmodel surfaces are now split into explicit static
 subassets:
 
-- `DoE/yent.html` loads `/worldmodel/yent.js`.
-- `DoE/worldmodel.html` loads `/worldmodel/worldmodel.js`.
+- `yent.html` loads `/worldmodel/yent.js`.
+- `worldmodel.html` loads `/worldmodel/worldmodel.js`.
 - The DoE HTTP server serves only those exact JavaScript paths with
   `application/javascript; charset=utf-8`; it does not expose a general
   directory route.
@@ -126,9 +139,9 @@ manifested-answer physics.
 The first UI scout after the Sol will-boundary pass imports the local DoE
 prototypes into the Yent inference tree:
 
-- `DoE/yent.html` is the dark Janus parliament interface: readable transcript
+- `yent.html` is the dark Janus parliament interface: readable transcript
   plus twin token-face internals over the existing SSE token stream.
-- `DoE/worldmodel.html` is the light walkable probability-field surface:
+- `worldmodel.html` is the light walkable probability-field surface:
   manifested answer in the center, candidate word mass around it, still using
   synthetic topology until runtime telemetry is widened.
 - `DoE/worldmodel/WORLDMODELOG.md` records the interface contract and next

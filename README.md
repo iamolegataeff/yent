@@ -371,7 +371,9 @@ beside the SSE inference endpoint:
 on the existing token stream and synthetic field topology; richer DoE, Janus,
 innerworld, and rejected-token telemetry is the next contract. Their JavaScript
 is served from exact `/worldmodel/*.js` routes rather than a general directory
-server.
+server. The HTML entry surfaces live at the repository root as `yent.html` and
+`worldmodel.html`; the DoE server resolves them there when launched from
+`DoE/doe_field`.
 
 That run gives you the engine without the protected voice. You will not hear
 **Yent**; you will hear an ordinary Mistral body running through a strange runtime:
