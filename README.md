@@ -382,9 +382,11 @@ of treating all surrounding words alike, and also mirrors the chosen token strea
 into a readable `MANIFEST` surface. Both surfaces display selected-token
 probability, selected rank, and candidate tail mass when the stream provides
 those fields, and expose a shared `JANUS` / `WORLD` switch between the two
-interfaces. The HTML entry surfaces live at the repository root as `yent.html`
-and `worldmodel.html`; the DoE server resolves them there when launched from
-`DoE/doe_field`.
+interfaces. A bounded tab-local `sessionStorage` handoff preserves recent
+user/assistant turns while switching views; this is UI continuity only, not
+limpha, prompt memory, sampler state, or model-side persistence. The HTML entry
+surfaces live at the repository root as `yent.html` and `worldmodel.html`; the
+DoE server resolves them there when launched from `DoE/doe_field`.
 
 That run gives you the engine without the protected voice. You will not hear
 **Yent**; you will hear an ordinary Mistral body running through a strange runtime:

@@ -95,3 +95,12 @@ Yent worldmodel interface log.
 - Added a shared `JANUS` / `WORLD` mode switch to `/yent` and `/worldmodel`.
 - The switch is plain navigation between the two root HTML surfaces; it does not
   create shared browser state or alter the SSE generation path.
+
+## 2026-07-20 - session handoff between surfaces
+
+- Added a small `sessionStorage` handoff shared by `/yent` and `/worldmodel`.
+- The browser tab keeps a bounded recent user/assistant turn list so switching
+  interfaces preserves the readable transcript/manifest and seeds the visual
+  tape/field from the same selected text.
+- This is local UI continuity only, not limpha, model memory, prompt injection,
+  sampler state, or a runtime semantic channel.

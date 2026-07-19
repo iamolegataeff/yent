@@ -23,6 +23,8 @@ const hud = {
 
 const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_./-=+*#@%&';
 const seedWords = 'Yent DoE Janus parliament notorch prophecy debt consensus memory limpha identity boundary'.split(' ');
+const SESSION_KEY = 'yent.interface.session.v1';
+const SESSION_LIMIT = 12;
 const state = {
   debt: 0.0,
   consensus: 0.62,
@@ -55,6 +57,7 @@ let mouseY = -9999;
 let smoothX = 0;
 let smoothY = 0;
 let time = 0;
+let lastSessionSaveAt = 0;
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
@@ -66,6 +69,41 @@ function mix(a, b, t) {
 
 function metricProb(v) {
   return Number.isFinite(v) ? v.toFixed(v < 0.01 ? 4 : 3) : '-';
+}
+
+function normalizeSessionMessages(source) {
+  if (!Array.isArray(source)) return [];
+  const out = [];
+  for (const msg of source) {
+    if (!msg || (msg.role !== 'user' && msg.role !== 'assistant')) continue;
+    if (typeof msg.content !== 'string' || !msg.content.trim()) continue;
+    out.push({ role: msg.role, content: msg.content.slice(0, 12000) });
+  }
+  return out.slice(-SESSION_LIMIT);
+}
+
+function loadInterfaceSession() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return normalizeSessionMessages(parsed && parsed.messages);
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveInterfaceSession(nextMessages, force = false) {
+  try {
+    const now = Date.now();
+    if (!force && now - lastSessionSaveAt < 250) return;
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+      savedAt: now,
+      messages: normalizeSessionMessages(nextMessages)
+    }));
+    lastSessionSaveAt = now;
+  } catch (_) {
+  }
 }
 
 function tokenTextForTape(text) {
@@ -356,6 +394,18 @@ function setStatus(text) {
   runState.textContent = text;
 }
 
+function restoreInterfaceSession() {
+  const restored = loadInterfaceSession();
+  if (!restored.length) return;
+
+  messages = restored;
+  transcript.textContent = '';
+  for (const msg of messages) addTurn(msg.role, msg.content);
+
+  const tapeText = tokenTextForTape(messages.map(msg => msg.content).join(' '));
+  if (tapeText) tokenTape = (seedWords.join('') + ' ' + tapeText).slice(-900);
+}
+
 function pushBurst(power) {
   const scene = sceneMetrics();
   bursts.push({
@@ -562,6 +612,7 @@ async function generate(text) {
   pushBurst(2.4);
 
   messages.push({ role: 'user', content: text });
+  saveInterfaceSession(messages, true);
   addTurn('user', text);
   const assistantBody = addTurn('assistant', '');
   let fullResponse = '';
@@ -600,6 +651,7 @@ async function generate(text) {
         if (data.token) {
           fullResponse += data.token;
           assistantBody.textContent = fullResponse;
+          saveInterfaceSession(messages.concat({ role: 'assistant', content: fullResponse }));
           absorbToken(data.token, data);
           transcript.scrollTop = transcript.scrollHeight;
         }
@@ -608,6 +660,7 @@ async function generate(text) {
 
     if (fullResponse.trim()) {
       messages.push({ role: 'assistant', content: fullResponse });
+      saveInterfaceSession(messages, true);
     }
     setStatus('COMPLETE');
     state.consensus = clamp(state.consensus + 0.16, 0, 1);
@@ -615,7 +668,10 @@ async function generate(text) {
   } catch (err) {
     if (err.name === 'AbortError') {
       setStatus('STOPPED');
-      if (fullResponse.trim()) messages.push({ role: 'assistant', content: fullResponse });
+      if (fullResponse.trim()) {
+        messages.push({ role: 'assistant', content: fullResponse });
+        saveInterfaceSession(messages, true);
+      }
     } else {
       setStatus('FAULT');
       assistantBody.textContent = `parliament unreachable: ${err.message}`;
@@ -654,5 +710,6 @@ window.addEventListener('mousedown', event => {
 });
 
 window.addEventListener('resize', resize);
+restoreInterfaceSession();
 resize();
 animate();
