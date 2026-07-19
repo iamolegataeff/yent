@@ -388,7 +388,9 @@ do not repopulate the `/chat/completions` request after a view switch. This is
 UI continuity only, not limpha, prompt memory, sampler state, or model-side
 persistence. The HTML entry surfaces live at the repository root as `yent.html`
 and `worldmodel.html`; the DoE server resolves them there when launched from
-`DoE/doe_field`.
+`DoE/doe_field`. Their shared browser receipt helper lives at
+`DoE/worldmodel/interface_session.js` and is served through an explicit
+`/worldmodel/interface_session.js` route, keeping the static surface bounded.
 
 That run gives you the engine without the protected voice. You will not hear
 **Yent**; you will hear an ordinary Mistral body running through a strange runtime:

@@ -25,8 +25,8 @@ const baseWords = (
   'calendar dissonance birth origin consensus expert gate scar shadow wall ' +
   'probability manifested almost future present innerworld method arianna'
 ).split(/\s+/);
-const SESSION_KEY = 'yent.interface.session.v1';
-const SESSION_LIMIT = 12;
+const interfaceSession = window.YentInterfaceSession;
+if (!interfaceSession) throw new Error('YentInterfaceSession helper missing');
 
 const state = {
   debt: 0.0,
@@ -82,36 +82,18 @@ function metricProb(v) {
 }
 
 function normalizeSessionMessages(source) {
-  if (!Array.isArray(source)) return [];
-  const out = [];
-  for (const msg of source) {
-    if (!msg || (msg.role !== 'user' && msg.role !== 'assistant')) continue;
-    if (typeof msg.content !== 'string' || !msg.content.trim()) continue;
-    out.push({ role: msg.role, content: msg.content.slice(0, 12000) });
-  }
-  return out.slice(-SESSION_LIMIT);
+  return interfaceSession.normalize(source);
 }
 
 function loadInterfaceSession() {
-  try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return normalizeSessionMessages(parsed && parsed.messages);
-  } catch (_) {
-    return [];
-  }
+  return interfaceSession.load(sessionStorage);
 }
 
 function saveInterfaceSession(nextMessages, force = false) {
   try {
     const now = Date.now();
     if (!force && now - lastSessionSaveAt < 250) return;
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify({
-      savedAt: now,
-      messages: normalizeSessionMessages(nextMessages)
-    }));
-    lastSessionSaveAt = now;
+    if (interfaceSession.save(sessionStorage, nextMessages)) lastSessionSaveAt = now;
   } catch (_) {
   }
 }
