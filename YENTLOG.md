@@ -116,6 +116,11 @@ switch and do not repopulate the next `/chat/completions` request. There is no
 limpha write, prompt injection, sampler state, model-side persistence, or runtime
 semantic channel.
 
+The shared handoff normalizer now lives in `DoE/worldmodel/interface_session.js`
+and is served through the same explicit worldmodel asset whitelist as the page
+scripts. Both interfaces use that helper, and the test suite checks load order
+plus the guard against repopulating prompt messages from restored UI receipt.
+
 ---
 
 ## 2026-07-19 - Interfaces gain a mode switch

@@ -106,3 +106,15 @@ Yent worldmodel interface log.
   `/chat/completions` `messages` request after a view switch.
 - This is local UI continuity only, not limpha, model memory, prompt injection,
   sampler state, or a runtime semantic channel.
+
+## 2026-07-20 - shared receipt helper
+
+- Moved the bounded `sessionStorage` normalizer/load/save contract into
+  `worldmodel/interface_session.js`.
+- `yent.html` and `worldmodel.html` load the helper before their page-specific
+  scripts, so JANUS and WORLD cannot drift on receipt shape or message limits.
+- The DoE server whitelists `/worldmodel/interface_session.js` explicitly; this
+  keeps helper delivery bounded like the two existing page scripts.
+- `tests/worldmodel_interface_session_test.go` runs the JS helper test when Node
+  is present and also checks script order plus the no-`messages = restored`
+  boundary.
