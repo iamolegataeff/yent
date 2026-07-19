@@ -38,3 +38,13 @@ Yent worldmodel interface log.
 - Kept JavaScript under `DoE/worldmodel/`, served by exact routes only.
 - The server resolves root HTML first and keeps an adjacent-layout fallback for
   copied binary bundles.
+
+## 2026-07-19 - runtime token telemetry
+
+- Extended `/chat/completions` SSE token events with real observer metrics:
+  `token_id`, `step`, `experts`, `debt`, `prophecy_debt`, `field_health`,
+  `consensus`, `entropy`, `resonance`, `emergence`, and `temperature`.
+- `worldmodel.html` now uses runtime `step` and `entropy` when present, with the
+  old synthetic fallback preserved for older streams.
+- This is still token-level observability, not top-k/logprob/rejected-token
+  geometry.

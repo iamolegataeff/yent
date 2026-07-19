@@ -5304,6 +5304,24 @@ static int http_serve_first_file(int fd, const char *primary, const char *fallba
     return 0;
 }
 
+static float http_metric_float(float v, float fallback) {
+    return isfinite(v) ? v : fallback;
+}
+
+static int http_alive_expert_count(const GGUFIndex *ps) {
+    if (!ps || ps->n_field_layers <= 0) return 0;
+    int total = 0;
+    for (int l = 0; l < ps->n_field_layers; l++)
+        if (ps->field_layers[l].n_alive > 0) total += ps->field_layers[l].n_alive;
+    return total;
+}
+
+static float http_layer0_consensus(const GGUFIndex *ps) {
+    if (!ps || ps->n_field_layers <= 0) return 0.0f;
+    float c = ps->field_layers[0].parliament.consensus;
+    return isfinite(c) ? clamp01(c) : 0.5f;
+}
+
 /* Extract JSON string value for a key from body. Simple parser. */
 static int json_get_string(const char *json, const char *key, char *out, int outsz) {
     if (!json || !key || !out || outsz <= 0) return -1;
@@ -5505,9 +5523,24 @@ static void http_stream_inference(int fd, GGUFIndex *ps, const char *user_msg, f
             break;
         }
 
-        /* Send SSE event */
-        char sse[1024];
-        int slen = snprintf(sse, sizeof(sse), "data: {\"token\":\"%s\"}\n\n", escaped);
+        /* Send SSE event with real runtime telemetry for UI observers. */
+        char sse[1536];
+        int slen = snprintf(sse, sizeof(sse),
+            "data: {\"token\":\"%s\",\"token_id\":%d,\"step\":%d,"
+            "\"experts\":%d,\"debt\":%.6g,\"prophecy_debt\":%.6g,"
+            "\"field_health\":%.6g,\"consensus\":%.6g,"
+            "\"entropy\":%.6g,\"resonance\":%.6g,\"emergence\":%.6g,"
+            "\"temperature\":%.6g}\n\n",
+            escaped, next, F.step,
+            http_alive_expert_count(ps),
+            http_metric_float(F.debt, 0.0f),
+            http_metric_float(pd, 0.0f),
+            http_metric_float(F.field_health, 0.0f),
+            http_layer0_consensus(ps),
+            http_metric_float(F.entropy, 0.0f),
+            http_metric_float(F.resonance, 0.0f),
+            http_metric_float(F.emergence, 0.0f),
+            http_metric_float(temp, 0.0f));
         if (slen < 0 || slen >= (int)sizeof(sse)) {
             const char *err = "data: {\"error\":\"token event too large\"}\n\n";
             http_send(fd, err, (int)strlen(err));

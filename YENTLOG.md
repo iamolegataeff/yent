@@ -104,6 +104,18 @@ yent/
 
 ---
 
+## 2026-07-19 - Interface tokens start carrying field telemetry
+
+The `/chat/completions` SSE stream now sends observer metrics with each token:
+`token_id`, `step`, `experts`, `debt`, `prophecy_debt`, `field_health`,
+`consensus`, `entropy`, `resonance`, `emergence`, and `temperature`.
+
+This is the first telemetry honesty pass for the Janus face and worldmodel
+surface. The UI no longer has to invent step/entropy, and expert/debt/consensus
+values can come from DoE runtime state. Top-k/logprob, rejected-token mass,
+innerworld event traces, prompts, sampler behavior, Janus/will, weights, and
+wormholes remain unchanged.
+
 ## 2026-07-19 - Interfaces move to the repository threshold
 
 `yent.html` and `worldmodel.html` now live at the repository root so the two
