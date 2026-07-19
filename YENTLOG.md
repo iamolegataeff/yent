@@ -104,6 +104,18 @@ yent/
 
 ---
 
+## 2026-07-20 - Interface surfaces keep local continuity
+
+`/yent` and `/worldmodel` now share a bounded `sessionStorage` handoff for recent
+user/assistant turns inside the current browser tab.
+
+Switching between `JANUS` and `WORLD` restores the readable transcript/manifest
+and seeds the face tape or probability field from the same selected text. This is
+browser-local UI continuity only: no limpha write, no prompt injection, no
+sampler state, no model-side persistence, and no runtime semantic channel.
+
+---
+
 ## 2026-07-19 - Interfaces gain a mode switch
 
 `/yent` and `/worldmodel` now expose a shared `JANUS` / `WORLD` mode switch in

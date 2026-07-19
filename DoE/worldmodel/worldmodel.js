@@ -25,6 +25,8 @@ const baseWords = (
   'calendar dissonance birth origin consensus expert gate scar shadow wall ' +
   'probability manifested almost future present innerworld method arianna'
 ).split(/\s+/);
+const SESSION_KEY = 'yent.interface.session.v1';
+const SESSION_LIMIT = 12;
 
 const state = {
   debt: 0.0,
@@ -63,6 +65,7 @@ let aborter = null;
 let tokenCount = 0;
 let startTime = 0;
 let sseBuffer = '';
+let lastSessionSaveAt = 0;
 const keys = Object.create(null);
 
 function clamp(v, lo, hi) {
@@ -75,6 +78,41 @@ function mix(a, b, t) {
 
 function metricProb(v) {
   return Number.isFinite(v) ? v.toFixed(v < 0.01 ? 4 : 3) : '-';
+}
+
+function normalizeSessionMessages(source) {
+  if (!Array.isArray(source)) return [];
+  const out = [];
+  for (const msg of source) {
+    if (!msg || (msg.role !== 'user' && msg.role !== 'assistant')) continue;
+    if (typeof msg.content !== 'string' || !msg.content.trim()) continue;
+    out.push({ role: msg.role, content: msg.content.slice(0, 12000) });
+  }
+  return out.slice(-SESSION_LIMIT);
+}
+
+function loadInterfaceSession() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return normalizeSessionMessages(parsed && parsed.messages);
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveInterfaceSession(nextMessages, force = false) {
+  try {
+    const now = Date.now();
+    if (!force && now - lastSessionSaveAt < 250) return;
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+      savedAt: now,
+      messages: normalizeSessionMessages(nextMessages)
+    }));
+    lastSessionSaveAt = now;
+  } catch (_) {
+  }
 }
 
 function hash(n) {
@@ -573,6 +611,33 @@ function setManifestText(text) {
   manifestText.scrollTop = manifestText.scrollHeight;
 }
 
+function restoreInterfaceSession() {
+  const restored = loadInterfaceSession();
+  if (!restored.length) return;
+
+  messages = restored;
+  const combined = messages.map(msg => msg.content).join(' ');
+  const words = cleanWords(combined).slice(-120);
+  if (words.length) {
+    fieldWords.unshift(...words);
+    fieldWords = fieldWords.slice(0, 260);
+    state.topologySeed = textSeed(combined);
+    state.entropy = Math.log(Math.max(1, new Set(words.map(w => w.toLowerCase())).size));
+  }
+
+  const lastAssistant = messages.slice().reverse().find(msg => msg.role === 'assistant');
+  if (lastAssistant) {
+    chosenText = lastAssistant.content;
+    rebuildManifest();
+    setManifestText(chosenText);
+    setManifestState('RESTORED', true);
+    setStatus('FIELD RESTORED.');
+  } else {
+    setManifestState('IDLE', false);
+    setStatus('FIELD REMEMBERS PROMPT.');
+  }
+}
+
 async function generate(text) {
   running = true;
   aborter = new AbortController();
@@ -602,6 +667,7 @@ async function generate(text) {
   fieldWords = fieldWords.slice(0, 260);
 
   messages.push({ role: 'user', content: text });
+  saveInterfaceSession(messages, true);
   let fullResponse = '';
 
   try {
@@ -634,12 +700,16 @@ async function generate(text) {
         if (data.token) {
           fullResponse += data.token;
           setManifestText(fullResponse);
+          saveInterfaceSession(messages.concat({ role: 'assistant', content: fullResponse }));
           absorbToken(data.token, data);
         }
       });
     }
 
-    if (fullResponse.trim()) messages.push({ role: 'assistant', content: fullResponse });
+    if (fullResponse.trim()) {
+      messages.push({ role: 'assistant', content: fullResponse });
+      saveInterfaceSession(messages, true);
+    }
     setStatus('FIELD SETTLED.');
     setManifestState(fullResponse.trim() ? 'COMPLETE' : 'EMPTY', Boolean(fullResponse.trim()));
     state.consensus = clamp(state.consensus + 0.18, 0, 1);
@@ -648,7 +718,10 @@ async function generate(text) {
     if (err.name === 'AbortError') {
       setStatus('MANIFESTATION STOPPED.');
       setManifestState(fullResponse.trim() ? 'STOPPED' : 'IDLE', Boolean(fullResponse.trim()));
-      if (fullResponse.trim()) messages.push({ role: 'assistant', content: fullResponse });
+      if (fullResponse.trim()) {
+        messages.push({ role: 'assistant', content: fullResponse });
+        saveInterfaceSession(messages, true);
+      }
     } else {
       setStatus(`FIELD FAULT: ${err.message}`);
       setManifestState('FAULT', Boolean(fullResponse.trim()));
@@ -684,5 +757,6 @@ window.addEventListener('keyup', event => {
 });
 
 window.addEventListener('resize', resize);
+restoreInterfaceSession();
 resize();
 requestAnimationFrame(animate);
