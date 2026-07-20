@@ -104,6 +104,25 @@ yent/
 
 ---
 
+## 2026-07-20 - CodeQL size arithmetic hardening
+
+GitHub CodeQL reported the same high-severity pattern across DoE image loading,
+LoRA/parliament persistence, and the vendored AML core: integer products were
+computed before being widened for allocation, copy, or gradient buffer sizes.
+
+This pass treats `DoE/stb_image.h` as Arianna-owned in this checkout and patches
+the vulnerable local copy rather than preserving upstream behavior. The fix adds
+checked `size_t` multiplication for stb conversion/GIF paths, moves DoE
+LoRA/parliament/mycelium tensor counts through checked size helpers, and routes
+AML matrix/sequence tensor sizes through `am_checked_mul_ints` before allocating
+or passing lengths into tape/GPU helpers. A neighboring CUDA scratch path now
+falls back instead of dereferencing missing scratch buffers.
+
+Validation: `git diff --check`; `cc -O2 -Wall -Wextra -c DoE/doe.c`;
+`cc -O2 -Wall -Wextra -c DoE/pixtral_vision.c` (existing Apple CBLAS deprecation
+warnings only); `cc -O2 -Wall -Wextra -c yent/c/ariannamethod.c`; `go test ./...`.
+Final CodeQL closure still depends on GitHub's scanner run after merge.
+
 ## 2026-07-20 - Interface surfaces keep local continuity
 
 `/yent` and `/worldmodel` now share a bounded `sessionStorage` handoff for recent

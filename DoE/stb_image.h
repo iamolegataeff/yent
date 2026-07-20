@@ -987,6 +987,20 @@ static void *stbi__malloc(size_t size)
     return STBI_MALLOC(size);
 }
 
+static int stbi__mul2size_overflow(size_t a, size_t b, size_t *out)
+{
+   if (b != 0 && a > ((size_t)-1) / b) return 1;
+   *out = a * b;
+   return 0;
+}
+
+static int stbi__mul3size_overflow(size_t a, size_t b, size_t c, size_t *out)
+{
+   size_t ab;
+   if (stbi__mul2size_overflow(a, b, &ab)) return 1;
+   return stbi__mul2size_overflow(ab, c, out);
+}
+
 // stb_image uses ints pervasively, including for offset calculations.
 // therefore the largest decoded image size we can support with the
 // current code, even on 64-bit targets, is INT_MAX. this is not a
@@ -1190,10 +1204,17 @@ static void *stbi__load_main(stbi__context *s, int *x, int *y, int *comp, int re
 static stbi_uc *stbi__convert_16_to_8(stbi__uint16 *orig, int w, int h, int channels)
 {
    int i;
-   int img_len = w * h * channels;
+   int img_len;
+   size_t img_len_sz;
    stbi_uc *reduced;
 
-   reduced = (stbi_uc *) stbi__malloc(img_len);
+   if (w < 0 || h < 0 || channels < 0 ||
+       stbi__mul3size_overflow((size_t) w, (size_t) h, (size_t) channels, &img_len_sz) ||
+       img_len_sz > (size_t) INT_MAX)
+      return stbi__errpuc("too large", "Image too large");
+   img_len = (int) img_len_sz;
+
+   reduced = (stbi_uc *) stbi__malloc(img_len_sz);
    if (reduced == NULL) return stbi__errpuc("outofmem", "Out of memory");
 
    for (i = 0; i < img_len; ++i)
@@ -1206,10 +1227,18 @@ static stbi_uc *stbi__convert_16_to_8(stbi__uint16 *orig, int w, int h, int chan
 static stbi__uint16 *stbi__convert_8_to_16(stbi_uc *orig, int w, int h, int channels)
 {
    int i;
-   int img_len = w * h * channels;
+   int img_len;
+   size_t img_len_sz, img_bytes;
    stbi__uint16 *enlarged;
 
-   enlarged = (stbi__uint16 *) stbi__malloc(img_len*2);
+   if (w < 0 || h < 0 || channels < 0 ||
+       stbi__mul3size_overflow((size_t) w, (size_t) h, (size_t) channels, &img_len_sz) ||
+       img_len_sz > (size_t) INT_MAX ||
+       stbi__mul2size_overflow(img_len_sz, sizeof(stbi__uint16), &img_bytes))
+      return (stbi__uint16 *) stbi__errpuc("too large", "Image too large");
+   img_len = (int) img_len_sz;
+
+   enlarged = (stbi__uint16 *) stbi__malloc(img_bytes);
    if (enlarged == NULL) return (stbi__uint16 *) stbi__errpuc("outofmem", "Out of memory");
 
    for (i = 0; i < img_len; ++i)
@@ -1813,11 +1842,18 @@ static stbi__uint16 *stbi__convert_format16(stbi__uint16 *data, int img_n, int r
 {
    int i,j;
    stbi__uint16 *good;
+   size_t good_count, good_size;
 
    if (req_comp == img_n) return data;
    STBI_ASSERT(req_comp >= 1 && req_comp <= 4);
 
-   good = (stbi__uint16 *) stbi__malloc(req_comp * x * y * 2);
+   if (stbi__mul3size_overflow((size_t) req_comp, (size_t) x, (size_t) y, &good_count) ||
+       stbi__mul2size_overflow(good_count, sizeof(stbi__uint16), &good_size)) {
+      STBI_FREE(data);
+      return (stbi__uint16 *) stbi__errpuc("too large", "Image too large");
+   }
+
+   good = (stbi__uint16 *) stbi__malloc(good_size);
    if (good == NULL) {
       STBI_FREE(data);
       return (stbi__uint16 *) stbi__errpuc("outofmem", "Out of memory");
@@ -1892,7 +1928,7 @@ static stbi_uc *stbi__hdr_to_ldr(float   *data, int x, int y, int comp)
    if (comp & 1) n = comp; else n = comp-1;
    for (i=0; i < x*y; ++i) {
       for (k=0; k < n; ++k) {
-         float z = (float) pow(data[i*comp+k]*stbi__h2l_scale_i, stbi__h2l_gamma_i) * 255 + 0.5f;
+         float z = (float) pow((double) data[i*comp+k] * (double) stbi__h2l_scale_i, (double) stbi__h2l_gamma_i) * 255 + 0.5f;
          if (z < 0) z = 0;
          if (z > 255) z = 255;
          output[i*comp + k] = (stbi_uc) stbi__float2int(z);
@@ -4821,7 +4857,7 @@ static int stbi__create_png_image_raw(stbi__png *a, stbi_uc *raw, stbi__uint32 r
             stbi__create_png_alpha_expand8(dest, dest, x, img_n);
       } else if (depth == 8) {
          if (img_n == out_n)
-            memcpy(dest, cur, x*img_n);
+            memcpy(dest, cur, (size_t) x * (size_t) img_n);
          else
             stbi__create_png_alpha_expand8(dest, cur, x, img_n);
       } else if (depth == 16) {
@@ -6201,7 +6237,7 @@ static void *stbi__psd_load(stbi__context *s, int *x, int *y, int *comp, int req
       out = (stbi_uc *) stbi__malloc_mad3(8, w, h, 0);
       ri->bits_per_channel = 16;
    } else
-      out = (stbi_uc *) stbi__malloc(4 * w*h);
+      out = (stbi_uc *) stbi__malloc_mad3(4, w, h, 0);
 
    if (!out) return stbi__errpuc("outofmem", "Out of memory");
    pixelCount = w*h;
@@ -6524,7 +6560,7 @@ static void *stbi__pic_load(stbi__context *s,int *px,int *py,int *comp,int req_c
    // intermediate buffer is RGBA
    result = (stbi_uc *) stbi__malloc_mad3(x, y, 4, 0);
    if (!result) return stbi__errpuc("outofmem", "Out of memory");
-   memset(result, 0xff, x*y*4);
+   memset(result, 0xff, (size_t) x * (size_t) y * 4u);
 
    if (!stbi__pic_load_core(s,x,y,comp, result)) {
       STBI_FREE(result);
@@ -6781,6 +6817,7 @@ static stbi_uc *stbi__gif_load_next(stbi__context *s, stbi__gif *g, int *comp, i
    int first_frame;
    int pi;
    int pcount;
+   size_t frame_bytes, history_bytes;
    STBI_NOTUSED(req_comp);
 
    // on first frame, any non-written pixels get the background colour (non-transparent)
@@ -6790,18 +6827,20 @@ static stbi_uc *stbi__gif_load_next(stbi__context *s, stbi__gif *g, int *comp, i
       if (!stbi__mad3sizes_valid(4, g->w, g->h, 0))
          return stbi__errpuc("too large", "GIF image is too large");
       pcount = g->w * g->h;
-      g->out = (stbi_uc *) stbi__malloc(4 * pcount);
-      g->background = (stbi_uc *) stbi__malloc(4 * pcount);
-      g->history = (stbi_uc *) stbi__malloc(pcount);
+      frame_bytes = (size_t) pcount * 4u;
+      history_bytes = (size_t) pcount;
+      g->out = (stbi_uc *) stbi__malloc(frame_bytes);
+      g->background = (stbi_uc *) stbi__malloc(frame_bytes);
+      g->history = (stbi_uc *) stbi__malloc(history_bytes);
       if (!g->out || !g->background || !g->history)
          return stbi__errpuc("outofmem", "Out of memory");
 
       // image is treated as "transparent" at the start - ie, nothing overwrites the current background;
       // background colour is only used for pixels that are not rendered first frame, after that "background"
       // color refers to the color that was there the previous frame.
-      memset(g->out, 0x00, 4 * pcount);
-      memset(g->background, 0x00, 4 * pcount); // state of the background (starts transparent)
-      memset(g->history, 0x00, pcount);        // pixels that were affected previous frame
+      memset(g->out, 0x00, frame_bytes);
+      memset(g->background, 0x00, frame_bytes); // state of the background (starts transparent)
+      memset(g->history, 0x00, history_bytes);  // pixels that were affected previous frame
       first_frame = 1;
    } else {
       // second frame - how do we dispose of the previous one?
@@ -6833,11 +6872,13 @@ static stbi_uc *stbi__gif_load_next(stbi__context *s, stbi__gif *g, int *comp, i
       }
 
       // background is what out is after the undoing of the previou frame;
-      memcpy( g->background, g->out, 4 * g->w * g->h );
+      frame_bytes = (size_t) g->w * (size_t) g->h * 4u;
+      memcpy( g->background, g->out, frame_bytes );
    }
 
    // clear my history;
-   memset( g->history, 0x00, g->w * g->h );        // pixels that were affected previous frame
+   history_bytes = (size_t) g->w * (size_t) g->h;
+   memset( g->history, 0x00, history_bytes );        // pixels that were affected previous frame
 
    for (;;) {
       int tag = stbi__get8(s);
@@ -6968,9 +7009,9 @@ static void *stbi__load_gif_main(stbi__context *s, int **delays, int *x, int *y,
       stbi_uc *out = 0;
       stbi_uc *two_back = 0;
       stbi__gif g;
-      int stride;
-      int out_size = 0;
-      int delays_size = 0;
+      size_t stride;
+      size_t out_size = 0;
+      size_t delays_size = 0;
 
       STBI_NOTUSED(out_size);
       STBI_NOTUSED(delays_size);
@@ -6988,37 +7029,51 @@ static void *stbi__load_gif_main(stbi__context *s, int **delays, int *x, int *y,
             *x = g.w;
             *y = g.h;
             ++layers;
-            stride = g.w * g.h * 4;
+            if (g.w < 0 || g.h < 0 ||
+                stbi__mul3size_overflow((size_t) g.w, (size_t) g.h, 4u, &stride))
+               return stbi__load_gif_main_outofmem(&g, out, delays);
 
             if (out) {
-               void *tmp = (stbi_uc*) STBI_REALLOC_SIZED( out, out_size, layers * stride );
+               size_t new_out_size;
+               if (stbi__mul2size_overflow((size_t) layers, stride, &new_out_size))
+                  return stbi__load_gif_main_outofmem(&g, out, delays);
+               void *tmp = (stbi_uc*) STBI_REALLOC_SIZED( out, out_size, new_out_size );
                if (!tmp)
                   return stbi__load_gif_main_outofmem(&g, out, delays);
                else {
                    out = (stbi_uc*) tmp;
-                   out_size = layers * stride;
+                   out_size = new_out_size;
                }
 
                if (delays) {
-                  int *new_delays = (int*) STBI_REALLOC_SIZED( *delays, delays_size, sizeof(int) * layers );
+                  size_t new_delays_size;
+                  if (stbi__mul2size_overflow((size_t) layers, sizeof(int), &new_delays_size))
+                     return stbi__load_gif_main_outofmem(&g, out, delays);
+                  int *new_delays = (int*) STBI_REALLOC_SIZED( *delays, delays_size, new_delays_size );
                   if (!new_delays)
                      return stbi__load_gif_main_outofmem(&g, out, delays);
                   *delays = new_delays;
-                  delays_size = layers * sizeof(int);
+                  delays_size = new_delays_size;
                }
             } else {
-               out = (stbi_uc*)stbi__malloc( layers * stride );
+               size_t new_out_size;
+               if (stbi__mul2size_overflow((size_t) layers, stride, &new_out_size))
+                  return stbi__load_gif_main_outofmem(&g, out, delays);
+               out = (stbi_uc*)stbi__malloc( new_out_size );
                if (!out)
                   return stbi__load_gif_main_outofmem(&g, out, delays);
-               out_size = layers * stride;
+               out_size = new_out_size;
                if (delays) {
-                  *delays = (int*) stbi__malloc( layers * sizeof(int) );
+                  size_t new_delays_size;
+                  if (stbi__mul2size_overflow((size_t) layers, sizeof(int), &new_delays_size))
+                     return stbi__load_gif_main_outofmem(&g, out, delays);
+                  *delays = (int*) stbi__malloc( new_delays_size );
                   if (!*delays)
                      return stbi__load_gif_main_outofmem(&g, out, delays);
-                  delays_size = layers * sizeof(int);
+                  delays_size = new_delays_size;
                }
             }
-            memcpy( out + ((layers - 1) * stride), u, stride );
+            memcpy( out + ((size_t)(layers - 1) * stride), u, stride );
             if (layers >= 2) {
                two_back = out - 2 * stride;
             }

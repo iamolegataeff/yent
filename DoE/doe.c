@@ -2163,8 +2163,16 @@ static void env_scan(Environment *env, const char *self_src) {
  * the weights are substrate. DOE is the architecture.
  * ═══════════════════════════════════════════════════════════════════════════════ */
 static int init_lora_expert(LoraExpert *e, int dim, int rank, float freq) {
-    e->lora_A = calloc(dim * rank, sizeof(float));
-    e->lora_B = calloc(rank * dim, sizeof(float));
+    size_t lora_elems = 0;
+    if (dim <= 0 || rank <= 0 ||
+        !doe_mul_size((size_t)dim, (size_t)rank, &lora_elems) ||
+        lora_elems > (size_t)INT_MAX) {
+        fprintf(stderr, "[doe] invalid LoRA expert shape (dim=%d rank=%d)\n", dim, rank);
+        memset(e, 0, sizeof(*e));
+        return 0;
+    }
+    e->lora_A = calloc(lora_elems, sizeof(float));
+    e->lora_B = calloc(lora_elems, sizeof(float));
     if (!e->lora_A || !e->lora_B) {
         fprintf(stderr, "[doe] LoRA expert allocation failed (dim=%d rank=%d)\n", dim, rank);
         free(e->lora_A);
@@ -2173,8 +2181,8 @@ static int init_lora_expert(LoraExpert *e, int dim, int rank, float freq) {
         return 0;
     }
     float scale = 0.02f / sqrtf((float)rank);
-    for (int i = 0; i < dim*rank; i++) e->lora_A[i] = rand_normal() * scale;
-    for (int i = 0; i < rank*dim; i++) e->lora_B[i] = rand_normal() * scale;
+    for (size_t i = 0; i < lora_elems; i++) e->lora_A[i] = rand_normal() * scale;
+    for (size_t i = 0; i < lora_elems; i++) e->lora_B[i] = rand_normal() * scale;
     e->frequency = freq;
     e->vitality = 0.7f;
     e->alive = 1;
@@ -2296,11 +2304,34 @@ static void field_repack_arena(GGUFIndex *ps) {
                 freq_layer, freq_expert);
         return;
     }
-    size_t per_expert  = (size_t)rank * D + (size_t)D * rank;            /* B then A */
-    size_t layer_floats = (size_t)MAX_EXPERTS * D + (size_t)MAX_EXPERTS * per_expert;
-    size_t total_floats = layer_floats * (size_t)L;
-    size_t pg    = (size_t)getpagesize();
-    size_t bytes = (total_floats * sizeof(float) + pg - 1) / pg * pg;    /* register needs page-aligned len */
+    size_t lora_b = 0, lora_a = 0, per_expert = 0, vote_floats = 0;
+    size_t expert_floats = 0, layer_floats = 0, total_floats = 0, raw_bytes = 0;
+    if (D <= 0 || rank <= 0 || L <= 0 ||
+        !doe_mul_size((size_t)rank, (size_t)D, &lora_b) ||
+        !doe_mul_size((size_t)D, (size_t)rank, &lora_a) ||
+        lora_b > SIZE_MAX - lora_a ||
+        !doe_mul_size((size_t)MAX_EXPERTS, (size_t)D, &vote_floats) ||
+        !doe_mul_size((size_t)MAX_EXPERTS, lora_b + lora_a, &expert_floats) ||
+        vote_floats > SIZE_MAX - expert_floats ||
+        !doe_mul_size(vote_floats + expert_floats, (size_t)L, &total_floats) ||
+        !doe_mul_size(total_floats, sizeof(float), &raw_bytes)) {
+        fprintf(stderr, "[doe] parliament arena disabled: invalid tensor shape (layers=%d dim=%d rank=%d)\n",
+                L, D, rank);
+        return;
+    }
+    per_expert = lora_b + lora_a;                                       /* B then A */
+    layer_floats = vote_floats + expert_floats;
+    int page_size = getpagesize();
+    if (page_size <= 0) {
+        fprintf(stderr, "[doe] parliament arena disabled: invalid page size %d\n", page_size);
+        return;
+    }
+    size_t pg = (size_t)page_size;
+    if (raw_bytes > SIZE_MAX - (pg - 1)) {
+        fprintf(stderr, "[doe] parliament arena disabled: byte size overflow\n");
+        return;
+    }
+    size_t bytes = (raw_bytes + pg - 1) / pg * pg;                      /* register needs page-aligned len */
     float *arena = NULL;
     if (posix_memalign((void**)&arena, pg, bytes) != 0 || !arena) {
         fprintf(stderr, "[doe] parliament arena posix_memalign(%zu) failed — parliament stays on CPU\n", bytes);
@@ -2817,13 +2848,20 @@ static int index_load(GGUFIndex *ps, const char *path) {
         FieldLayer *fl = &ps->field_layers[l];
         fl->host_layer_idx = l;
         fl->n_alive = initial_experts;
-        fl->parliament.w_vote = calloc(MAX_EXPERTS * ps->host_dim, sizeof(float));
+        size_t vote_count = 0;
+        if (ps->host_dim <= 0 ||
+            !doe_mul_size((size_t)MAX_EXPERTS, (size_t)ps->host_dim, &vote_count) ||
+            vote_count > (size_t)INT_MAX) {
+            fprintf(stderr, "[doe] invalid parliament vote shape for layer %d (dim=%d)\n", l, ps->host_dim);
+            goto bail;
+        }
+        fl->parliament.w_vote = calloc(vote_count, sizeof(float));
         if (!fl->parliament.w_vote) {
             fprintf(stderr, "[doe] parliament vote allocation failed for layer %d\n", l);
             goto bail;
         }
         float vote_std = 0.01f;
-        for (int i = 0; i < MAX_EXPERTS * ps->host_dim; i++)
+        for (size_t i = 0; i < vote_count; i++)
             fl->parliament.w_vote[i] = rand_normal() * vote_std;
         fl->parliament.consensus = 0.5f;
         /* Initialize experts with harmonic spacing — health-aware */
@@ -3247,6 +3285,15 @@ static void mycelium_save(GGUFIndex *ps, int step, float fitness) {
         printf("[mycelium] temp spore path too long: %s\n", path);
         return;
     }
+    int nl = ps->n_field_layers, dim = ps->host_dim, rank = ps->lora_rank;
+    size_t vote_count = 0, lora_count = 0;
+    if (dim <= 0 || rank <= 0 ||
+        !doe_mul_size((size_t)MAX_EXPERTS, (size_t)dim, &vote_count) ||
+        !doe_mul_size((size_t)dim, (size_t)rank, &lora_count) ||
+        lora_count > (size_t)INT_MAX) {
+        printf("[mycelium] invalid spore tensor shape (layers=%d dim=%d rank=%d)\n", nl, dim, rank);
+        return;
+    }
     errno = 0;
     FILE *f = fopen(tmp_path, "wb");
     if (!f) {
@@ -3271,14 +3318,13 @@ static void mycelium_save(GGUFIndex *ps, int step, float fitness) {
     SPORE_WRITE(&fp, 8, 1);
     SPORE_WRITE(&step, 4, 1);
     SPORE_WRITE(&fitness, 4, 1);
-    int nl = ps->n_field_layers, dim = ps->host_dim, rank = ps->lora_rank;
     SPORE_WRITE(&nl, 4, 1); SPORE_WRITE(&dim, 4, 1); SPORE_WRITE(&rank, 4, 1);
     /* per layer: n_alive, then per expert: alive, vitality, frequency, A, B */
     for (int l = 0; l < nl; l++) {
         FieldLayer *fl = &ps->field_layers[l];
         SPORE_WRITE(&fl->n_alive, 4, 1);
         /* parliament vote weights */
-        SPORE_WRITE(fl->parliament.w_vote, sizeof(float), MAX_EXPERTS * dim);
+        SPORE_WRITE(fl->parliament.w_vote, sizeof(float), vote_count);
         SPORE_WRITE(&fl->parliament.consensus, 4, 1);
         for (int e = 0; e < MAX_EXPERTS; e++) {
             LoraExpert *ex = &fl->experts[e];
@@ -3286,8 +3332,8 @@ static void mycelium_save(GGUFIndex *ps, int step, float fitness) {
             if (ex->alive) {
                 SPORE_WRITE(&ex->vitality, 4, 1);
                 SPORE_WRITE(&ex->frequency, 4, 1);
-                SPORE_WRITE(ex->lora_A, sizeof(float), dim * rank);
-                SPORE_WRITE(ex->lora_B, sizeof(float), rank * dim);
+                SPORE_WRITE(ex->lora_A, sizeof(float), lora_count);
+                SPORE_WRITE(ex->lora_B, sizeof(float), lora_count);
             }
         }
     }
@@ -3374,17 +3420,27 @@ static int mycelium_load_file(GGUFIndex *ps, uint64_t target_fp, const char *spo
                nl, ps->n_field_layers, dim, ps->host_dim, rank, ps->lora_rank);
         goto done;
     }
+    size_t vote_count = 0, vote_bytes = 0, lora_count = 0;
+    if (dim <= 0 || rank <= 0 ||
+        !doe_mul_size((size_t)MAX_EXPERTS, (size_t)dim, &vote_count) ||
+        !doe_mul_size(vote_count, sizeof(float), &vote_bytes) ||
+        !doe_mul_size((size_t)dim, (size_t)rank, &lora_count) ||
+        lora_count > (size_t)INT_MAX) {
+        printf("[mycelium] invalid spore tensor shape in %s (layers=%d dim=%d rank=%d)\n",
+               spore_path, nl, dim, rank);
+        goto done;
+    }
     for (int l = 0; l < nl; l++) {
         FieldLayer *fl = &tmp_layers[l];
         fl->host_layer_idx = ps->field_layers[l].host_layer_idx;
-        fl->parliament.w_vote = malloc((size_t)MAX_EXPERTS * dim * sizeof(float));
+        fl->parliament.w_vote = malloc(vote_bytes);
         if (!fl->parliament.w_vote) {
             printf("[mycelium] cannot allocate spore vote rows for layer %d\n", l);
             goto done;
         }
         int saved_alive = 0;
         SPORE_READ(&saved_alive, 4, 1);
-        SPORE_READ(fl->parliament.w_vote, sizeof(float), MAX_EXPERTS * dim);
+        SPORE_READ(fl->parliament.w_vote, sizeof(float), vote_count);
         SPORE_READ(&fl->parliament.consensus, 4, 1);
         if (!isfinite(fl->parliament.consensus) ||
             fl->parliament.consensus < 0.0f || fl->parliament.consensus > 1.0f) {
@@ -3413,9 +3469,9 @@ static int mycelium_load_file(GGUFIndex *ps, uint64_t target_fp, const char *spo
                 ex->alive = 1;
                 ex->vitality = vitality;
                 ex->frequency = frequency;
-                SPORE_READ(ex->lora_A, sizeof(float), dim * rank);
-                SPORE_READ(ex->lora_B, sizeof(float), rank * dim);
-                if (lora_poisoned(ex->lora_A, ex->lora_B, dim * rank)) {
+                SPORE_READ(ex->lora_A, sizeof(float), lora_count);
+                SPORE_READ(ex->lora_B, sizeof(float), lora_count);
+                if (lora_poisoned(ex->lora_A, ex->lora_B, (int)lora_count)) {
                     printf("[mycelium] poisoned expert payload in spore L%d e%d; dropping expert\n", l, e);
                     free_lora_expert(ex);
                 }

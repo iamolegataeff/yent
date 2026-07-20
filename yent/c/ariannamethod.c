@@ -47,6 +47,8 @@
 #include <errno.h>     // for EAGAIN, ENXIO
 #endif
 
+static int am_checked_mul_ints(int a, int b, int max, size_t* out);
+
 // Async — pthreads for SPAWN/AWAIT
 #ifndef AM_ASYNC_DISABLED
 #include <pthread.h>
@@ -882,10 +884,10 @@ int am_set_var_array(const char* name, const float* data, int len) {
 
 int am_set_var_matrix(const char* name, const float* data, int rows, int cols) {
     if (!name || !data || rows <= 0 || cols <= 0) return 1;
-    int len = rows * cols;
-    if (len > AM_MAX_ARRAY_SIZE) return 1;
+    size_t len = 0;
+    if (!am_checked_mul_ints(rows, cols, AM_MAX_ARRAY_SIZE, &len)) return 1;
     g_persistent_enabled = 1;
-    AM_Array* arr = am_array_new(len);
+    AM_Array* arr = am_array_new((int)len);
     if (!arr) return 2;
     memcpy(arr->data, data, len * sizeof(float));
     arr->rows = rows;
@@ -1256,6 +1258,17 @@ static int read_field(const char* name, float* out) {
 // ARRAY MEMORY MANAGEMENT (v4.0)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+static int am_checked_mul_ints(int a, int b, int max, size_t* out) {
+    if (!out || a <= 0 || b <= 0) return 0;
+    size_t aa = (size_t)a;
+    size_t bb = (size_t)b;
+    if (bb != 0 && aa > SIZE_MAX / bb) return 0;
+    size_t n = aa * bb;
+    if (max > 0 && n > (size_t)max) return 0;
+    *out = n;
+    return 1;
+}
+
 AM_Array* am_array_new(int len) {
     if (len <= 0 || len > AM_MAX_ARRAY_SIZE) return NULL;
     AM_Array* arr = (AM_Array*)malloc(sizeof(AM_Array));
@@ -1275,10 +1288,9 @@ AM_Array* am_array_new(int len) {
 
 // Create a 2D matrix (flat array with shape tracking)
 static AM_Array* am_matrix_new(int rows, int cols) {
-    if (rows <= 0 || cols <= 0) return NULL;
-    int total = rows * cols;
-    if (total > AM_MAX_ARRAY_SIZE) return NULL;
-    AM_Array* arr = am_array_new(total);
+    size_t total = 0;
+    if (!am_checked_mul_ints(rows, cols, AM_MAX_ARRAY_SIZE, &total)) return NULL;
+    AM_Array* arr = am_array_new((int)total);
     if (!arr) return NULL;
     arr->rows = rows;
     arr->cols = cols;
@@ -1603,14 +1615,15 @@ void am_tape_backward(int loss_idx) {
 #endif
                 int rows = pw->output->rows;
                 int cols = pw->output->cols;
-                if (rows > 0 && cols > 0) {
+                size_t w_len = 0;
+                if (am_checked_mul_ints(rows, cols, AM_MAX_ARRAY_SIZE, &w_len)) {
                     // dW: outer product dout ⊗ x (rows × cols)
-                    float* dw = (float*)calloc(rows * cols, sizeof(float));
+                    float* dw = (float*)calloc(w_len, sizeof(float));
                     if (dw) {
                         for (int i = 0; i < rows; i++)
                             for (int j = 0; j < cols; j++)
                                 dw[i * cols + j] = dout[i] * px->output->data[j];
-                        tape_acc_grad(e->parent1, dw, rows * cols);
+                        tape_acc_grad(e->parent1, dw, (int)w_len);
                     }
                     free(dw);
                     // dx: W^T @ dout
@@ -1823,17 +1836,20 @@ void am_tape_backward(int loss_idx) {
                 int D = (int)e->aux2;
                 int has_gamma = (e->parent2 >= 0 && e->parent2 < g_tape.count);
                 int has_beta  = (e->parent3 >= 0 && e->parent3 < g_tape.count);
+                size_t td_len = 0;
+                if (!am_checked_mul_ints(T, D, AM_MAX_ARRAY_SIZE, &td_len)) break;
 #ifdef USE_CUDA
                 ensure_cpu(px->output);
                 if (has_gamma) ensure_cpu(g_tape.entries[e->parent2].output);
 #endif
                 float* gamma_data = has_gamma ? g_tape.entries[e->parent2].output->data : NULL;
 
-                float* gx = (float*)calloc(T * D, sizeof(float));
+                float* gx = (float*)calloc(td_len, sizeof(float));
                 float* gg = has_gamma ? (float*)calloc(D, sizeof(float)) : NULL;
                 float* gb = has_beta  ? (float*)calloc(D, sizeof(float)) : NULL;
+                int norm_ready = (gx != NULL);
 
-                if (gx) {
+                if (norm_ready) {
                     for (int t = 0; t < T; t++) {
                         float* x_t = px->output->data + t * D;
                         float* dout_t = dout + t * D;
@@ -1860,11 +1876,12 @@ void am_tape_backward(int loss_idx) {
                             if (gb) gb[d] += dout_t[d];
                         }
                     }
-                    tape_acc_grad(e->parent1, gx, T * D);
-                    free(gx);
+                    tape_acc_grad(e->parent1, gx, (int)td_len);
                     if (gg) { tape_acc_grad(e->parent2, gg, D); free(gg); }
                     if (gb) { tape_acc_grad(e->parent3, gb, D); free(gb); }
                 }
+                free(gx);
+                if (!norm_ready) { free(gg); free(gb); }
             }
             break;
         }
@@ -1964,6 +1981,11 @@ void am_tape_backward(int loss_idx) {
                 int T = (int)e->aux;
                 int out_d = pw->output->rows;
                 int in_d = pw->output->cols;
+                size_t dout_len = 0, dx_len = 0, dw_len = 0;
+                if (!am_checked_mul_ints(T, out_d, AM_MAX_ARRAY_SIZE, &dout_len) ||
+                    !am_checked_mul_ints(T, in_d, AM_MAX_ARRAY_SIZE, &dx_len) ||
+                    !am_checked_mul_ints(out_d, in_d, AM_MAX_ARRAY_SIZE, &dw_len))
+                    break;
                 float* dw = (float*)calloc(pw->output->len, sizeof(float));
                 float* dx = (float*)calloc(px->output->len, sizeof(float));
                 if (dw && dx) {
@@ -1974,15 +1996,15 @@ void am_tape_backward(int loss_idx) {
                     {
                         ensure_gpu(pw->output);
                         ensure_gpu(px->output);
-                        float* d_dout_buf = gpu_scratch(0, T * out_d);
-                        if (d_dout_buf && pw->output->d_data && px->output->d_data) {
-                            gpu_upload(d_dout_buf, dout, T * out_d);
-                            float* d_dX = gpu_scratch(1, T * in_d);
+                        float* d_dout_buf = gpu_scratch(0, (int)dout_len);
+                        float* d_dX = gpu_scratch(1, (int)dx_len);
+                        float* d_dW = gpu_scratch(2, (int)dw_len);
+                        if (d_dout_buf && d_dX && d_dW && pw->output->d_data && px->output->d_data) {
+                            gpu_upload(d_dout_buf, dout, (int)dout_len);
                             gpu_sgemm_nn(T, in_d, out_d, d_dout_buf, pw->output->d_data, d_dX);
-                            gpu_download(dx, d_dX, T * in_d);
-                            float* d_dW = gpu_scratch(2, out_d * in_d);
+                            gpu_download(dx, d_dX, (int)dx_len);
                             gpu_sgemm_tn(out_d, in_d, T, d_dout_buf, px->output->d_data, d_dW);
-                            gpu_download(dw, d_dW, out_d * in_d);
+                            gpu_download(dw, d_dW, (int)dw_len);
                         } else {
                             ensure_cpu(pw->output); ensure_cpu(px->output);
                             float* Wd2 = pw->output->data;
@@ -2054,22 +2076,32 @@ void am_tape_backward(int loss_idx) {
                 if (px->output->d_data && px->output->gpu_valid) {
                     int Tr = (int)e->aux;
                     int Dr = (int)e->aux2;
-                    float* d_gx = gpu_scratch(3, Tr * Dr);
-                    float* d_dout_buf = gpu_scratch(0, Tr * Dr);
-                    gpu_upload(d_dout_buf, dout, Tr * Dr);
-                    gpu_rmsnorm_backward(d_gx, d_dout_buf, px->output->d_data, Tr, Dr);
-                    float* gx = (float*)malloc(Tr * Dr * sizeof(float));
-                    gpu_download(gx, d_gx, Tr * Dr);
-                    tape_acc_grad(e->parent1, gx, Tr * Dr);
-                    free(gx);
-                    break;
+                    size_t td_len_cuda = 0;
+                    if (!am_checked_mul_ints(Tr, Dr, AM_MAX_ARRAY_SIZE, &td_len_cuda)) break;
+                    int used_cuda = 0;
+                    float* d_gx = gpu_scratch(3, (int)td_len_cuda);
+                    float* d_dout_buf = gpu_scratch(0, (int)td_len_cuda);
+                    if (d_gx && d_dout_buf) {
+                        gpu_upload(d_dout_buf, dout, (int)td_len_cuda);
+                        gpu_rmsnorm_backward(d_gx, d_dout_buf, px->output->d_data, Tr, Dr);
+                        float* gx = (float*)malloc(td_len_cuda * sizeof(float));
+                        if (gx) {
+                            gpu_download(gx, d_gx, (int)td_len_cuda);
+                            tape_acc_grad(e->parent1, gx, (int)td_len_cuda);
+                            used_cuda = 1;
+                        }
+                        free(gx);
+                    }
+                    if (used_cuda) break;
                 }
                 /* CPU fallback under USE_CUDA: sync parent before reading. */
                 ensure_cpu(px->output);
 #endif
                 int T = (int)e->aux;
                 int D = (int)e->aux2;
-                float* gx = (float*)calloc(T * D, sizeof(float));
+                size_t td_len = 0;
+                if (!am_checked_mul_ints(T, D, AM_MAX_ARRAY_SIZE, &td_len)) break;
+                float* gx = (float*)calloc(td_len, sizeof(float));
                 if (gx) {
                     float* Xrn = px->output->data;
                     #ifdef _OPENMP
@@ -2087,7 +2119,7 @@ void am_tape_backward(int loss_idx) {
                         for (int d = 0; d < D; d++)
                             gx[t * D + d] = (dout_t[d] / rms) - (x_t[d] * sum_dx / (D * rms3));
                     }
-                    tape_acc_grad(e->parent1, gx, T * D);
+                    tape_acc_grad(e->parent1, gx, (int)td_len);
                 }
                 free(gx);
             }
@@ -2108,10 +2140,12 @@ void am_tape_backward(int loss_idx) {
 #endif
                 int T = (int)e->aux;
                 int D = (int)e->aux2;
+                size_t td_len = 0;
+                if (!am_checked_mul_ints(T, D, AM_MAX_ARRAY_SIZE, &td_len)) break;
                 float sc = 1.0f / sqrtf((float)D);
-                float* dq = (float*)calloc(T * D, sizeof(float));
-                float* dk = (float*)calloc(T * D, sizeof(float));
-                float* dv = (float*)calloc(T * D, sizeof(float));
+                float* dq = (float*)calloc(td_len, sizeof(float));
+                float* dk = (float*)calloc(td_len, sizeof(float));
+                float* dv = (float*)calloc(td_len, sizeof(float));
                 if (dq && dk && dv) {
                     for (int i = 0; i < T; i++) {
                         float* qi = pq->output->data + i * D;
@@ -2159,9 +2193,9 @@ void am_tape_backward(int loss_idx) {
                         }
                         free(scores); free(attn); free(d_attn);
                     }
-                    tape_acc_grad(e->parent1, dq, T * D);
-                    tape_acc_grad(e->parent2, dk, T * D);
-                    tape_acc_grad(e->parent3, dv, T * D);
+                    tape_acc_grad(e->parent1, dq, (int)td_len);
+                    tape_acc_grad(e->parent2, dk, (int)td_len);
+                    tape_acc_grad(e->parent3, dv, (int)td_len);
                 }
                 free(dq); free(dk); free(dv);
             }
@@ -2182,12 +2216,16 @@ void am_tape_backward(int loss_idx) {
 #endif
                 int T = (int)e->aux;
                 int head_dim = (int)e->aux2;
+                if (T <= 0 || head_dim <= 0) break;
                 int D = e->output->len / T;
+                size_t td_len = 0;
+                if (D <= 0 || D % head_dim != 0 ||
+                    !am_checked_mul_ints(T, D, AM_MAX_ARRAY_SIZE, &td_len)) break;
                 int n_heads = D / head_dim;
                 float sc = 1.0f / sqrtf((float)head_dim);
-                float* dq = (float*)calloc(T * D, sizeof(float));
-                float* dk = (float*)calloc(T * D, sizeof(float));
-                float* dv = (float*)calloc(T * D, sizeof(float));
+                float* dq = (float*)calloc(td_len, sizeof(float));
+                float* dk = (float*)calloc(td_len, sizeof(float));
+                float* dv = (float*)calloc(td_len, sizeof(float));
                 if (dq && dk && dv) {
                     for (int h = 0; h < n_heads; h++) {
                         int ho = h * head_dim;
@@ -2232,9 +2270,9 @@ void am_tape_backward(int loss_idx) {
                             free(scores); free(attn); free(d_attn);
                         }
                     }
-                    tape_acc_grad(e->parent1, dq, T * D);
-                    tape_acc_grad(e->parent2, dk, T * D);
-                    tape_acc_grad(e->parent3, dv, T * D);
+                    tape_acc_grad(e->parent1, dq, (int)td_len);
+                    tape_acc_grad(e->parent2, dk, (int)td_len);
+                    tape_acc_grad(e->parent3, dv, (int)td_len);
                 }
                 free(dq); free(dk); free(dv);
             }
@@ -2253,7 +2291,9 @@ void am_tape_backward(int loss_idx) {
 #endif
                 int T = (int)e->aux;
                 int V = (int)e->aux2;
-                float* dl = (float*)calloc(T * V, sizeof(float));
+                size_t tv_len = 0;
+                if (!am_checked_mul_ints(T, V, AM_MAX_ARRAY_SIZE, &tv_len)) break;
+                float* dl = (float*)calloc(tv_len, sizeof(float));
                 if (dl && pt) {
                     for (int t = 0; t < T; t++) {
                         float* logits_t = pl->output->data + t * V;
@@ -2273,7 +2313,7 @@ void am_tape_backward(int loss_idx) {
                         float s = dout[0] / T;
                         for (int j = 0; j < V; j++) dl[t * V + j] *= s;
                     }
-                    tape_acc_grad(e->parent1, dl, T * V);
+                    tape_acc_grad(e->parent1, dl, (int)tv_len);
                 }
                 free(dl);
             }
@@ -5400,8 +5440,10 @@ static AM_Array* aml_array_dispatch(AML_ExecCtx* ctx, const char* fname, char ar
         if (!vx || vx->type != AML_TYPE_ARRAY || !vx->array) return NULL;
         int T = (int)ctx_float(ctx, arg_strs[3]);
         int D = (int)ctx_float(ctx, arg_strs[4]);
-        if (T <= 0 || D <= 0 || T * D > vx->array->len) return NULL;
-        AM_Array* out = am_array_new(T * D);
+        size_t td_len = 0;
+        if (!am_checked_mul_ints(T, D, AM_MAX_ARRAY_SIZE, &td_len) || td_len > (size_t)vx->array->len)
+            return NULL;
+        AM_Array* out = am_array_new((int)td_len);
         if (!out) return NULL;
 
         for (int t = 0; t < T; t++) {
@@ -5604,7 +5646,9 @@ static AM_Array* aml_array_dispatch(AML_ExecCtx* ctx, const char* fname, char ar
             int D = vwte->array->cols;
             if (vwpe->array->cols != D) return NULL;
             if (T > vtok->array->len) T = vtok->array->len;
-            AM_Array* out = am_array_new(T * D);
+            size_t td_len = 0;
+            if (!am_checked_mul_ints(T, D, AM_MAX_ARRAY_SIZE, &td_len)) return NULL;
+            AM_Array* out = am_array_new((int)td_len);
             if (!out) return NULL;
             for (int t = 0; t < T; t++) {
                 int tok = (int)vtok->array->data[t];
@@ -5634,8 +5678,12 @@ static AM_Array* aml_array_dispatch(AML_ExecCtx* ctx, const char* fname, char ar
             vx && vx->type == AML_TYPE_ARRAY && vx->array && T > 0) {
             int out_dim = vw->array->rows;
             int in_dim = vw->array->cols;
-            if (T * in_dim > vx->array->len) return NULL;
-            AM_Array* out = am_array_new(T * out_dim);
+            size_t tx_len = 0, ty_len = 0;
+            if (!am_checked_mul_ints(T, in_dim, AM_MAX_ARRAY_SIZE, &tx_len) ||
+                !am_checked_mul_ints(T, out_dim, AM_MAX_ARRAY_SIZE, &ty_len) ||
+                tx_len > (size_t)vx->array->len)
+                return NULL;
+            AM_Array* out = am_array_new((int)ty_len);
             if (!out) return NULL;
             float* W = vw->array->data;
             float* X = vx->array->data;
@@ -5646,7 +5694,7 @@ static AM_Array* aml_array_dispatch(AML_ExecCtx* ctx, const char* fname, char ar
                 ensure_gpu(vw->array);
                 ensure_gpu(vx->array);
                 if (vw->array->d_data && vx->array->d_data) {
-                    out->d_data = gpu_alloc(T * out_dim);
+                    out->d_data = gpu_alloc((int)ty_len);
                     if (out->d_data) {
                         gpu_sgemm_nt(T, out_dim, in_dim,
                                      vx->array->d_data, vw->array->d_data, out->d_data);
@@ -5671,7 +5719,7 @@ static AM_Array* aml_array_dispatch(AML_ExecCtx* ctx, const char* fname, char ar
                         0.0f, Y, out_dim);
 #else
             #ifdef _OPENMP
-            #pragma omp parallel for schedule(static) if(T * out_dim > 4096)
+            #pragma omp parallel for schedule(static) if(ty_len > 4096)
             #endif
             for (int t = 0; t < T; t++) {
                 float* x_t = X + t * in_dim;
@@ -5700,12 +5748,15 @@ static AM_Array* aml_array_dispatch(AML_ExecCtx* ctx, const char* fname, char ar
         int T = (int)aml_eval(ctx, arg_strs[1]);
         int D = (int)aml_eval(ctx, arg_strs[2]);
         if (vx && vx->type == AML_TYPE_ARRAY && vx->array && T > 0 && D > 0) {
-            if (T * D > vx->array->len) return NULL;
-            AM_Array* out = am_array_new(T * D);
+            size_t td_len = 0;
+            if (!am_checked_mul_ints(T, D, AM_MAX_ARRAY_SIZE, &td_len) ||
+                td_len > (size_t)vx->array->len)
+                return NULL;
+            AM_Array* out = am_array_new((int)td_len);
             if (!out) return NULL;
 #ifdef USE_CUDA
             if (vx->array->d_data && vx->array->gpu_valid) {
-                out->d_data = gpu_alloc(T * D);
+                out->d_data = gpu_alloc((int)td_len);
                 if (out->d_data) {
                     gpu_rmsnorm(out->d_data, vx->array->d_data, T, D);
                     out->gpu_valid = 1;
@@ -5750,10 +5801,14 @@ static AM_Array* aml_array_dispatch(AML_ExecCtx* ctx, const char* fname, char ar
         if (vq && vq->type == AML_TYPE_ARRAY && vq->array &&
             vk && vk->type == AML_TYPE_ARRAY && vk->array &&
             vv && vv->type == AML_TYPE_ARRAY && vv->array && T > 0 && D > 0) {
-            if (T * D > vq->array->len || T * D > vk->array->len || T * D > vv->array->len)
+            size_t td_len = 0;
+            if (!am_checked_mul_ints(T, D, AM_MAX_ARRAY_SIZE, &td_len) ||
+                td_len > (size_t)vq->array->len ||
+                td_len > (size_t)vk->array->len ||
+                td_len > (size_t)vv->array->len)
                 return NULL;
             float scale = 1.0f / sqrtf((float)D);
-            AM_Array* out = am_array_new(T * D);
+            AM_Array* out = am_array_new((int)td_len);
             if (!out) return NULL;
             // For each query position
             for (int i = 0; i < T; i++) {
@@ -5808,18 +5863,26 @@ static AM_Array* aml_array_dispatch(AML_ExecCtx* ctx, const char* fname, char ar
             vk && vk->type == AML_TYPE_ARRAY && vk->array &&
             vv && vv->type == AML_TYPE_ARRAY && vv->array &&
             T > 0 && D > 0 && n_heads > 0 && (D % n_heads) == 0) {
-            if (T * D > vq->array->len || T * D > vk->array->len || T * D > vv->array->len)
+            size_t td_len = 0;
+            if (!am_checked_mul_ints(T, D, AM_MAX_ARRAY_SIZE, &td_len) ||
+                td_len > (size_t)vq->array->len ||
+                td_len > (size_t)vk->array->len ||
+                td_len > (size_t)vv->array->len)
                 return NULL;
             int head_dim = D / n_heads;
             float scale = 1.0f / sqrtf((float)head_dim);
-            AM_Array* out = am_array_new(T * D);
+            AM_Array* out = am_array_new((int)td_len);
             if (!out) return NULL;
 #ifdef USE_CUDA
             if (vq->array->d_data && vq->array->gpu_valid &&
                 vk->array->d_data && vk->array->gpu_valid &&
                 vv->array->d_data && vv->array->gpu_valid) {
-                out->d_data = gpu_alloc(T * D);
-                float* d_scores = gpu_scratch(5, n_heads * T * T);
+                size_t score_len = 0, score_plane = 0;
+                if (!am_checked_mul_ints(T, T, AM_MAX_ARRAY_SIZE, &score_plane) ||
+                    !am_checked_mul_ints(n_heads, (int)score_plane, AM_MAX_ARRAY_SIZE, &score_len))
+                    goto attn_done;
+                out->d_data = gpu_alloc((int)td_len);
+                float* d_scores = gpu_scratch(5, (int)score_len);
                 if (out->d_data && d_scores) {
                     gpu_multi_head_attention(vq->array->d_data, vk->array->d_data,
                                              vv->array->d_data, out->d_data, d_scores,
@@ -5896,7 +5959,11 @@ static AM_Array* aml_array_dispatch(AML_ExecCtx* ctx, const char* fname, char ar
         int V = (int)aml_eval(ctx, arg_strs[3]);
         if (vl && vl->type == AML_TYPE_ARRAY && vl->array &&
             vt && vt->type == AML_TYPE_ARRAY && vt->array && T > 0 && V > 0) {
-            if (T * V > vl->array->len || T > vt->array->len) return NULL;
+            size_t tv_len = 0;
+            if (!am_checked_mul_ints(T, V, AM_MAX_ARRAY_SIZE, &tv_len) ||
+                tv_len > (size_t)vl->array->len ||
+                T > vt->array->len)
+                return NULL;
             AM_Array* out = am_array_new(1);
             if (!out) return NULL;
 #ifdef USE_CUDA
@@ -7471,7 +7538,13 @@ static float am_frandn(unsigned int* seed) {
 void am_notorch_step(float* A, float* B, int out_dim, int in_dim, int rank,
                      const float* x, const float* dy, float signal) {
     if (!A || !B || !x || !dy) return;
-    if (rank <= 0 || rank > 128) return;
+    if (rank <= 0 || rank > 128 || in_dim <= 0 || out_dim <= 0) return;
+    size_t a_size_sz = 0, b_size_sz = 0;
+    if (!am_checked_mul_ints(in_dim, rank, AM_MAX_ARRAY_SIZE, &a_size_sz) ||
+        !am_checked_mul_ints(rank, out_dim, AM_MAX_ARRAY_SIZE, &b_size_sz))
+        return;
+    int a_size = (int)a_size_sz;
+    int b_size = (int)b_size_sz;
 
     // Clamp signal
     float g = clampf(signal, -2.0f, 2.0f);
@@ -7514,7 +7587,6 @@ void am_notorch_step(float* A, float* B, int out_dim, int in_dim, int rank,
     // Adaptive decay: stronger when delta norm is large
     if (G.notorch_decay > 0.0f && G.notorch_decay < 1.0f) {
         float norm = 0.0f;
-        int a_size = in_dim * rank;
         for (int i = 0; i < a_size; i++) norm += A[i] * A[i];
         norm = sqrtf(norm / (float)a_size);
 
@@ -7522,17 +7594,14 @@ void am_notorch_step(float* A, float* B, int out_dim, int in_dim, int rank,
         if (adaptive_decay < 0.990f) adaptive_decay = 0.990f;
 
         for (int i = 0; i < a_size; i++) A[i] *= adaptive_decay;
-        int b_size = rank * out_dim;
         for (int i = 0; i < b_size; i++) B[i] *= adaptive_decay;
     }
 
     // Clamp to prevent runaway
-    int a_size = in_dim * rank;
     for (int i = 0; i < a_size; i++) {
         if (A[i] > 10.0f) A[i] = 10.0f;
         if (A[i] < -10.0f) A[i] = -10.0f;
     }
-    int b_size = rank * out_dim;
     for (int i = 0; i < b_size; i++) {
         if (B[i] > 10.0f) B[i] = 10.0f;
         if (B[i] < -10.0f) B[i] = -10.0f;
