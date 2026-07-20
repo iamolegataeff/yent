@@ -5742,7 +5742,7 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
     char ui_path[512], vis_path[512], yent_path[512], worldmodel_path[512];
     char yent_adj_path[512], worldmodel_adj_path[512];
     char interface_session_js_path[512], event_stream_js_path[512], chat_stream_js_path[512], token_telemetry_js_path[512], interface_run_js_path[512];
-    char yent_js_path[512], worldmodel_js_path[512];
+    char yent_js_path[512], worldmodel_geometry_js_path[512], worldmodel_js_path[512];
     int ui_len = snprintf(ui_path, sizeof(ui_path), "%sdoe_ui.html", exe_dir);
     int vis_len = snprintf(vis_path, sizeof(vis_path), "%sdoe.html", exe_dir);
     int yent_len = snprintf(yent_path, sizeof(yent_path), "%s../yent.html", exe_dir);
@@ -5755,6 +5755,7 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
     int token_telemetry_js_len = snprintf(token_telemetry_js_path, sizeof(token_telemetry_js_path), "%sworldmodel/token_telemetry.js", exe_dir);
     int interface_run_js_len = snprintf(interface_run_js_path, sizeof(interface_run_js_path), "%sworldmodel/interface_run.js", exe_dir);
     int yent_js_len = snprintf(yent_js_path, sizeof(yent_js_path), "%sworldmodel/yent.js", exe_dir);
+    int worldmodel_geometry_js_len = snprintf(worldmodel_geometry_js_path, sizeof(worldmodel_geometry_js_path), "%sworldmodel/worldmodel_geometry.js", exe_dir);
     int worldmodel_js_len = snprintf(worldmodel_js_path, sizeof(worldmodel_js_path), "%sworldmodel/worldmodel.js", exe_dir);
     if (ui_len < 0 || ui_len >= (int)sizeof(ui_path) ||
         vis_len < 0 || vis_len >= (int)sizeof(vis_path) ||
@@ -5768,6 +5769,7 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
         token_telemetry_js_len < 0 || token_telemetry_js_len >= (int)sizeof(token_telemetry_js_path) ||
         interface_run_js_len < 0 || interface_run_js_len >= (int)sizeof(interface_run_js_path) ||
         yent_js_len < 0 || yent_js_len >= (int)sizeof(yent_js_path) ||
+        worldmodel_geometry_js_len < 0 || worldmodel_geometry_js_len >= (int)sizeof(worldmodel_geometry_js_path) ||
         worldmodel_js_len < 0 || worldmodel_js_len >= (int)sizeof(worldmodel_js_path)) {
         fprintf(stderr, "[serve] static file path too long\n");
         close(server_fd);
@@ -5867,6 +5869,11 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
             } else if (strcmp(path, "/worldmodel/yent.js") == 0) {
                 if (!http_serve_static_file(client, yent_js_path, "application/javascript; charset=utf-8")) {
                     const char *msg = "worldmodel/yent.js not found";
+                    http_send_text(client, 404, msg);
+                }
+            } else if (strcmp(path, "/worldmodel/worldmodel_geometry.js") == 0) {
+                if (!http_serve_static_file(client, worldmodel_geometry_js_path, "application/javascript; charset=utf-8")) {
+                    const char *msg = "worldmodel/worldmodel_geometry.js not found";
                     http_send_text(client, 404, msg);
                 }
             } else if (strcmp(path, "/worldmodel/worldmodel.js") == 0) {

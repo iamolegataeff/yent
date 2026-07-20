@@ -104,6 +104,20 @@ yent/
 
 ---
 
+## 2026-07-20 - Worldmodel geometry follows stream pressure
+
+`/worldmodel` now routes its corridor topology through
+`DoE/worldmodel/worldmodel_geometry.js`.
+
+The helper owns deterministic text seeding, prompt reset, per-token telemetry
+pressure, decay, and wall-shape parameters. Prompt text sets the initial field
+shape; selected token events and candidate telemetry bend it during generation.
+The page still owns rendering, camera, and manifestation, but the geometry state
+is now a tested contract instead of page-local visual math.
+
+This remains observational UI only: no sampler, prompt construction, model
+weights, will, wormhole, limpha, SARTRE, or runtime semantics changed.
+
 ## 2026-07-20 - Interface telemetry contract
 
 `/yent` and `/worldmodel` now share `DoE/worldmodel/token_telemetry.js` for

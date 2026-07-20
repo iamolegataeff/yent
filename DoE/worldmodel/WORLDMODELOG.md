@@ -168,3 +168,16 @@ Yent worldmodel interface log.
 - The DoE server whitelists `/worldmodel/token_telemetry.js` explicitly, and the
   interface contract test now fails if page scripts resume parsing telemetry
   fields locally.
+
+## 2026-07-20 - tested worldmodel geometry state
+
+- Added `worldmodel/worldmodel_geometry.js` for deterministic prompt-derived
+  topology and per-token stream-pressure deformation.
+- The helper owns text seeds, prompt reset, telemetry pressure, decay, and wall
+  shape parameters; `worldmodel.js` owns rendering only.
+- Prompt text now sets the initial corridor form, and selected tokens plus
+  bounded candidate telemetry bend the walls during generation.
+- The DoE server whitelists `/worldmodel/worldmodel_geometry.js` explicitly.
+- Node and Go contract tests cover deterministic prompt geometry, telemetry
+  deformation, decay, script load order, and removal of page-local topology seed
+  helpers.
