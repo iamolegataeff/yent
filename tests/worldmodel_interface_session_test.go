@@ -17,6 +17,7 @@ func TestWorldmodelInterfaceSessionHelper(t *testing.T) {
 		filepath.Join(root, "DoE", "worldmodel", "interface_session.test.cjs"),
 		filepath.Join(root, "DoE", "worldmodel", "event_stream.test.cjs"),
 		filepath.Join(root, "DoE", "worldmodel", "chat_stream.test.cjs"),
+		filepath.Join(root, "DoE", "worldmodel", "token_telemetry.test.cjs"),
 		filepath.Join(root, "DoE", "worldmodel", "interface_run.test.cjs"),
 	} {
 		cmd := exec.Command("node", script)
@@ -40,12 +41,14 @@ func TestWorldmodelInterfaceSessionContract(t *testing.T) {
 		"/worldmodel/interface_session.js",
 		"/worldmodel/event_stream.js",
 		"/worldmodel/chat_stream.js",
+		"/worldmodel/token_telemetry.js",
 		"/worldmodel/interface_run.js",
 		"/worldmodel/yent.js")
 	assertScriptOrder(t, "worldmodel.html", worldHTML,
 		"/worldmodel/interface_session.js",
 		"/worldmodel/event_stream.js",
 		"/worldmodel/chat_stream.js",
+		"/worldmodel/token_telemetry.js",
 		"/worldmodel/interface_run.js",
 		"/worldmodel/worldmodel.js")
 
@@ -60,6 +63,10 @@ func TestWorldmodelInterfaceSessionContract(t *testing.T) {
 	if !strings.Contains(doeC, `"/worldmodel/chat_stream.js"`) ||
 		!strings.Contains(doeC, `"worldmodel/chat_stream.js not found"`) {
 		t.Fatalf("DoE server does not explicitly whitelist chat_stream.js")
+	}
+	if !strings.Contains(doeC, `"/worldmodel/token_telemetry.js"`) ||
+		!strings.Contains(doeC, `"worldmodel/token_telemetry.js not found"`) {
+		t.Fatalf("DoE server does not explicitly whitelist token_telemetry.js")
 	}
 	if !strings.Contains(doeC, `"/worldmodel/interface_run.js"`) ||
 		!strings.Contains(doeC, `"worldmodel/interface_run.js not found"`) {
@@ -81,6 +88,9 @@ func TestWorldmodelInterfaceSessionContract(t *testing.T) {
 		}
 		if !strings.Contains(tc.src, "window.YentChatStream") {
 			t.Fatalf("%s does not use the shared chat stream helper", tc.name)
+		}
+		if !strings.Contains(tc.src, "window.YentTokenTelemetry") {
+			t.Fatalf("%s does not use the shared token telemetry helper", tc.name)
 		}
 		if !strings.Contains(tc.src, "window.YentInterfaceRun") {
 			t.Fatalf("%s does not use the shared interface run helper", tc.name)
@@ -107,6 +117,12 @@ func TestWorldmodelInterfaceSessionContract(t *testing.T) {
 			strings.Contains(tc.src, "new AbortController()") ||
 			strings.Contains(tc.src, "sendButton.textContent =") {
 			t.Fatalf("%s still carries page-local generation run state", tc.name)
+		}
+		if strings.Contains(tc.src, "data.top_tokens") ||
+			strings.Contains(tc.src, "candidate_tail_mass") ||
+			strings.Contains(tc.src, "selected_prob") ||
+			strings.Contains(tc.src, "selected_rank") {
+			t.Fatalf("%s still parses token telemetry locally", tc.name)
 		}
 	}
 }

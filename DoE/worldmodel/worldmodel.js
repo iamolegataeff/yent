@@ -30,6 +30,8 @@ if (!interfaceSession) throw new Error('YentInterfaceSession helper missing');
 if (!window.YentEventStream) throw new Error('YentEventStream helper missing');
 const chatStream = window.YentChatStream;
 if (!chatStream) throw new Error('YentChatStream helper missing');
+const tokenTelemetry = window.YentTokenTelemetry;
+if (!tokenTelemetry) throw new Error('YentTokenTelemetry helper missing');
 const interfaceRun = window.YentInterfaceRun;
 if (!interfaceRun) throw new Error('YentInterfaceRun helper missing');
 const generationRun = interfaceRun.create({ button: sendButton });
@@ -78,10 +80,6 @@ function clamp(v, lo, hi) {
 
 function mix(a, b, t) {
   return a + (b - a) * t;
-}
-
-function metricProb(v) {
-  return Number.isFinite(v) ? v.toFixed(v < 0.01 ? 4 : 3) : '-';
 }
 
 function normalizeSessionMessages(source) {
@@ -146,28 +144,13 @@ function rebuildManifest() {
 }
 
 function candidateEntries(data) {
-  const candidates = Array.isArray(data && data.top_tokens) ? data.top_tokens : [];
-  const entries = [];
-  for (let i = 0; i < candidates.length; i++) {
-    const c = candidates[i];
-    if (!c || c.selected || typeof c.token !== 'string') continue;
-    const words = cleanWords(c.token).slice(0, 2);
-    if (!words.length) continue;
-    const prob = clamp(Number.isFinite(c.prob) ? c.prob : 0, 0, 1);
-    const logprob = Number.isFinite(c.logprob) ? c.logprob : Math.log(Math.max(prob, 1e-9));
-    for (const word of words) {
-      entries.push({
-        word,
-        prob,
-        logprob,
-        rank: i + 1,
-        seed: textSeed(`${word}:${i}:${state.step}`)
-      });
-      if (entries.length >= 18) break;
-    }
-    if (entries.length >= 18) break;
-  }
-  return entries;
+  return tokenTelemetry.candidateWords(data, { limit: 18, wordsPerToken: 2 }).map((entry, i) => ({
+    word: entry.word,
+    prob: entry.prob,
+    logprob: entry.logprob,
+    rank: entry.rank,
+    seed: textSeed(`${entry.word}:${i}:${state.step}`)
+  }));
 }
 
 function rememberCandidates(entries, tailMass) {
@@ -200,6 +183,7 @@ function decayCandidateCloud(dt) {
 
 function absorbToken(token, data) {
   if (!token) return;
+  const telemetry = tokenTelemetry.normalize(data);
   chosenText += token;
   rebuildManifest();
   const words = cleanWords(token);
@@ -215,28 +199,27 @@ function absorbToken(token, data) {
   }
   while (fieldWords.length > 280) fieldWords.pop();
   tokenCount++;
-  if (Number.isFinite(data && data.step)) state.step = Math.max(0, Math.floor(data.step));
+  if (telemetry.hasStep) state.step = telemetry.step;
   else state.step++;
   state.pulse = 1;
   state.quake = clamp(state.quake + 0.2, 0, 1);
   state.topologySeed = (state.topologySeed * 0.985 + textSeed(token) * 0.015) % 1;
-  const tailMass = Number.isFinite(data && data.candidate_tail_mass) ? clamp(data.candidate_tail_mass, 0, 1) : 0;
-  const hasSelectedProb = Number.isFinite(data && data.selected_prob);
-  const selectedProb = hasSelectedProb ? clamp(data.selected_prob, 0, 1) : state.selectedProb;
-  const selectedRank = Number.isFinite(data && data.selected_rank) ? Math.max(0, Math.floor(data.selected_rank)) : state.selectedRank;
+  const tailMass = telemetry.candidateTailMass;
+  const selectedProb = telemetry.hasSelectedProb ? telemetry.selectedProb : state.selectedProb;
+  const selectedRank = telemetry.hasSelectedRank ? telemetry.selectedRank : state.selectedRank;
   state.candidateTail = tailMass;
   state.selectedProb = selectedProb;
   state.selectedRank = selectedRank;
-  state.hasCandidateTelemetry = state.hasCandidateTelemetry || hasSelectedProb || alternatives.length > 0;
+  state.hasCandidateTelemetry = state.hasCandidateTelemetry || telemetry.hasCandidateTelemetry || alternatives.length > 0;
   rememberCandidates(alternatives, tailMass);
-  state.topologyWarp = clamp(state.topologyWarp + 0.032 + tailMass * 0.025 + (hasSelectedProb ? (1 - selectedProb) * 0.008 : 0), 0, 1);
-  state.debt = clamp(Number.isFinite(data && data.debt) ? data.debt : state.debt * 0.985 + 0.006, 0, 1);
-  state.consensus = clamp(Number.isFinite(data && data.consensus) ? data.consensus : state.consensus * 0.992 + 0.004, 0, 1);
-  state.field = clamp(Number.isFinite(data && data.field_health) ? data.field_health : state.field * 0.996 + 0.004, 0, 1);
+  state.topologyWarp = clamp(state.topologyWarp + 0.032 + tailMass * 0.025 + (telemetry.hasSelectedProb ? (1 - selectedProb) * 0.008 : 0), 0, 1);
+  state.debt = telemetry.hasDebt ? telemetry.debt : clamp(state.debt * 0.985 + 0.006, 0, 1);
+  state.consensus = telemetry.hasConsensus ? telemetry.consensus : clamp(state.consensus * 0.992 + 0.004, 0, 1);
+  state.field = telemetry.hasFieldHealth ? telemetry.fieldHealth : clamp(state.field * 0.996 + 0.004, 0, 1);
   const elapsed = Math.max(0.001, (performance.now() - startTime) / 1000);
   state.tokps = tokenCount / elapsed;
-  if (Number.isFinite(data && data.entropy)) {
-    state.entropy = Math.max(0, data.entropy);
+  if (telemetry.hasEntropy) {
+    state.entropy = telemetry.entropy;
   } else {
     const diversity = new Set(fieldWords.slice(0, 80).map(w => w.toLowerCase())).size;
     state.entropy = Math.log(Math.max(1, diversity));
@@ -525,7 +508,7 @@ function updateHud() {
   hud.debt.textContent = state.debt.toFixed(2);
   hud.cons.textContent = state.consensus.toFixed(2);
   hud.field.textContent = state.field.toFixed(2);
-  hud.prob.textContent = state.hasCandidateTelemetry ? metricProb(state.selectedProb) : '-';
+  hud.prob.textContent = state.hasCandidateTelemetry ? tokenTelemetry.metricProb(state.selectedProb) : '-';
   hud.rank.textContent = state.hasCandidateTelemetry && state.selectedRank > 0 ? String(state.selectedRank) : '-';
   hud.tail.textContent = state.hasCandidateTelemetry ? state.candidateTail.toFixed(2) : '-';
 }

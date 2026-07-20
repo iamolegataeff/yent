@@ -155,3 +155,16 @@ Yent worldmodel interface log.
 - The DoE server whitelists `/worldmodel/interface_run.js` explicitly, and the
   interface contract test checks load order plus removal of page-local run
   state.
+
+## 2026-07-20 - shared token telemetry contract
+
+- Moved selected-token probability/rank, candidate tail mass, and `top_tokens`
+  normalization into `worldmodel/token_telemetry.js`.
+- JANUS feeds its latent face tape from the helper's bounded candidate words.
+- WORLD feeds its rejected candidate cloud from the same normalized candidate
+  words while keeping its own projection/physics.
+- Missing telemetry remains honest: old streams still show `-` in candidate HUD
+  fields and keep the existing visual fallbacks.
+- The DoE server whitelists `/worldmodel/token_telemetry.js` explicitly, and the
+  interface contract test now fails if page scripts resume parsing telemetry
+  fields locally.

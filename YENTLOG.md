@@ -104,6 +104,22 @@ yent/
 
 ---
 
+## 2026-07-20 - Interface telemetry contract
+
+`/yent` and `/worldmodel` now share `DoE/worldmodel/token_telemetry.js` for
+SSE token event normalization.
+
+The helper owns selected-token probability/rank, candidate tail mass,
+`top_tokens`, and bounded candidate-word extraction. JANUS still turns rejected
+candidates into the torn face's latent tape, and WORLD still turns them into the
+walkable field, but both now read the same normalized observation instead of
+parsing telemetry independently.
+
+The DoE server serves the helper only through the exact
+`/worldmodel/token_telemetry.js` route. The interface contract test checks script
+order, helper use, static whitelisting, and absence of page-local telemetry
+parsing.
+
 ## 2026-07-20 - CodeQL size arithmetic hardening
 
 GitHub CodeQL reported the same high-severity pattern across DoE image loading,
