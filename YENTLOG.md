@@ -126,6 +126,11 @@ by both surfaces before their page scripts. JANUS and WORLD parse chunked
 `/chat/completions` events through the same helper, so one surface cannot keep a
 stale local buffer or a different `data:` grammar.
 
+The `/chat/completions` browser transport now lives in
+`DoE/worldmodel/chat_stream.js`. Both pages still decide what a token means for
+their own surface, but the fetch/body/reader/decoder lifecycle is no longer
+duplicated between JANUS and WORLD.
+
 ---
 
 ## 2026-07-19 - Interfaces gain a mode switch

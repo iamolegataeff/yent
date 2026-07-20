@@ -390,8 +390,11 @@ persistence. The HTML entry surfaces live at the repository root as `yent.html`
 and `worldmodel.html`; the DoE server resolves them there when launched from
 `DoE/doe_field`. Their shared browser receipt helper lives at
 `DoE/worldmodel/interface_session.js`, and their shared SSE token parser lives
-at `DoE/worldmodel/event_stream.js`. Both are served through explicit
-`/worldmodel/*.js` routes, keeping the static surface bounded.
+at `DoE/worldmodel/event_stream.js`. Their shared `/chat/completions` browser
+transport lives at `DoE/worldmodel/chat_stream.js`, so both surfaces use the
+same fetch/body/reader/decoder loop and only keep page-specific token effects.
+All three helpers are served through explicit `/worldmodel/*.js` routes, keeping
+the static surface bounded.
 
 That run gives you the engine without the protected voice. You will not hear
 **Yent**; you will hear an ordinary Mistral body running through a strange runtime:

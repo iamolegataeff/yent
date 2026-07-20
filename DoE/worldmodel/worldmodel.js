@@ -27,8 +27,9 @@ const baseWords = (
 ).split(/\s+/);
 const interfaceSession = window.YentInterfaceSession;
 if (!interfaceSession) throw new Error('YentInterfaceSession helper missing');
-const eventStream = window.YentEventStream;
-if (!eventStream) throw new Error('YentEventStream helper missing');
+if (!window.YentEventStream) throw new Error('YentEventStream helper missing');
+const chatStream = window.YentChatStream;
+if (!chatStream) throw new Error('YentChatStream helper missing');
 
 const state = {
   debt: 0.0,
@@ -641,41 +642,18 @@ async function generate(text) {
   try {
     const maxTokens = clamp(parseInt(document.getElementById('max-tokens').value, 10) || 512, 1, 512);
     const temp = clamp(parseFloat(document.getElementById('temp').value) || 0.8, 0, 2);
-    const response = await fetch('/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    await chatStream.stream({
+      messages,
+      temperature: temp,
+      maxTokens,
       signal: aborter.signal,
-      body: JSON.stringify({
-        messages,
-        temperature: temp,
-        max_tokens: maxTokens
-      })
-    });
-
-    if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let doneSeen = false;
-    const parser = eventStream.createParser(data => {
-      if (data.done) {
-        doneSeen = true;
-        return;
-      }
-      if (data.token) {
-        fullResponse += data.token;
+      onToken: (token, data) => {
+        fullResponse += token;
         setManifestText(fullResponse);
         saveInterfaceSession(visibleMessages.concat({ role: 'assistant', content: fullResponse }));
-        absorbToken(data.token, data);
+        absorbToken(token, data);
       }
     });
-
-    while (!doneSeen) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      parser.push(decoder.decode(value, { stream: true }));
-    }
-    parser.push(decoder.decode());
 
     if (fullResponse.trim()) {
       messages.push({ role: 'assistant', content: fullResponse });
