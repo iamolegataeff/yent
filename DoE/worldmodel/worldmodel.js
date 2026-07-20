@@ -27,6 +27,8 @@ const baseWords = (
 ).split(/\s+/);
 const interfaceSession = window.YentInterfaceSession;
 if (!interfaceSession) throw new Error('YentInterfaceSession helper missing');
+const eventStream = window.YentEventStream;
+if (!eventStream) throw new Error('YentEventStream helper missing');
 
 const state = {
   debt: 0.0,
@@ -65,7 +67,6 @@ let running = false;
 let aborter = null;
 let tokenCount = 0;
 let startTime = 0;
-let sseBuffer = '';
 let lastSessionSaveAt = 0;
 const keys = Object.create(null);
 
@@ -561,23 +562,6 @@ function animate(now) {
   updateHud();
 }
 
-function parseSseEvents(chunk, onData) {
-  sseBuffer += chunk;
-  const events = sseBuffer.split('\n\n');
-  sseBuffer = events.pop() || '';
-  for (const event of events) {
-    for (const line of event.split('\n')) {
-      if (!line.startsWith('data: ')) continue;
-      const raw = line.slice(6).trim();
-      if (!raw || raw === '[DONE]') continue;
-      try {
-        onData(JSON.parse(raw));
-      } catch (_) {
-      }
-    }
-  }
-}
-
 function setStatus(text) {
   statusNote.textContent = text;
 }
@@ -633,7 +617,6 @@ async function generate(text) {
   manifestWords = [];
   tokenCount = 0;
   startTime = performance.now();
-  sseBuffer = '';
   state.debt = 0.46;
   state.consensus = 0.16;
   state.field = 0.92;
@@ -674,22 +657,25 @@ async function generate(text) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let doneSeen = false;
+    const parser = eventStream.createParser(data => {
+      if (data.done) {
+        doneSeen = true;
+        return;
+      }
+      if (data.token) {
+        fullResponse += data.token;
+        setManifestText(fullResponse);
+        saveInterfaceSession(visibleMessages.concat({ role: 'assistant', content: fullResponse }));
+        absorbToken(data.token, data);
+      }
+    });
+
     while (!doneSeen) {
       const { done, value } = await reader.read();
       if (done) break;
-      parseSseEvents(decoder.decode(value, { stream: true }), data => {
-        if (data.done) {
-          doneSeen = true;
-          return;
-        }
-        if (data.token) {
-          fullResponse += data.token;
-          setManifestText(fullResponse);
-          saveInterfaceSession(visibleMessages.concat({ role: 'assistant', content: fullResponse }));
-          absorbToken(data.token, data);
-        }
-      });
+      parser.push(decoder.decode(value, { stream: true }));
     }
+    parser.push(decoder.decode());
 
     if (fullResponse.trim()) {
       messages.push({ role: 'assistant', content: fullResponse });
