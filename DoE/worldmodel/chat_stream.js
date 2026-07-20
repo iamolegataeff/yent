@@ -23,10 +23,19 @@
     return new Decoder();
   }
 
+  function clampNumber(value, fallback, min, max) {
+    const n = Number.isFinite(value) ? value : fallback;
+    return Math.max(min, Math.min(max, n));
+  }
+
+  function clampInteger(value, fallback, min, max) {
+    return Math.floor(clampNumber(value, fallback, min, max));
+  }
+
   function requestBody(options) {
     const messages = Array.isArray(options && options.messages) ? options.messages : [];
-    const temperature = Number.isFinite(options && options.temperature) ? options.temperature : 0.8;
-    const maxTokens = Number.isFinite(options && options.maxTokens) ? Math.floor(options.maxTokens) : 512;
+    const temperature = clampNumber(options && options.temperature, 0.8, 0, 2);
+    const maxTokens = clampInteger(options && options.maxTokens, 512, 1, 512);
     return JSON.stringify({
       messages,
       temperature,
@@ -55,11 +64,19 @@
     const reader = response.body.getReader();
     const decoder = decoderImpl(options);
     let doneSeen = false;
+    let streamError = null;
     let events = 0;
     let tokens = 0;
     const parser = eventStream.createParser(data => {
+      if (doneSeen || streamError) return;
       events++;
       if (typeof options.onEvent === 'function') options.onEvent(data);
+      if (data && typeof data.error === 'string' && data.error) {
+        streamError = new Error(data.error);
+        if (typeof options.onError === 'function') options.onError(streamError, data);
+        doneSeen = true;
+        return;
+      }
       if (data && data.done) {
         doneSeen = true;
         if (typeof options.onDone === 'function') options.onDone(data);
@@ -77,6 +94,9 @@
       parser.push(decoder.decode(next.value, { stream: true }));
     }
     parser.push(decoder.decode());
+
+    if (streamError) throw streamError;
+    if (!doneSeen && !options.allowEof) throw new Error('stream ended before done');
 
     return {
       done: doneSeen,

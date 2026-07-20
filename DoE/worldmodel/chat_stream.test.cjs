@@ -36,6 +36,19 @@ async function main() {
 }
 
 {
+  const body = JSON.parse(chat.requestBody({
+    messages: 'not-array',
+    temperature: 9,
+    maxTokens: -3
+  }));
+  assert.deepEqual(body, {
+    messages: [],
+    temperature: 2,
+    max_tokens: 1
+  });
+}
+
+{
   let captured = null;
   const seen = [];
   const result = await chat.stream({
@@ -63,6 +76,41 @@ async function main() {
   });
   assert.deepEqual(seen, [{ token: 'hello', prob: 0.5 }]);
   assert.deepEqual(result, { done: true, events: 2, tokens: 1, pending: '' });
+}
+
+{
+  const seen = [];
+  await assert.rejects(
+    () => chat.stream({
+      eventStream,
+      fetch: async () => makeResponse([
+        'data: {"token":"before"}\n\n',
+        'data: {"error":"tokenization failed"}\n\ndata: {"token":"after"}\n\n'
+      ]),
+      onToken: token => seen.push(token)
+    }),
+    /tokenization failed/
+  );
+  assert.deepEqual(seen, ['before']);
+}
+
+{
+  await assert.rejects(
+    () => chat.stream({
+      eventStream,
+      fetch: async () => makeResponse(['data: {"token":"cut"}\n\n'])
+    }),
+    /stream ended before done/
+  );
+}
+
+{
+  const result = await chat.stream({
+    eventStream,
+    allowEof: true,
+    fetch: async () => makeResponse(['data: {"token":"partial"}\n\n'])
+  });
+  assert.deepEqual(result, { done: false, events: 1, tokens: 1, pending: '' });
 }
 
 {
