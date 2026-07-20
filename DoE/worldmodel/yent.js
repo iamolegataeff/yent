@@ -28,6 +28,8 @@ if (!interfaceSession) throw new Error('YentInterfaceSession helper missing');
 if (!window.YentEventStream) throw new Error('YentEventStream helper missing');
 const chatStream = window.YentChatStream;
 if (!chatStream) throw new Error('YentChatStream helper missing');
+const tokenTelemetry = window.YentTokenTelemetry;
+if (!tokenTelemetry) throw new Error('YentTokenTelemetry helper missing');
 const interfaceRun = window.YentInterfaceRun;
 if (!interfaceRun) throw new Error('YentInterfaceRun helper missing');
 const generationRun = interfaceRun.create({ button: sendButton });
@@ -72,10 +74,6 @@ function mix(a, b, t) {
   return a + (b - a) * t;
 }
 
-function metricProb(v) {
-  return Number.isFinite(v) ? v.toFixed(v < 0.01 ? 4 : 3) : '-';
-}
-
 function normalizeSessionMessages(source) {
   return interfaceSession.normalize(source);
 }
@@ -106,15 +104,11 @@ function tokenTextForTape(text) {
 }
 
 function candidateTapeText(data) {
-  const candidates = Array.isArray(data && data.top_tokens) ? data.top_tokens : [];
-  const parts = [];
-  for (const c of candidates) {
-    if (!c || c.selected || typeof c.token !== 'string') continue;
-    const text = tokenTextForTape(c.token);
-    if (text) parts.push(text);
-    if (parts.length >= 10) break;
-  }
-  return parts.join(' ');
+  return tokenTelemetry.candidateText(data, {
+    limit: 10,
+    wordsPerToken: 1,
+    sanitizer: tokenTextForTape
+  });
 }
 
 function setCanvasSize(canvas, context, cssW, cssH) {
@@ -414,34 +408,34 @@ function pushBurst(power) {
 
 function absorbToken(token, data) {
   if (!token) return;
+  const telemetry = tokenTelemetry.normalize(data);
   const printable = tokenTextForTape(token);
   tokenTape = (tokenTape + printable + ' ').slice(-900);
-  const latent = candidateTapeText(data);
+  const latent = candidateTapeText(telemetry);
   if (latent) latentTape = (latentTape + latent + ' ').slice(-900);
   tokenCount += 1;
 
   const elapsed = Math.max((performance.now() - startTime) / 1000, 0.01);
   state.tokps = tokenCount / elapsed;
 
-  if (typeof data.experts === 'number') state.experts = data.experts;
-  if (typeof data.debt === 'number') state.debt = clamp(data.debt, 0, 1);
+  if (telemetry.hasExperts) state.experts = telemetry.experts;
+  if (telemetry.hasDebt) state.debt = telemetry.debt;
   else state.debt = clamp(state.debt * 0.985 + (/[?!]/.test(token) ? 0.035 : 0.004), 0, 1);
 
-  if (typeof data.consensus === 'number') state.consensus = clamp(data.consensus, 0, 1);
+  if (telemetry.hasConsensus) state.consensus = telemetry.consensus;
   else state.consensus = clamp(state.consensus + 0.006 + (/[.!?]/.test(token) ? 0.026 : 0), 0, 1);
 
-  if (typeof data.field_health === 'number') state.field = clamp(data.field_health, 0, 1);
+  if (telemetry.hasFieldHealth) state.field = telemetry.fieldHealth;
   else state.field = clamp(1.0 - state.debt * 0.38 + state.consensus * 0.08, 0, 1);
 
-  const tailMass = Number.isFinite(data && data.candidate_tail_mass) ? clamp(data.candidate_tail_mass, 0, 1) : 0;
-  const hasSelectedProb = Number.isFinite(data && data.selected_prob);
-  const selectedProb = hasSelectedProb ? clamp(data.selected_prob, 0, 1) : state.selectedProb;
-  const selectedRank = Number.isFinite(data && data.selected_rank) ? Math.max(0, Math.floor(data.selected_rank)) : state.selectedRank;
+  const tailMass = telemetry.candidateTailMass;
+  const selectedProb = telemetry.hasSelectedProb ? telemetry.selectedProb : state.selectedProb;
+  const selectedRank = telemetry.hasSelectedRank ? telemetry.selectedRank : state.selectedRank;
   state.candidateTail = tailMass;
   state.selectedProb = selectedProb;
   state.selectedRank = selectedRank;
-  state.hasCandidateTelemetry = state.hasCandidateTelemetry || hasSelectedProb || latent.length > 0;
-  state.sidePulse = clamp(state.sidePulse + tailMass * 0.2 + (hasSelectedProb ? (1 - selectedProb) * 0.05 : 0), 0, 1);
+  state.hasCandidateTelemetry = state.hasCandidateTelemetry || telemetry.hasCandidateTelemetry || latent.length > 0;
+  state.sidePulse = clamp(state.sidePulse + tailMass * 0.2 + (telemetry.hasSelectedProb ? (1 - selectedProb) * 0.05 : 0), 0, 1);
   state.velocity = 0.75 + state.debt * 2.7 + (1 - state.consensus) * 1.2 + tailMass * 0.8;
   if (/[.!?]/.test(token)) pushBurst(0.55);
 }
@@ -477,7 +471,7 @@ function updateHud() {
   hud.debt.textContent = state.debt.toFixed(2);
   hud.cons.textContent = state.consensus.toFixed(2);
   hud.field.textContent = state.field.toFixed(2);
-  hud.prob.textContent = state.hasCandidateTelemetry ? metricProb(state.selectedProb) : '-';
+  hud.prob.textContent = state.hasCandidateTelemetry ? tokenTelemetry.metricProb(state.selectedProb) : '-';
   hud.rank.textContent = state.hasCandidateTelemetry && state.selectedRank > 0 ? String(state.selectedRank) : '-';
   hud.tail.textContent = state.hasCandidateTelemetry ? state.candidateTail.toFixed(2) : '-';
 }
