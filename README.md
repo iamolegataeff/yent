@@ -397,9 +397,11 @@ That transport clamps browser request parameters, treats SSE `error` events as
 faults, and rejects a stream that ends before the explicit `done` event unless a
 test opts into EOF tolerance. It also provides the shared outcome classifier for
 `complete`, `empty`, `stopped`, and `fault`, so JANUS and WORLD do not diverge
-on whether a partial or empty generation is committed. All three helpers are
-served through explicit `/worldmodel/*.js` routes, keeping the static surface
-bounded.
+on whether a partial or empty generation is committed. Their shared generation
+run controller lives at `DoE/worldmodel/interface_run.js`, keeping STOP/SEND,
+abort, duplicate-submit rejection, and final button cleanup under one browser
+contract. All four helpers are served through explicit `/worldmodel/*.js`
+routes, keeping the static surface bounded.
 
 That run gives you the engine without the protected voice. You will not hear
 **Yent**; you will hear an ordinary Mistral body running through a strange runtime:

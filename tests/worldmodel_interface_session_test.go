@@ -17,6 +17,7 @@ func TestWorldmodelInterfaceSessionHelper(t *testing.T) {
 		filepath.Join(root, "DoE", "worldmodel", "interface_session.test.cjs"),
 		filepath.Join(root, "DoE", "worldmodel", "event_stream.test.cjs"),
 		filepath.Join(root, "DoE", "worldmodel", "chat_stream.test.cjs"),
+		filepath.Join(root, "DoE", "worldmodel", "interface_run.test.cjs"),
 	} {
 		cmd := exec.Command("node", script)
 		cmd.Dir = root
@@ -39,11 +40,13 @@ func TestWorldmodelInterfaceSessionContract(t *testing.T) {
 		"/worldmodel/interface_session.js",
 		"/worldmodel/event_stream.js",
 		"/worldmodel/chat_stream.js",
+		"/worldmodel/interface_run.js",
 		"/worldmodel/yent.js")
 	assertScriptOrder(t, "worldmodel.html", worldHTML,
 		"/worldmodel/interface_session.js",
 		"/worldmodel/event_stream.js",
 		"/worldmodel/chat_stream.js",
+		"/worldmodel/interface_run.js",
 		"/worldmodel/worldmodel.js")
 
 	if !strings.Contains(doeC, `"/worldmodel/interface_session.js"`) ||
@@ -57,6 +60,10 @@ func TestWorldmodelInterfaceSessionContract(t *testing.T) {
 	if !strings.Contains(doeC, `"/worldmodel/chat_stream.js"`) ||
 		!strings.Contains(doeC, `"worldmodel/chat_stream.js not found"`) {
 		t.Fatalf("DoE server does not explicitly whitelist chat_stream.js")
+	}
+	if !strings.Contains(doeC, `"/worldmodel/interface_run.js"`) ||
+		!strings.Contains(doeC, `"worldmodel/interface_run.js not found"`) {
+		t.Fatalf("DoE server does not explicitly whitelist interface_run.js")
 	}
 
 	for _, tc := range []struct {
@@ -75,6 +82,9 @@ func TestWorldmodelInterfaceSessionContract(t *testing.T) {
 		if !strings.Contains(tc.src, "window.YentChatStream") {
 			t.Fatalf("%s does not use the shared chat stream helper", tc.name)
 		}
+		if !strings.Contains(tc.src, "window.YentInterfaceRun") {
+			t.Fatalf("%s does not use the shared interface run helper", tc.name)
+		}
 		if !strings.Contains(tc.src, "chatStream.outcome(") {
 			t.Fatalf("%s does not use the shared chat stream outcome classifier", tc.name)
 		}
@@ -91,6 +101,12 @@ func TestWorldmodelInterfaceSessionContract(t *testing.T) {
 		if strings.Contains(tc.src, "err.name === 'AbortError'") ||
 			strings.Contains(tc.src, `err.name === "AbortError"`) {
 			t.Fatalf("%s still carries page-local stream outcome classification", tc.name)
+		}
+		if strings.Contains(tc.src, "let running = false") ||
+			strings.Contains(tc.src, "let aborter = null") ||
+			strings.Contains(tc.src, "new AbortController()") ||
+			strings.Contains(tc.src, "sendButton.textContent =") {
+			t.Fatalf("%s still carries page-local generation run state", tc.name)
 		}
 	}
 }

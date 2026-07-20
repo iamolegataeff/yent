@@ -28,6 +28,9 @@ if (!interfaceSession) throw new Error('YentInterfaceSession helper missing');
 if (!window.YentEventStream) throw new Error('YentEventStream helper missing');
 const chatStream = window.YentChatStream;
 if (!chatStream) throw new Error('YentChatStream helper missing');
+const interfaceRun = window.YentInterfaceRun;
+if (!interfaceRun) throw new Error('YentInterfaceRun helper missing');
+const generationRun = interfaceRun.create({ button: sendButton });
 const state = {
   debt: 0.0,
   consensus: 0.62,
@@ -52,8 +55,6 @@ let tokenTape = seedWords.join('');
 let latentTape = seedWords.join('');
 let messages = [];
 let visibleMessages = [];
-let running = false;
-let aborter = null;
 let startTime = 0;
 let tokenCount = 0;
 let mouseX = -9999;
@@ -527,7 +528,7 @@ function animate() {
   requestAnimationFrame(animate);
   time += 0.016;
   state.sidePulse *= 0.96;
-  if (!running) {
+  if (!generationRun.isRunning()) {
     state.candidateTail = mix(state.candidateTail, 0, 0.018);
     state.selectedProb = mix(state.selectedProb, 0, 0.018);
   }
@@ -567,10 +568,7 @@ function animate() {
 }
 
 async function generate(text) {
-  running = true;
-  aborter = new AbortController();
-  sendButton.textContent = 'STOP';
-  sendButton.disabled = false;
+  const currentRun = generationRun.begin();
   setStatus('GENERATING');
   tokenCount = 0;
   startTime = performance.now();
@@ -601,7 +599,7 @@ async function generate(text) {
       messages,
       temperature: temp,
       maxTokens,
-      signal: aborter.signal,
+      signal: currentRun.signal,
       onToken: (token, data) => {
         fullResponse += token;
         assistantBody.textContent = fullResponse;
@@ -628,23 +626,11 @@ async function generate(text) {
         : `parliament unreachable: ${result.message}`;
     }
   } finally {
-    running = false;
-    aborter = null;
-    sendButton.textContent = 'SEND';
+    generationRun.finish(currentRun);
   }
 }
 
-composer.addEventListener('submit', event => {
-  event.preventDefault();
-  if (running) {
-    if (aborter) aborter.abort();
-    return;
-  }
-  const text = promptInput.value.trim();
-  if (!text) return;
-  promptInput.value = '';
-  generate(text);
-});
+generationRun.bindComposer(composer, promptInput, generate);
 
 window.addEventListener('mousemove', event => {
   mouseX = event.clientX;
