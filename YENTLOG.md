@@ -121,6 +121,11 @@ and is served through the same explicit worldmodel asset whitelist as the page
 scripts. Both interfaces use that helper, and the test suite checks load order
 plus the guard against repopulating prompt messages from restored UI receipt.
 
+The SSE stream parser now lives in `DoE/worldmodel/event_stream.js` and is loaded
+by both surfaces before their page scripts. JANUS and WORLD parse chunked
+`/chat/completions` events through the same helper, so one surface cannot keep a
+stale local buffer or a different `data:` grammar.
+
 ---
 
 ## 2026-07-19 - Interfaces gain a mode switch

@@ -5685,7 +5685,8 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
     /* Resolve HTML file paths relative to executable */
     char ui_path[512], vis_path[512], yent_path[512], worldmodel_path[512];
     char yent_adj_path[512], worldmodel_adj_path[512];
-    char interface_session_js_path[512], yent_js_path[512], worldmodel_js_path[512];
+    char interface_session_js_path[512], event_stream_js_path[512];
+    char yent_js_path[512], worldmodel_js_path[512];
     int ui_len = snprintf(ui_path, sizeof(ui_path), "%sdoe_ui.html", exe_dir);
     int vis_len = snprintf(vis_path, sizeof(vis_path), "%sdoe.html", exe_dir);
     int yent_len = snprintf(yent_path, sizeof(yent_path), "%s../yent.html", exe_dir);
@@ -5693,6 +5694,7 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
     int yent_adj_len = snprintf(yent_adj_path, sizeof(yent_adj_path), "%syent.html", exe_dir);
     int worldmodel_adj_len = snprintf(worldmodel_adj_path, sizeof(worldmodel_adj_path), "%sworldmodel.html", exe_dir);
     int interface_session_js_len = snprintf(interface_session_js_path, sizeof(interface_session_js_path), "%sworldmodel/interface_session.js", exe_dir);
+    int event_stream_js_len = snprintf(event_stream_js_path, sizeof(event_stream_js_path), "%sworldmodel/event_stream.js", exe_dir);
     int yent_js_len = snprintf(yent_js_path, sizeof(yent_js_path), "%sworldmodel/yent.js", exe_dir);
     int worldmodel_js_len = snprintf(worldmodel_js_path, sizeof(worldmodel_js_path), "%sworldmodel/worldmodel.js", exe_dir);
     if (ui_len < 0 || ui_len >= (int)sizeof(ui_path) ||
@@ -5702,6 +5704,7 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
         yent_adj_len < 0 || yent_adj_len >= (int)sizeof(yent_adj_path) ||
         worldmodel_adj_len < 0 || worldmodel_adj_len >= (int)sizeof(worldmodel_adj_path) ||
         interface_session_js_len < 0 || interface_session_js_len >= (int)sizeof(interface_session_js_path) ||
+        event_stream_js_len < 0 || event_stream_js_len >= (int)sizeof(event_stream_js_path) ||
         yent_js_len < 0 || yent_js_len >= (int)sizeof(yent_js_path) ||
         worldmodel_js_len < 0 || worldmodel_js_len >= (int)sizeof(worldmodel_js_path)) {
         fprintf(stderr, "[serve] static file path too long\n");
@@ -5777,6 +5780,11 @@ static void serve_loop(GGUFIndex *ps, const char *exe_dir) {
             } else if (strcmp(path, "/worldmodel/interface_session.js") == 0) {
                 if (!http_serve_static_file(client, interface_session_js_path, "application/javascript; charset=utf-8")) {
                     const char *msg = "worldmodel/interface_session.js not found";
+                    http_send_text(client, 404, msg);
+                }
+            } else if (strcmp(path, "/worldmodel/event_stream.js") == 0) {
+                if (!http_serve_static_file(client, event_stream_js_path, "application/javascript; charset=utf-8")) {
+                    const char *msg = "worldmodel/event_stream.js not found";
                     http_send_text(client, 404, msg);
                 }
             } else if (strcmp(path, "/worldmodel/yent.js") == 0) {

@@ -25,6 +25,8 @@ const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_
 const seedWords = 'Yent DoE Janus parliament notorch prophecy debt consensus memory limpha identity boundary'.split(' ');
 const interfaceSession = window.YentInterfaceSession;
 if (!interfaceSession) throw new Error('YentInterfaceSession helper missing');
+const eventStream = window.YentEventStream;
+if (!eventStream) throw new Error('YentEventStream helper missing');
 const state = {
   debt: 0.0,
   consensus: 0.62,
@@ -555,25 +557,6 @@ function animate() {
   updateHud();
 }
 
-function parseSseEvents(chunk, buffer, onData) {
-  buffer += chunk;
-  const events = buffer.split('\n\n');
-  buffer = events.pop() || '';
-  for (const event of events) {
-    const lines = event.split('\n');
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const raw = line.slice(6).trim();
-      if (!raw || raw === '[DONE]') continue;
-      try {
-        onData(JSON.parse(raw));
-      } catch (_) {
-      }
-    }
-  }
-  return buffer;
-}
-
 async function generate(text) {
   running = true;
   aborter = new AbortController();
@@ -622,26 +605,27 @@ async function generate(text) {
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let buffer = '';
     let doneSeen = false;
+    const parser = eventStream.createParser(data => {
+      if (data.done) {
+        doneSeen = true;
+        return;
+      }
+      if (data.token) {
+        fullResponse += data.token;
+        assistantBody.textContent = fullResponse;
+        saveInterfaceSession(visibleMessages.concat({ role: 'assistant', content: fullResponse }));
+        absorbToken(data.token, data);
+        transcript.scrollTop = transcript.scrollHeight;
+      }
+    });
 
     while (!doneSeen) {
       const { done, value } = await reader.read();
       if (done) break;
-      buffer = parseSseEvents(decoder.decode(value, { stream: true }), buffer, data => {
-        if (data.done) {
-          doneSeen = true;
-          return;
-        }
-        if (data.token) {
-          fullResponse += data.token;
-          assistantBody.textContent = fullResponse;
-          saveInterfaceSession(visibleMessages.concat({ role: 'assistant', content: fullResponse }));
-          absorbToken(data.token, data);
-          transcript.scrollTop = transcript.scrollHeight;
-        }
-      });
+      parser.push(decoder.decode(value, { stream: true }));
     }
+    parser.push(decoder.decode());
 
     if (fullResponse.trim()) {
       messages.push({ role: 'assistant', content: fullResponse });

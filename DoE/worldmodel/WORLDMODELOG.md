@@ -118,3 +118,14 @@ Yent worldmodel interface log.
 - `tests/worldmodel_interface_session_test.go` runs the JS helper test when Node
   is present and also checks script order plus the no-`messages = restored`
   boundary.
+
+## 2026-07-20 - shared event stream parser
+
+- Moved chunked SSE event parsing into `worldmodel/event_stream.js`.
+- Both JANUS and WORLD now use `YentEventStream.createParser(...)` instead of
+  carrying page-local `parseSseEvents` implementations.
+- The shared parser handles chunk boundaries, CRLF frame separators, compact
+  `data:{...}` lines, OpenAI-style `[DONE]` sentinels, and malformed frames
+  without breaking the UI loop.
+- The DoE server whitelists `/worldmodel/event_stream.js` explicitly, and the
+  interface contract test checks script order plus removal of local SSE buffers.
