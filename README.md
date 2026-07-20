@@ -393,8 +393,10 @@ and `worldmodel.html`; the DoE server resolves them there when launched from
 at `DoE/worldmodel/event_stream.js`. Their shared `/chat/completions` browser
 transport lives at `DoE/worldmodel/chat_stream.js`, so both surfaces use the
 same fetch/body/reader/decoder loop and only keep page-specific token effects.
-All three helpers are served through explicit `/worldmodel/*.js` routes, keeping
-the static surface bounded.
+That transport clamps browser request parameters, treats SSE `error` events as
+faults, and rejects a stream that ends before the explicit `done` event unless a
+test opts into EOF tolerance. All three helpers are served through explicit
+`/worldmodel/*.js` routes, keeping the static surface bounded.
 
 That run gives you the engine without the protected voice. You will not hear
 **Yent**; you will hear an ordinary Mistral body running through a strange runtime:

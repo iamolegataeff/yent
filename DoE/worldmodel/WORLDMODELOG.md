@@ -139,3 +139,5 @@ Yent worldmodel interface log.
   for WORLD.
 - The helper is loaded after `event_stream.js`, served through an exact DoE
   route, and covered by a Node test plus the shared interface contract test.
+- The helper clamps request parameters and turns SSE `error` frames or
+  EOF-before-`done` into faults, so incomplete streams cannot look complete.

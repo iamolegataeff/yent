@@ -131,6 +131,11 @@ The `/chat/completions` browser transport now lives in
 their own surface, but the fetch/body/reader/decoder lifecycle is no longer
 duplicated between JANUS and WORLD.
 
+The shared transport now treats SSE `error` frames and EOF-before-`done` as
+fault boundaries, rather than allowing either interface to report a truncated or
+failed generation as `COMPLETE` / `EMPTY`. Request parameters are clamped again
+inside the helper, so direct helper use cannot bypass the UI input bounds.
+
 ---
 
 ## 2026-07-19 - Interfaces gain a mode switch
