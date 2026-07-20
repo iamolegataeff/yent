@@ -16,6 +16,7 @@ func TestWorldmodelInterfaceSessionHelper(t *testing.T) {
 	for _, script := range []string{
 		filepath.Join(root, "DoE", "worldmodel", "interface_session.test.cjs"),
 		filepath.Join(root, "DoE", "worldmodel", "event_stream.test.cjs"),
+		filepath.Join(root, "DoE", "worldmodel", "chat_stream.test.cjs"),
 	} {
 		cmd := exec.Command("node", script)
 		cmd.Dir = root
@@ -37,10 +38,12 @@ func TestWorldmodelInterfaceSessionContract(t *testing.T) {
 	assertScriptOrder(t, "yent.html", yentHTML,
 		"/worldmodel/interface_session.js",
 		"/worldmodel/event_stream.js",
+		"/worldmodel/chat_stream.js",
 		"/worldmodel/yent.js")
 	assertScriptOrder(t, "worldmodel.html", worldHTML,
 		"/worldmodel/interface_session.js",
 		"/worldmodel/event_stream.js",
+		"/worldmodel/chat_stream.js",
 		"/worldmodel/worldmodel.js")
 
 	if !strings.Contains(doeC, `"/worldmodel/interface_session.js"`) ||
@@ -50,6 +53,10 @@ func TestWorldmodelInterfaceSessionContract(t *testing.T) {
 	if !strings.Contains(doeC, `"/worldmodel/event_stream.js"`) ||
 		!strings.Contains(doeC, `"worldmodel/event_stream.js not found"`) {
 		t.Fatalf("DoE server does not explicitly whitelist event_stream.js")
+	}
+	if !strings.Contains(doeC, `"/worldmodel/chat_stream.js"`) ||
+		!strings.Contains(doeC, `"worldmodel/chat_stream.js not found"`) {
+		t.Fatalf("DoE server does not explicitly whitelist chat_stream.js")
 	}
 
 	for _, tc := range []struct {
@@ -65,11 +72,18 @@ func TestWorldmodelInterfaceSessionContract(t *testing.T) {
 		if !strings.Contains(tc.src, "window.YentEventStream") {
 			t.Fatalf("%s does not use the shared event stream helper", tc.name)
 		}
+		if !strings.Contains(tc.src, "window.YentChatStream") {
+			t.Fatalf("%s does not use the shared chat stream helper", tc.name)
+		}
 		if strings.Contains(tc.src, "messages = restored") {
 			t.Fatalf("%s repopulates prompt messages from restored UI receipt", tc.name)
 		}
 		if strings.Contains(tc.src, "function parseSseEvents") || strings.Contains(tc.src, "sseBuffer") {
 			t.Fatalf("%s still carries a page-local SSE parser", tc.name)
+		}
+		if strings.Contains(tc.src, "fetch('/chat/completions'") ||
+			strings.Contains(tc.src, "fetch(\"/chat/completions\"") {
+			t.Fatalf("%s still carries a page-local chat/completions transport", tc.name)
 		}
 	}
 }

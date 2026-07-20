@@ -129,3 +129,13 @@ Yent worldmodel interface log.
   without breaking the UI loop.
 - The DoE server whitelists `/worldmodel/event_stream.js` explicitly, and the
   interface contract test checks script order plus removal of local SSE buffers.
+
+## 2026-07-20 - shared chat stream transport
+
+- Moved the browser `/chat/completions` fetch/body/reader/decoder lifecycle into
+  `worldmodel/chat_stream.js`.
+- JANUS and WORLD now call `YentChatStream.stream(...)` and keep only their
+  surface-specific `onToken` effects: transcript/face for JANUS, manifest/field
+  for WORLD.
+- The helper is loaded after `event_stream.js`, served through an exact DoE
+  route, and covered by a Node test plus the shared interface contract test.
