@@ -141,3 +141,6 @@ Yent worldmodel interface log.
   route, and covered by a Node test plus the shared interface contract test.
 - The helper clamps request parameters and turns SSE `error` frames or
   EOF-before-`done` into faults, so incomplete streams cannot look complete.
+- The helper also classifies stream outcomes. Page scripts map the shared
+  `complete` / `empty` / `stopped` / `fault` result into their own visual labels,
+  but no longer decide commit policy independently.

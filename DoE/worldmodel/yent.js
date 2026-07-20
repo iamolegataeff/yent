@@ -92,6 +92,14 @@ function saveInterfaceSession(nextMessages, force = false) {
   }
 }
 
+function commitAssistantResponse(text) {
+  if (!text.trim()) return;
+  messages.push({ role: 'assistant', content: text });
+  visibleMessages.push({ role: 'assistant', content: text });
+  visibleMessages = normalizeSessionMessages(visibleMessages);
+  saveInterfaceSession(visibleMessages, true);
+}
+
 function tokenTextForTape(text) {
   return (text || '').replace(/\s+/g, '_').replace(/[^\p{L}\p{N}_./=+\-*#@%&_]/gu, '');
 }
@@ -603,27 +611,21 @@ async function generate(text) {
       }
     });
 
-    if (fullResponse.trim()) {
-      messages.push({ role: 'assistant', content: fullResponse });
-      visibleMessages.push({ role: 'assistant', content: fullResponse });
-      visibleMessages = normalizeSessionMessages(visibleMessages);
-      saveInterfaceSession(visibleMessages, true);
-    }
-    setStatus('COMPLETE');
+    const result = chatStream.outcome(null, fullResponse);
+    if (result.commitAssistant) commitAssistantResponse(fullResponse);
+    setStatus(result.kind === 'empty' ? 'EMPTY' : 'COMPLETE');
     state.consensus = clamp(state.consensus + 0.16, 0, 1);
     state.debt = clamp(state.debt * 0.72, 0, 1);
   } catch (err) {
-    if (err.name === 'AbortError') {
-      setStatus('STOPPED');
-      if (fullResponse.trim()) {
-        messages.push({ role: 'assistant', content: fullResponse });
-        visibleMessages.push({ role: 'assistant', content: fullResponse });
-        visibleMessages = normalizeSessionMessages(visibleMessages);
-        saveInterfaceSession(visibleMessages, true);
-      }
+    const result = chatStream.outcome(err, fullResponse);
+    if (result.stopped) {
+      setStatus(result.hasText ? 'STOPPED' : 'IDLE');
+      if (result.commitAssistant) commitAssistantResponse(fullResponse);
     } else {
       setStatus('FAULT');
-      assistantBody.textContent = `parliament unreachable: ${err.message}`;
+      assistantBody.textContent = result.hasText
+        ? `${fullResponse}\n\n[stream fault: ${result.message}]`
+        : `parliament unreachable: ${result.message}`;
     }
   } finally {
     running = false;

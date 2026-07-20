@@ -395,8 +395,11 @@ transport lives at `DoE/worldmodel/chat_stream.js`, so both surfaces use the
 same fetch/body/reader/decoder loop and only keep page-specific token effects.
 That transport clamps browser request parameters, treats SSE `error` events as
 faults, and rejects a stream that ends before the explicit `done` event unless a
-test opts into EOF tolerance. All three helpers are served through explicit
-`/worldmodel/*.js` routes, keeping the static surface bounded.
+test opts into EOF tolerance. It also provides the shared outcome classifier for
+`complete`, `empty`, `stopped`, and `fault`, so JANUS and WORLD do not diverge
+on whether a partial or empty generation is committed. All three helpers are
+served through explicit `/worldmodel/*.js` routes, keeping the static surface
+bounded.
 
 That run gives you the engine without the protected voice. You will not hear
 **Yent**; you will hear an ordinary Mistral body running through a strange runtime:

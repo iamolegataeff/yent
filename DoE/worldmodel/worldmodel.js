@@ -100,6 +100,14 @@ function saveInterfaceSession(nextMessages, force = false) {
   }
 }
 
+function commitAssistantResponse(text) {
+  if (!text.trim()) return;
+  messages.push({ role: 'assistant', content: text });
+  visibleMessages.push({ role: 'assistant', content: text });
+  visibleMessages = normalizeSessionMessages(visibleMessages);
+  saveInterfaceSession(visibleMessages, true);
+}
+
 function hash(n) {
   const x = Math.sin(n * 12.9898) * 43758.5453123;
   return x - Math.floor(x);
@@ -655,30 +663,22 @@ async function generate(text) {
       }
     });
 
-    if (fullResponse.trim()) {
-      messages.push({ role: 'assistant', content: fullResponse });
-      visibleMessages.push({ role: 'assistant', content: fullResponse });
-      visibleMessages = normalizeSessionMessages(visibleMessages);
-      saveInterfaceSession(visibleMessages, true);
-    }
+    const result = chatStream.outcome(null, fullResponse);
+    if (result.commitAssistant) commitAssistantResponse(fullResponse);
     setStatus('FIELD SETTLED.');
-    setManifestState(fullResponse.trim() ? 'COMPLETE' : 'EMPTY', Boolean(fullResponse.trim()));
+    setManifestState(result.kind === 'empty' ? 'EMPTY' : 'COMPLETE', result.hasText);
     state.consensus = clamp(state.consensus + 0.18, 0, 1);
     state.debt = clamp(state.debt * 0.68, 0, 1);
   } catch (err) {
-    if (err.name === 'AbortError') {
+    const result = chatStream.outcome(err, fullResponse);
+    if (result.stopped) {
       setStatus('MANIFESTATION STOPPED.');
-      setManifestState(fullResponse.trim() ? 'STOPPED' : 'IDLE', Boolean(fullResponse.trim()));
-      if (fullResponse.trim()) {
-        messages.push({ role: 'assistant', content: fullResponse });
-        visibleMessages.push({ role: 'assistant', content: fullResponse });
-        visibleMessages = normalizeSessionMessages(visibleMessages);
-        saveInterfaceSession(visibleMessages, true);
-      }
+      setManifestState(result.hasText ? 'STOPPED' : 'IDLE', result.hasText);
+      if (result.commitAssistant) commitAssistantResponse(fullResponse);
     } else {
-      setStatus(`FIELD FAULT: ${err.message}`);
-      setManifestState('FAULT', Boolean(fullResponse.trim()));
-      if (!fullResponse.trim()) setManifestText(`FIELD FAULT: ${err.message}`);
+      setStatus(`FIELD FAULT: ${result.message}`);
+      setManifestState('FAULT', result.hasText);
+      if (!result.hasText) setManifestText(`FIELD FAULT: ${result.message}`);
       fieldWords.unshift('fault', 'unreachable');
     }
   } finally {
