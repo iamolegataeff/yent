@@ -136,6 +136,12 @@ fault boundaries, rather than allowing either interface to report a truncated or
 failed generation as `COMPLETE` / `EMPTY`. Request parameters are clamped again
 inside the helper, so direct helper use cannot bypass the UI input bounds.
 
+The same helper now owns stream outcome classification. JANUS and WORLD still
+render their own labels, but both derive `complete`, `empty`, `stopped`, and
+`fault` from the same contract. Empty generations are no longer `COMPLETE` in
+one surface and `EMPTY` in the other, and faulted partials are not committed as
+assistant turns.
+
 ---
 
 ## 2026-07-19 - Interfaces gain a mode switch

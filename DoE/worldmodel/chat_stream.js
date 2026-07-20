@@ -43,6 +43,31 @@
     });
   }
 
+  function outcome(error, responseText) {
+    const text = typeof responseText === 'string' ? responseText : '';
+    const hasText = text.trim().length > 0;
+    if (!error) {
+      return {
+        kind: hasText ? 'complete' : 'empty',
+        hasText,
+        commitAssistant: hasText,
+        fault: false,
+        stopped: false,
+        message: ''
+      };
+    }
+    const stopped = error && error.name === 'AbortError';
+    const message = error && error.message ? error.message : 'stream failed';
+    return {
+      kind: stopped ? 'stopped' : 'fault',
+      hasText,
+      commitAssistant: stopped && hasText,
+      fault: !stopped,
+      stopped,
+      message
+    };
+  }
+
   async function stream(options) {
     options = options || {};
     const eventStream = dependency(options);
@@ -106,7 +131,7 @@
     };
   }
 
-  const api = { DEFAULT_ENDPOINT, requestBody, stream };
+  const api = { DEFAULT_ENDPOINT, outcome, requestBody, stream };
   root.YentChatStream = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

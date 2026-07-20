@@ -49,6 +49,43 @@ async function main() {
 }
 
 {
+  assert.deepEqual(chat.outcome(null, 'answer'), {
+    kind: 'complete',
+    hasText: true,
+    commitAssistant: true,
+    fault: false,
+    stopped: false,
+    message: ''
+  });
+  assert.deepEqual(chat.outcome(null, '   '), {
+    kind: 'empty',
+    hasText: false,
+    commitAssistant: false,
+    fault: false,
+    stopped: false,
+    message: ''
+  });
+  const abort = new Error('aborted');
+  abort.name = 'AbortError';
+  assert.deepEqual(chat.outcome(abort, 'partial'), {
+    kind: 'stopped',
+    hasText: true,
+    commitAssistant: true,
+    fault: false,
+    stopped: true,
+    message: 'aborted'
+  });
+  assert.deepEqual(chat.outcome(new Error('stream ended before done'), 'partial'), {
+    kind: 'fault',
+    hasText: true,
+    commitAssistant: false,
+    fault: true,
+    stopped: false,
+    message: 'stream ended before done'
+  });
+}
+
+{
   let captured = null;
   const seen = [];
   const result = await chat.stream({

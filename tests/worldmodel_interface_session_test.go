@@ -75,6 +75,9 @@ func TestWorldmodelInterfaceSessionContract(t *testing.T) {
 		if !strings.Contains(tc.src, "window.YentChatStream") {
 			t.Fatalf("%s does not use the shared chat stream helper", tc.name)
 		}
+		if !strings.Contains(tc.src, "chatStream.outcome(") {
+			t.Fatalf("%s does not use the shared chat stream outcome classifier", tc.name)
+		}
 		if strings.Contains(tc.src, "messages = restored") {
 			t.Fatalf("%s repopulates prompt messages from restored UI receipt", tc.name)
 		}
@@ -84,6 +87,10 @@ func TestWorldmodelInterfaceSessionContract(t *testing.T) {
 		if strings.Contains(tc.src, "fetch('/chat/completions'") ||
 			strings.Contains(tc.src, "fetch(\"/chat/completions\"") {
 			t.Fatalf("%s still carries a page-local chat/completions transport", tc.name)
+		}
+		if strings.Contains(tc.src, "err.name === 'AbortError'") ||
+			strings.Contains(tc.src, `err.name === "AbortError"`) {
+			t.Fatalf("%s still carries page-local stream outcome classification", tc.name)
 		}
 	}
 }
