@@ -30,6 +30,9 @@ if (!interfaceSession) throw new Error('YentInterfaceSession helper missing');
 if (!window.YentEventStream) throw new Error('YentEventStream helper missing');
 const chatStream = window.YentChatStream;
 if (!chatStream) throw new Error('YentChatStream helper missing');
+const interfaceRun = window.YentInterfaceRun;
+if (!interfaceRun) throw new Error('YentInterfaceRun helper missing');
+const generationRun = interfaceRun.create({ button: sendButton });
 
 const state = {
   debt: 0.0,
@@ -64,8 +67,6 @@ let fieldWords = baseWords.slice();
 let candidateCloud = [];
 let messages = [];
 let visibleMessages = [];
-let running = false;
-let aborter = null;
 let tokenCount = 0;
 let startTime = 0;
 let lastSessionSaveAt = 0;
@@ -555,7 +556,7 @@ function animate(now) {
   state.pulse *= Math.pow(0.86, dt * 60);
   state.quake *= Math.pow(0.9, dt * 60);
   state.topologyWarp *= Math.pow(0.955, dt * 60);
-  if (!running) {
+  if (!generationRun.isRunning()) {
     state.debt = mix(state.debt, 0, 0.006);
     state.consensus = mix(state.consensus, 0.62, 0.004);
     state.tokps = mix(state.tokps, 0, 0.03);
@@ -615,10 +616,7 @@ function restoreInterfaceSession() {
 }
 
 async function generate(text) {
-  running = true;
-  aborter = new AbortController();
-  sendButton.textContent = 'STOP';
-  sendButton.disabled = false;
+  const currentRun = generationRun.begin();
   setStatus('FIELD DISTORTED.');
   setManifestState('GENERATING', true);
   setManifestText('');
@@ -654,7 +652,7 @@ async function generate(text) {
       messages,
       temperature: temp,
       maxTokens,
-      signal: aborter.signal,
+      signal: currentRun.signal,
       onToken: (token, data) => {
         fullResponse += token;
         setManifestText(fullResponse);
@@ -682,23 +680,11 @@ async function generate(text) {
       fieldWords.unshift('fault', 'unreachable');
     }
   } finally {
-    running = false;
-    aborter = null;
-    sendButton.textContent = 'SEND';
+    generationRun.finish(currentRun);
   }
 }
 
-composer.addEventListener('submit', event => {
-  event.preventDefault();
-  if (running) {
-    if (aborter) aborter.abort();
-    return;
-  }
-  const text = promptInput.value.trim();
-  if (!text) return;
-  promptInput.value = '';
-  generate(text);
-});
+generationRun.bindComposer(composer, promptInput, generate);
 
 window.addEventListener('keydown', event => {
   if (document.activeElement === promptInput) return;

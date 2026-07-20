@@ -142,6 +142,11 @@ render their own labels, but both derive `complete`, `empty`, `stopped`, and
 one surface and `EMPTY` in the other, and faulted partials are not committed as
 assistant turns.
 
+The shared generation run controller now lives in
+`DoE/worldmodel/interface_run.js`. It owns STOP/SEND button state, duplicate
+submit rejection, abort delivery, and final cleanup for both JANUS and WORLD,
+while the page scripts keep only their surface-specific visual/token effects.
+
 ---
 
 ## 2026-07-19 - Interfaces gain a mode switch

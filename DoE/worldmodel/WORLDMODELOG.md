@@ -144,3 +144,14 @@ Yent worldmodel interface log.
 - The helper also classifies stream outcomes. Page scripts map the shared
   `complete` / `empty` / `stopped` / `fault` result into their own visual labels,
   but no longer decide commit policy independently.
+
+## 2026-07-20 - shared generation run controller
+
+- Moved the browser generation run lifecycle into `worldmodel/interface_run.js`.
+- JANUS and WORLD now share the same STOP/SEND button state, duplicate-submit
+  rejection, abort path, and final cleanup contract.
+- Page scripts keep their own visual/token effects, but no longer carry local
+  `running`/`aborter` state or construct `AbortController` directly.
+- The DoE server whitelists `/worldmodel/interface_run.js` explicitly, and the
+  interface contract test checks load order plus removal of page-local run
+  state.
