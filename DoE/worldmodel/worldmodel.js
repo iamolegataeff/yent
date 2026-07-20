@@ -32,6 +32,8 @@ const chatStream = window.YentChatStream;
 if (!chatStream) throw new Error('YentChatStream helper missing');
 const tokenTelemetry = window.YentTokenTelemetry;
 if (!tokenTelemetry) throw new Error('YentTokenTelemetry helper missing');
+const worldGeometry = window.YentWorldmodelGeometry;
+if (!worldGeometry) throw new Error('YentWorldmodelGeometry helper missing');
 const interfaceRun = window.YentInterfaceRun;
 if (!interfaceRun) throw new Error('YentInterfaceRun helper missing');
 const generationRun = interfaceRun.create({ button: sendButton });
@@ -73,6 +75,7 @@ let tokenCount = 0;
 let startTime = 0;
 let lastSessionSaveAt = 0;
 const keys = Object.create(null);
+const geometry = worldGeometry.create({ seed: state.topologySeed });
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
@@ -107,18 +110,12 @@ function commitAssistantResponse(text) {
   saveInterfaceSession(visibleMessages, true);
 }
 
-function hash(n) {
-  const x = Math.sin(n * 12.9898) * 43758.5453123;
-  return x - Math.floor(x);
-}
+const hash = worldGeometry.hash;
+const textSeed = worldGeometry.textSeed;
 
-function textSeed(text) {
-  let h = 2166136261;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return ((h >>> 0) % 1000003) / 1000003;
+function syncTopologyFromGeometry() {
+  state.topologySeed = geometry.seed;
+  state.topologyWarp = geometry.warp;
 }
 
 function resize() {
@@ -191,7 +188,7 @@ function absorbToken(token, data) {
     fieldWords.unshift(w);
     if (fieldWords.length > 260) fieldWords.pop();
   }
-  const alternatives = candidateEntries(data);
+  const alternatives = candidateEntries(telemetry);
   let insertAt = Math.min(fieldWords.length, Math.max(1, words.length + 1));
   for (const alt of alternatives) {
     fieldWords.splice(insertAt, 0, alt.word);
@@ -203,7 +200,8 @@ function absorbToken(token, data) {
   else state.step++;
   state.pulse = 1;
   state.quake = clamp(state.quake + 0.2, 0, 1);
-  state.topologySeed = (state.topologySeed * 0.985 + textSeed(token) * 0.015) % 1;
+  worldGeometry.absorbToken(geometry, token, telemetry);
+  syncTopologyFromGeometry();
   const tailMass = telemetry.candidateTailMass;
   const selectedProb = telemetry.hasSelectedProb ? telemetry.selectedProb : state.selectedProb;
   const selectedRank = telemetry.hasSelectedRank ? telemetry.selectedRank : state.selectedRank;
@@ -212,7 +210,6 @@ function absorbToken(token, data) {
   state.selectedRank = selectedRank;
   state.hasCandidateTelemetry = state.hasCandidateTelemetry || telemetry.hasCandidateTelemetry || alternatives.length > 0;
   rememberCandidates(alternatives, tailMass);
-  state.topologyWarp = clamp(state.topologyWarp + 0.032 + tailMass * 0.025 + (telemetry.hasSelectedProb ? (1 - selectedProb) * 0.008 : 0), 0, 1);
   state.debt = telemetry.hasDebt ? telemetry.debt : clamp(state.debt * 0.985 + 0.006, 0, 1);
   state.consensus = telemetry.hasConsensus ? telemetry.consensus : clamp(state.consensus * 0.992 + 0.004, 0, 1);
   state.field = telemetry.hasFieldHealth ? telemetry.fieldHealth : clamp(state.field * 0.996 + 0.004, 0, 1);
@@ -291,16 +288,11 @@ function projectWorld(worldX, depth, worldY) {
 }
 
 function wallShape(side) {
-  const near = 170;
-  const far = 3450;
-  const topo = state.topologySeed + side * 7.13;
-  const spread = 1 + (hash(topo) - 0.5) * 0.34 + state.topologyWarp * 0.08;
-  const lift = (hash(topo + 9.1) - 0.5) * 140;
-  const farLean = (hash(topo + 4.7) - 0.5) * 190;
-  const nearOuter = projectWorld(side * (1120 + 190 * spread), near, 470 + lift * 0.25);
-  const nearTop = projectWorld(side * (1060 + 150 * spread), near, -160 + lift * 0.34);
-  const farTop = projectWorld(side * (370 + farLean * 0.35), far, -70 + lift * 0.18);
-  const farBottom = projectWorld(side * (390 + farLean * 0.35), far, 270 + lift * 0.12);
+  const params = worldGeometry.wallShapeParams(geometry, side);
+  const nearOuter = projectWorld(side * params.nearOuterX, params.nearDepth, params.nearOuterY);
+  const nearTop = projectWorld(side * params.nearTopX, params.nearDepth, params.nearTopY);
+  const farTop = projectWorld(side * params.farTopX, params.farDepth, params.farTopY);
+  const farBottom = projectWorld(side * params.farBottomX, params.farDepth, params.farBottomY);
   return [nearTop, farTop, farBottom, nearOuter];
 }
 
@@ -538,7 +530,8 @@ function animate(now) {
   state.idle += dt;
   state.pulse *= Math.pow(0.86, dt * 60);
   state.quake *= Math.pow(0.9, dt * 60);
-  state.topologyWarp *= Math.pow(0.955, dt * 60);
+  worldGeometry.decay(geometry, dt);
+  syncTopologyFromGeometry();
   if (!generationRun.isRunning()) {
     state.debt = mix(state.debt, 0, 0.006);
     state.consensus = mix(state.consensus, 0.62, 0.004);
@@ -581,7 +574,8 @@ function restoreInterfaceSession() {
   if (words.length) {
     fieldWords.unshift(...words);
     fieldWords = fieldWords.slice(0, 260);
-    state.topologySeed = textSeed(combined);
+    worldGeometry.resetFromPrompt(geometry, combined);
+    syncTopologyFromGeometry();
     state.entropy = Math.log(Math.max(1, new Set(words.map(w => w.toLowerCase())).size));
   }
 
@@ -616,8 +610,8 @@ async function generate(text) {
   state.candidateTail = 0;
   state.hasCandidateTelemetry = false;
   candidateCloud = [];
-  state.topologySeed = textSeed(text);
-  state.topologyWarp = 1;
+  worldGeometry.resetFromPrompt(geometry, text);
+  syncTopologyFromGeometry();
   state.cameraY = mix(state.cameraY, (state.topologySeed - 0.5) * 170, 0.22);
   fieldWords.unshift(...cleanWords(text).slice(0, 18));
   fieldWords = fieldWords.slice(0, 260);

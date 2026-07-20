@@ -19,6 +19,7 @@ func TestWorldmodelInterfaceSessionHelper(t *testing.T) {
 		filepath.Join(root, "DoE", "worldmodel", "chat_stream.test.cjs"),
 		filepath.Join(root, "DoE", "worldmodel", "token_telemetry.test.cjs"),
 		filepath.Join(root, "DoE", "worldmodel", "interface_run.test.cjs"),
+		filepath.Join(root, "DoE", "worldmodel", "worldmodel_geometry.test.cjs"),
 	} {
 		cmd := exec.Command("node", script)
 		cmd.Dir = root
@@ -50,6 +51,7 @@ func TestWorldmodelInterfaceSessionContract(t *testing.T) {
 		"/worldmodel/chat_stream.js",
 		"/worldmodel/token_telemetry.js",
 		"/worldmodel/interface_run.js",
+		"/worldmodel/worldmodel_geometry.js",
 		"/worldmodel/worldmodel.js")
 
 	if !strings.Contains(doeC, `"/worldmodel/interface_session.js"`) ||
@@ -71,6 +73,10 @@ func TestWorldmodelInterfaceSessionContract(t *testing.T) {
 	if !strings.Contains(doeC, `"/worldmodel/interface_run.js"`) ||
 		!strings.Contains(doeC, `"worldmodel/interface_run.js not found"`) {
 		t.Fatalf("DoE server does not explicitly whitelist interface_run.js")
+	}
+	if !strings.Contains(doeC, `"/worldmodel/worldmodel_geometry.js"`) ||
+		!strings.Contains(doeC, `"worldmodel/worldmodel_geometry.js not found"`) {
+		t.Fatalf("DoE server does not explicitly whitelist worldmodel_geometry.js")
 	}
 
 	for _, tc := range []struct {
@@ -124,6 +130,12 @@ func TestWorldmodelInterfaceSessionContract(t *testing.T) {
 			strings.Contains(tc.src, "selected_rank") {
 			t.Fatalf("%s still parses token telemetry locally", tc.name)
 		}
+	}
+	if !strings.Contains(worldJS, "window.YentWorldmodelGeometry") {
+		t.Fatalf("worldmodel.js does not use the worldmodel geometry helper")
+	}
+	if strings.Contains(worldJS, "function textSeed") || strings.Contains(worldJS, "function hash") {
+		t.Fatalf("worldmodel.js still carries page-local topology hash/seed helpers")
 	}
 }
 
